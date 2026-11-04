@@ -119,6 +119,7 @@ async function replayPending(
 				`Check adopted role ${role}, which ${file} made inside a statement the replay cannot leave out, as one it made: NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS with no password on devUrl, dropped after it; apply makes it as the file says`,
 			),
 		after: async () => undefined,
+		print,
 		doing: "check replayed the history and the pending files there",
 		leftOut: (file, sent, what) =>
 			print(

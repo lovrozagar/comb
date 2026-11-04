@@ -4,10 +4,21 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { bound, openLibsqlFile } from "./libsql-file.ts"
+import { openedWhileStopping } from "../../../tests/support/signals.ts"
 
 const dirs: string[] = []
 afterEach(() => {
 	for (const dir of dirs.splice(0)) fs.rmSync(dir, { force: true, recursive: true })
+})
+
+/* r22b: the next file's connection is new work, which a stopping run starts none of */
+describe("openLibsqlFile while a signal's stop runs", () => {
+	it("opens the file only once the stop is past", async () => {
+		const file = dbFile()
+		const { early, value } = await openedWhileStopping(() => openLibsqlFile(file))
+		await value.close()
+		expect(early).toBe(false)
+	})
 })
 
 /** A new database file's path */

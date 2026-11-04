@@ -214,7 +214,7 @@ async function historyCatalog(
 	user: string,
 ): Promise<LiveObjects> {
 	if (!options.target.devUrl.startsWith("docker:"))
-		return (options.readReplay ?? replayCatalog)(options.target, { files, targetUser: user })
+		return (options.readReplay ?? replayCatalog)(options.target, { files, print: options.print, targetUser: user })
 	if (makesCompared(files)) {
 		throw new ReplayFailed(
 			`baseline compares the database's ${COMPARED} with the history replayed on devUrl, which comb reads itself, and ${options.target.devUrl} is Atlas's own container, which comb cannot reach: set devUrl to a postgres:// scratch database comb can connect to (it replays the history there file by file, in a database of its own)`,

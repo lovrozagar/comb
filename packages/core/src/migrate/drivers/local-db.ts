@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import path from "node:path"
-import { scratchDir } from "../core/cleanup.ts"
+import { pastStop, scratchDir } from "../core/cleanup.ts"
 
 /** What comb does with a private database */
 export type LocalDb = {
@@ -63,6 +63,7 @@ async function opener(engine: ScratchEngine): Promise<Open> {
 
 /** A new in-memory database on the runtime comb runs on */
 export async function openMemory(): Promise<LocalDb> {
+	await pastStop()
 	return (await opener("runtime"))(":memory:")
 }
 
@@ -97,6 +98,8 @@ function memoryPlace(open: Open): Place {
  * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
  */
 export async function openScratch(engine: ScratchEngine = "runtime"): Promise<ScratchDb> {
+	/* a scratch made past a stop would outlive the cleanup that removes its directory */
+	await pastStop()
 	const open = await opener(engine)
 	const place = engine === "libsql" ? memoryPlace(open) : filePlace()
 	/* the scratch is thrown away, so nothing it writes needs to survive a crash; a rollback still works */

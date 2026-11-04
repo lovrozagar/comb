@@ -14,6 +14,7 @@ import { postgresOptionsOf, queryParams } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { CATALOG, COMPARED } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
+import { pastStop } from "./cleanup.ts"
 import { optionalPeer } from "./optional-peer.ts"
 
 /** The postgres.js client, as far as comb uses it */
@@ -61,10 +62,29 @@ function failureOf(error: unknown, at: FailedAt): string {
 	return `${said}: the server takes no TLS, which comb and Atlas require where ${at.field} names no sslmode; set sslmode=disable on ${at.field} for a server without TLS`
 }
 
-/** postgres.js, or the refusal naming it, its range and `why` comb needs it here */
+/**
+ * `connect`, each connection it opens sending every query once a signal's stop is past (pastStop):
+ * postgres.js opens its backend at the first query, so a run being stopped starts no session, nor
+ * work on one, that its cleanup would miss, while the cleanup's own queries go on
+ */
+function pastStops(connect: Connect): Connect {
+	return (options) => {
+		const sql = connect(options)
+		const unsafe = sql.unsafe.bind(sql)
+		return Object.assign(sql, {
+			unsafe: async (query: string, params: unknown[]) => {
+				await pastStop()
+				return unsafe(query, params)
+			},
+		})
+	}
+}
+
+/** postgres.js, every query past a stop (pastStops), or the refusal naming it, its range and `why` comb needs it here */
 async function loadPostgres(why: string): Promise<Connect> {
-	return (await optionalPeer({ peer: "postgres", why }, async () => (await import(PEER)) as { default: Connect }))
-		.default
+	return pastStops(
+		(await optionalPeer({ peer: "postgres", why }, async () => (await import(PEER)) as { default: Connect })).default,
+	)
 }
 
 /* why a baseline loads it: it cannot vouch for the database without it */
@@ -241,4 +261,4 @@ function routineDrift(
 	return out
 }
 
-export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects }
+export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, pastStops, readCatalog, readLiveObjects }

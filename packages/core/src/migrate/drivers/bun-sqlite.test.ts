@@ -9,12 +9,21 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { bunLocal, createBunSqliteProvider } from "./bun-sqlite.ts"
+import { openedWhileStopping } from "../../../tests/support/signals.ts"
 
 vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 const DB = { migrationsDir: "m", name: "local", provider: { path: ":memory:", type: "bun-sqlite" as const } }
 
 describe("createBunSqliteProvider", () => {
+	/* r22b: a connection is new work, which a stopping run starts none of */
+	it("opens the database only once a signal's stop is past", async () => {
+		const provider = createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" })
+		const { early, value } = await openedWhileStopping(() => provider.connect(DB))
+		await value.close()
+		expect(early).toBe(false)
+	})
+
 	it("is a sqlite provider that opens the configured path on connect", async () => {
 		const provider = createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" })
 		expect(provider.dialect).toBe("sqlite")

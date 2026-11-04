@@ -4,6 +4,7 @@
  */
 import { existsSync } from "node:fs"
 import { BUSY_TIMEOUT } from "../core/apply.ts"
+import { pastStop } from "../core/cleanup.ts"
 import type { LocalDb } from "./local-db.ts"
 import { DatabaseMissing } from "./missing.ts"
 import type {
@@ -65,6 +66,7 @@ function bunSqliteConnection(db: BunDatabase): Connection {
 export function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
+			await pastStop()
 			/* an in-memory database holds nothing to protect, and bun opens none read-only */
 			const readonly = dbConfig?.readonly === true && config.path !== ":memory:"
 			if (readonly && !existsSync(config.path))

@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { liveDrift, loadPostgres, readLiveObjects } from "./pg-live-objects.ts"
+import { liveDrift, loadPostgres, pastStops, readLiveObjects } from "./pg-live-objects.ts"
+import { openedWhileStopping } from "../../../tests/support/signals.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { noLive } from "../__fixtures__/live-objects.ts"
 
@@ -107,9 +108,38 @@ describe("readLiveObjects", () => {
 	})
 })
 
+/** A postgres.js stand-in, each query it sent */
+function sending() {
+	const sent: string[] = []
+	return {
+		connect: () => ({ end: async () => undefined, unsafe: async (query: string) => (sent.push(query), []) }),
+		sent,
+	}
+}
+
 describe("loadPostgres", () => {
 	it("loads postgres.js, the optional peer", async () => {
 		expect(typeof (await loadPostgres("comb reads it"))).toBe("function")
+	})
+
+	/* r22b: postgres.js opens a backend at a connection's first query, which a stopping run must not start */
+	it("sends a query only once a signal's stop is past", async () => {
+		const server = sending()
+		const sql = pastStops(server.connect)({})
+		const { early } = await openedWhileStopping(() => sql.unsafe("SELECT 1", []))
+		expect([early, server.sent]).toEqual([false, ["SELECT 1"]])
+	})
+
+	it("gates every connection of what it loads", async () => {
+		const server = sending()
+		vi.doMock("postgres", () => ({ default: server.connect }))
+		try {
+			const connect = await loadPostgres("read it")
+			const { early } = await openedWhileStopping(() => connect({}).unsafe("SELECT 2", []))
+			expect([early, server.sent]).toEqual([false, ["SELECT 2"]])
+		} finally {
+			vi.doUnmock("postgres")
+		}
 	})
 
 	it("refuses, naming the package and its range, when the peer is missing", async () => {

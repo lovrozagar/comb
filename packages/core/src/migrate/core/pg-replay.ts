@@ -51,18 +51,8 @@ import { outsideTransaction } from "./atlas-header.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-transaction.ts"
-import {
-	copyExtensions,
-	dropRole,
-	dropSlot,
-	extensionsOf,
-	makeDatabase,
-	claim,
-	replayOptions,
-	settle,
-	type Sql,
-	sweep,
-} from "./pg-replay-database.ts"
+import { claim, copyExtensions, extensionsOf, makeDatabase, replayOptions, type Sql } from "./pg-replay-database.ts"
+import { cleanUp, leaving, sweep } from "./pg-replay-drops.ts"
 import { grantsMade, ownGrant, ownRole, type Run, superuserOf } from "./pg-replay-roles.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
@@ -188,35 +178,40 @@ async function prepare(
 	if (schema !== "public") await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(schema)}`, [])
 }
 
-/**
- * `run`'s cleanup, each step settled: its connection closed, a query in flight with it, any backend
- * still in its database ended, the slots a refused window added, which a drop waits on, the database
- * made no template and dropped, each role it made, and that window's roles and idle databases
- */
-async function cleanUp(run: Run): Promise<void> {
-	await settle(() => run.sql.end({ timeout: 0 }))
-	await settle(() =>
-		run.admin.unsafe(
-			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
-			[run.database],
-		),
-	)
-	for (const slot of run.strays.slots) await settle(() => dropSlot(run.admin, slot))
-	await settle(() => run.admin.unsafe(`ALTER DATABASE ${run.database} IS_TEMPLATE false`, []))
-	await settle(() => run.admin.unsafe(`DROP DATABASE IF EXISTS ${run.database}`, []))
-	for (const role of run.created) await settle(() => dropRole(run.admin, role))
-	for (const name of run.strays.databases)
-		await settle(() => run.admin.unsafe(`DROP DATABASE IF EXISTS ${sqlIdentifier(name)}`, []))
-	for (const role of run.strays.roles) await settle(() => dropRole(run.admin, role))
-}
-
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
 /**
+ * The replay's database made on `admin`'s server, and its run on it: a connection there searching
+ * `target`'s schema, and how each later session opens
+ */
+async function opening(
+	admin: Sql,
+	target: PgTarget,
+	{ connect, stops }: { connect: Connect; stops: string },
+): Promise<{ open: () => Sql; run: Run }> {
+	const { owner, settings } = await claim(admin)
+	const search = { ...settings, search_path: sqlIdentifier(target.schema) }
+	const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${stops}`))
+	const open = () => connect(replayOptions(target.devUrl, { database, settings: search }))
+	const run: Run = {
+		admin,
+		created: [],
+		database,
+		ours: { rows: new Map(), writes: new Map() },
+		owner,
+		seen: new Map(),
+		sql: open(),
+		strays: { databases: [], roles: [], slots: [] },
+		superuser: await superuserOf(admin),
+	}
+	return { open, run }
+}
+
+/**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
  * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
- * was `doing`, and then what that `stops`
+ * was `doing`, and then what that `stops`; what the replay or its sweep could not drop is `print`ed
  */
 async function onDev<T>(
 	target: PgTarget,
@@ -224,11 +219,13 @@ async function onDev<T>(
 	{
 		after,
 		load,
+		print,
 		...replay
 	}: Omit<Replay, "leftOut"> & {
 		after: (sql: Sql) => Promise<T>
 		leftOut?: Replay["leftOut"] | undefined
 		load: () => Promise<Connect>
+		print: (line: string) => void
 	},
 ): Promise<T> {
 	refuseUrlProblems(target, { dev: true })
@@ -236,32 +233,19 @@ async function onDev<T>(
 	const failed = { field: "devUrl", url: target.devUrl, urls: [target.devUrl, target.url] } as const
 	const refused: Refuse = (what, error) =>
 		new ReplayFailed(`${what}: ${failureOf(error, failed)}; ${replay.stops}`, { cause: error })
+	const leave = leaving(print, failed)
 	let admin: Sql | undefined
 	try {
 		const cleanup = onceCleanup()
 		return await onSignals(cleanup.run, async () => {
 			admin = connect(replayOptions(target.devUrl))
-			await sweep(admin, Date.now())
-			const { owner, settings } = await claim(admin)
-			const search = { ...settings, search_path: sqlIdentifier(target.schema) }
-			const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
-			const run: Run = {
-				admin,
-				created: [],
-				database,
-				ours: { rows: new Map(), writes: new Map() },
-				owner,
-				seen: new Map(),
-				sql: connect(replayOptions(target.devUrl, { database, settings: search })),
-				strays: { databases: [], roles: [], slots: [] },
-				superuser: await superuserOf(admin),
-			}
-			cleanup.set(() => cleanUp(run))
+			await sweep(admin, Date.now(), leave)
+			const { open, run } = await opening(admin, target, { connect, stops: replay.stops })
+			cleanup.set(() => cleanUp(run, leave))
 			try {
 				await prepare(run, target.schema, { files, refused, stops: replay.stops })
 				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
-				const open = () => connect(replayOptions(target.devUrl, { database, settings: search }))
 				await replayRuns(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused })
 				return await after(run.sql)
 			} finally {
@@ -286,13 +270,14 @@ async function onDev<T>(
  */
 async function replayCatalog(
 	target: PgTarget,
-	{ files, targetUser }: { files: readonly HistoryFile[]; targetUser: string },
+	{ files, print, targetUser }: { files: readonly HistoryFile[]; print: (line: string) => void; targetUser: string },
 	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
 ): Promise<LiveObjects> {
 	return onDev(target, files, {
 		after: async (sql) => asTarget(await readCatalog(sql, target.schema), targetUser),
 		doing: "baseline replayed the history there",
 		load,
+		print,
 		stops: "baseline compares nothing",
 	})
 }

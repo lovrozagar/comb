@@ -14,6 +14,7 @@ import type {
 	TursoProviderConfig,
 } from "../types.ts"
 import { BUSY_TIMEOUT } from "../core/apply.ts"
+import { pastStop } from "../core/cleanup.ts"
 import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
 import { type Client, type InValue, libsql } from "./libsql-client.ts"
 import { DatabaseMissing } from "./missing.ts"
@@ -174,6 +175,7 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 	}
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
+			await pastStop()
 			/* the client first: a project without it is refused before Turso creates a database or mints a token (S2 of r21) */
 			const { createClient } = await libsql()
 			const creds = await credentials(dbConfig.readonly === true)
@@ -207,6 +209,7 @@ export function libsqlFile(url: string): string | undefined {
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
+			await pastStop()
 			/* libsql has no read-only mode for a file, and creates a missing one on connect */
 			const file = libsqlFile(config.url)
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))

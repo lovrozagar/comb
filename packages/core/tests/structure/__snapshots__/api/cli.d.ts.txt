@@ -215,12 +215,13 @@ type Replay = {
 /**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
  * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
- * was `doing`, and then what that `stops`
+ * was `doing`, and then what that `stops`; what the replay or its sweep could not drop is `print`ed
  */
-declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { after, load, ...replay }: Omit<Replay, "leftOut"> & {
+declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { after, load, print, ...replay }: Omit<Replay, "leftOut"> & {
     after: (sql: Sql) => Promise<T>;
     leftOut?: Replay["leftOut"] | undefined;
     load: () => Promise<Connect>;
+    print: (line: string) => void;
 }): Promise<T>;
 /**
  * The catalog the history `files` leave in `target`'s schema, replayed on its dev server as Atlas
@@ -228,8 +229,9 @@ declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { aft
  * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
  * names the role each database was built as
  */
-declare function replayCatalog(target: PgTarget, { files, targetUser }: {
+declare function replayCatalog(target: PgTarget, { files, print, targetUser }: {
     files: readonly HistoryFile[];
+    print: (line: string) => void;
     targetUser: string;
 }, load?: () => Promise<Connect>): Promise<LiveObjects>;
 export { type HistoryFile, onDev, replayCatalog };
@@ -319,7 +321,13 @@ type FailedAt = {
  * (P5 of r20)
  */
 declare function failureOf(error: unknown, at: FailedAt): string;
-/** postgres.js, or the refusal naming it, its range and `why` comb needs it here */
+/**
+ * `connect`, each connection it opens sending every query once a signal's stop is past (pastStop):
+ * postgres.js opens its backend at the first query, so a run being stopped starts no session, nor
+ * work on one, that its cleanup would miss, while the cleanup's own queries go on
+ */
+declare function pastStops(connect: Connect): Connect;
+/** postgres.js, every query past a stop (pastStops), or the refusal naming it, its range and `why` comb needs it here */
 declare function loadPostgres(why: string): Promise<Connect>;
 /**
  * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
@@ -342,28 +350,16 @@ declare function liveDrift(history: LiveObjects, live: LiveObjects): {
     };
     only: string[];
 };
-export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects };
+export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, pastStops, readCatalog, readLiveObjects };
 
 // migrate/core/pg-replay-database.d.ts
-import type { PgTarget } from "./atlas-target.ts";
-import { type Connect } from "./pg-live-objects.ts";
+import type { Connect } from "./pg-live-objects.ts";
 type Sql = ReturnType<Connect>;
 declare const TAG = "comb_replay";
 declare const STALE_MS: number;
 /** A Postgres error's SQLSTATE */
 declare const codeOf: (error: unknown) => unknown;
 declare const literal: (text: string) => string;
-/** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
-declare function settle(step: () => Promise<unknown>): Promise<void>;
-/** Drops the replication slot `slot`, if it is still there */
-declare function dropSlot(admin: Sql, slot: string): Promise<void>;
-/**
- * Drop `role`, unless something still depends on it or it is not this role's to drop: a later sweep
- * takes it. Two sessions dropping one role race in Postgres's catalog, and the loser fails without
- * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
- * is dropped
- */
-declare function dropRole(admin: Sql, role: string): Promise<void>;
 /**
  * The backend `admin` runs on, as a replay's database name and role tag carry it, `<pid>_<start>`,
  * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
@@ -375,22 +371,20 @@ declare function claim(admin: Sql): Promise<{
     owner: string;
     settings: Record<string, string>;
 }>;
+/** What a replay whose run is over left: its databases, each with the backends it left in it, and its tagged roles */
+type Leftovers = {
+    databases: Array<{
+        name: string;
+        pids: unknown[];
+    }>;
+    roles: string[];
+};
 /**
- * Drop what replays over at `now` left, each drop settled: every replay database this role may
- * drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are ended (P4
- * of r22), and the tagged roles
+ * What replays over at `now` left on `sql`'s server, which a sweep takes: the replay databases of
+ * any role, or only those `sql`'s role may drop (`droppable`), but one with a session in it other
+ * than the backends its own replay left (P4 of r22), and the tagged roles
  */
-declare function sweep(admin: Sql, now: number): Promise<void>;
-/**
- * The sweep, run on `target`'s dev server before an apply (P2 of r21): a check killed past its
- * cleanup leaves a role there, which apply's CREATE ROLE of it stops at where dev and target share
- * a server. Only that server matters, so apply asks the target's own server first, which it reaches
- * anyway, and connects to devUrl only when the target's holds what a sweep would take, waiting
- * SWEEP_TIMEOUT for it (PR7 of r22b). Housekeeping never stops an apply, so without the postgres
- * package, on Atlas's docker:// container or with nothing left it sweeps nothing, and a sweep that
- * fails is `print`ed and passed
- */
-declare function sweepDev(target: PgTarget, print: (line: string) => void, load?: () => Promise<Connect>): Promise<void>;
+declare function leftovers(sql: Sql, now: number, droppable: boolean): Promise<Leftovers>;
 /** devUrl's options for one replay connection, notices unread; with `at`, the replay's own to its database, with its settings */
 declare function replayOptions(devUrl: string, at?: {
     database: string;
@@ -408,7 +402,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, claim, replayOptions, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
+export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, type Sql, STALE_MS, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

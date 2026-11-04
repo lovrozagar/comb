@@ -7,6 +7,7 @@
  */
 import { createRequire } from "node:module"
 import { BUSY_TIMEOUT, type FileConnection } from "../core/apply.ts"
+import { pastStop } from "../core/cleanup.ts"
 import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
 import { segments } from "../core/sql-scan.ts"
@@ -75,6 +76,7 @@ function asClient(error: unknown): unknown {
 
 /** The libsql file at `file`, opened for one migration file: its batch in a transaction of its own, through `exec` */
 async function openLibsqlFile(file: string): Promise<FileConnection> {
+	await pastStop()
 	const Database = await libsqlDatabase()
 	let db: Database
 	try {

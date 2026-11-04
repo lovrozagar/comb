@@ -33,7 +33,7 @@ const AROUND = {
 	after: [
 		expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/),
 		"ALTER DATABASE <db> IS_TEMPLATE false",
-		"DROP DATABASE IF EXISTS <db>",
+		"DROP DATABASE IF EXISTS <db> WITH (FORCE)",
 	],
 	before: [
 		expect.stringMatching(/^SELECT pid, datname, .* FROM pg_stat_activity$/),

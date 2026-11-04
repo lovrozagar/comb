@@ -3,6 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { SCOPED_PRAGMAS } from "../__fixtures__/pragma-scope.ts"
+import { openedWhileStopping } from "../../../tests/support/signals.ts"
 
 vi.mock("./bun-sqlite.ts", () => ({ bunLocal: vi.fn(async () => () => ({ bun: true })) }))
 
@@ -11,6 +12,16 @@ afterEach(() => {
 	if (bunVersion === undefined) Reflect.deleteProperty(process.versions, "bun")
 	else Object.defineProperty(process.versions, "bun", bunVersion)
 	vi.restoreAllMocks()
+})
+
+/* r22b: a scratch or database opened past a stop would outlive the cleanup that ends the run */
+describe("openMemory and openScratch while a signal's stop runs", () => {
+	it.each(["memory", "runtime", "libsql"] as const)("open nothing on %s until it is past", async (kind) => {
+		const { openMemory, openScratch } = await import("./local-db.ts")
+		const { early, value } = await openedWhileStopping(() => (kind === "memory" ? openMemory() : openScratch(kind)))
+		value.close()
+		expect(early).toBe(false)
+	})
 })
 
 describe("openMemory", () => {

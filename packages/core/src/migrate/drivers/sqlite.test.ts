@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { parseUri } from "@libsql/core/uri"
 import { describe, expect, it, vi } from "vitest"
 import { type LibsqlConnection, libsqlConnection } from "../__fixtures__/libsql-connection.ts"
+import { openedWhileStopping } from "../../../tests/support/signals.ts"
 import {
 	createBunSqliteProvider,
 	createLibsqlProvider,
@@ -83,6 +84,29 @@ describe("getTursoCredentials", () => {
 		["a JSON null error body", [[502, null]], 'Turso API error for "acme/core": HTTP 502'],
 	] as Array<[string, Array<[number, unknown]>, string]>)("says why %s failed", async (_label, answers, message) => {
 		await expect(getTursoCredentials({ ...REQUEST, fetch: fakeTurso(answers).fetch })).rejects.toThrow(message)
+	})
+})
+
+/* r22b: a connection is new work, which a stopping run starts none of */
+describe("provider factories while a signal's stop runs", () => {
+	it("connects to libsql only once the stop is past", async () => {
+		const provider = createLibsqlProvider({ type: "libsql", url: ":memory:" })
+		const { early, value } = await openedWhileStopping(() =>
+			provider.connect({ migrationsDir: "m", name: "local", provider: { type: "libsql", url: ":memory:" } }),
+		)
+		await value.close()
+		expect(early).toBe(false)
+	})
+
+	it("asks Turso for nothing until the stop is past", async () => {
+		const api = fakeTurso([DB_INFO, TOKEN])
+		const turso = { apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" } as const
+		const provider = createTursoProvider(turso, { fetch: api.fetch })
+		const { early, value } = await openedWhileStopping(() =>
+			provider.connect({ migrationsDir: "m", name: "prod", provider: turso }),
+		)
+		await value.close()
+		expect(early).toBe(false)
 	})
 })
 

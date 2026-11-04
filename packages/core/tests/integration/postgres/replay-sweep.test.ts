@@ -5,7 +5,6 @@
  * the role it made passes, while a live replay's database and role are never swept, nor a database
  * someone is in. The replay makes a role with no login or superuser, whatever the history says.
  */
-import { spawn } from "node:child_process"
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { type AddressInfo, createServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
@@ -20,7 +19,8 @@ import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { pauses, waitFor } from "../support/pg-pause.ts"
-import { dropRoles as dropOnly, query, roleOf, unique } from "../support/pg-roles.ts"
+import { childCheck, dropRoles, replayDatabases, untilRole } from "../support/replay-check.ts"
+import { query, roleOf, unique } from "../support/pg-roles.ts"
 import { leavesStale, needsNothingStale } from "../support/stale-replay.ts"
 
 beforeAll(loadPostgresParser)
@@ -67,54 +67,9 @@ async function check(devUrl: string, url: string, at = dir): Promise<{ out: stri
 	}
 }
 
-/** Until the server holds `role`, at most 30 s */
-async function untilRole(role: string): Promise<void> {
-	for (let tries = 0; (await roleOf(role)).length === 0; tries++) {
-		if (tries > 600) throw new Error(`the replay never made ${role}`)
-		await new Promise((done) => setTimeout(done, 50))
-	}
-}
-
 /** Whether the server holds the database `name` */
 const holds = async (name: string): Promise<boolean> =>
 	(await query(pgUrl(), `SELECT 1 FROM pg_database WHERE datname = '${name}'`)).length > 0
-
-/**
- * A check of the directory in a child process, under a shell that says how it ended, as a terminal
- * or a CI runner reads it; `kill` sends the child a signal, and `ended` is all it wrote, its end last
- */
-function childCheck(devUrl: string, url: string) {
-	const child = spawn(
-		"sh",
-		[
-			"-c",
-			'bun "$0" "$1"; echo "exit $?"',
-			join(import.meta.dirname, "../support/replay-child.ts"),
-			JSON.stringify({ devUrl, dir, url }),
-		],
-		{ stdio: ["ignore", "pipe", "inherit"] },
-	)
-	let said = ""
-	child.stdout.on("data", (chunk: Buffer) => {
-		said += chunk.toString()
-	})
-	const ended = new Promise<string[]>((done) => child.on("close", () => done(said.trim().split("\n"))))
-	const pid = async (): Promise<number> => {
-		while (!/^pid \d+$/m.test(said)) await new Promise((done) => setTimeout(done, 20))
-		return Number(/^pid (\d+)$/m.exec(said)?.[1])
-	}
-	return { ended, kill: async (signal: NodeJS.Signals) => process.kill(await pid(), signal) }
-}
-
-/** `roles` dropped, with any replay database a failed run left that grants one of them CONNECT, which holds it */
-async function dropRoles(...roles: string[]): Promise<void> {
-	const held = await query(
-		pgUrl(),
-		`SELECT datname FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%' AND (${roles.map((role) => `datacl::text LIKE '%${role}=%'`).join(" OR ")})`,
-	)
-	for (const { datname } of held) await query(pgUrl(), `DROP DATABASE IF EXISTS ${String(datname)} WITH (FORCE)`)
-	await dropOnly(...roles)
-}
 
 /**
  * A stale replay's database `name` (pid 1 is no backend, so its replay is over), made a template, which no
@@ -130,15 +85,6 @@ async function release(name: string): Promise<void> {
 	if (held.length > 0) await query(pgUrl(), `ALTER DATABASE ${name} IS_TEMPLATE false`)
 }
 
-/** The replay databases on the server that hold `role` by a grant, as a replay holds each role it made */
-const replayDatabases = async (role: string): Promise<string[]> =>
-	(
-		await query(
-			pgUrl(),
-			`SELECT datname FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%' AND datacl::text LIKE '%${role}=%'`,
-		)
-	).map((row) => String(row["datname"]))
-
 /**
  * A check of `made`'s paused history killed by SIGKILL mid-replay, past any cleanup, its statement in
  * flight then let end, as a killed check's does: the replay database it left, holding `made`
@@ -149,7 +95,7 @@ async function killedHard(
 	{ made, resume }: { made: string; resume: string },
 ): Promise<string> {
 	await write(paused(made, resume))
-	const child = childCheck(dev, url)
+	const child = childCheck(dev, url, dir)
 	await untilRole(made)
 	await child.kill("SIGKILL")
 	expect((await child.ended).at(-1)).toBe("exit 137")
@@ -171,7 +117,7 @@ describe("a check killed mid-replay", () => {
 				await withScratchDb((dev) =>
 					withScratchDb(async (url) => {
 						await write(paused(made, resume))
-						const child = childCheck(dev, url)
+						const child = childCheck(dev, url, dir)
 						await untilRole(made)
 						await child.kill(signal)
 						const said = await child.ended
@@ -277,7 +223,7 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 							`${UNSAFE}CREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nGRANT SELECT ON t TO ${made};\n`,
 							`${UNSAFE}${SLEEP};\n`,
 						])
-						const child = childCheck(dev, url)
+						const child = childCheck(dev, url, dir)
 						await untilSleeping(child.ended)
 						await child.kill("SIGKILL")
 						expect((await child.ended).at(-1)).toBe("exit 137")

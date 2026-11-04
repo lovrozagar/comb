@@ -15,14 +15,14 @@
  * (P4 of r22). Every replay database the sweep's role may drop is dropped, whichever role made it
  * (PR8 of r22b), but one with any other session in it, a person's psql among them, as a plain DROP
  * DATABASE fails after 5 s with another backend in it; and only tagged roles, none that still owns
- * anything. A drop that fails is left to a later run, and never decides the verdict (P4 of r21).
+ * anything. A drop that fails never decides the verdict (P4 of r21), and is said, never left unsaid:
+ * what it left, dev's error, and whether a later run's sweep takes it.
  * 0.19 marked its databases and roles with the run's start alone; those go once they are an hour
  * old.
  */
 import { randomUUID } from "node:crypto"
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
-import type { PgTarget } from "./atlas-target.ts"
-import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
+import type { Connect } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
@@ -40,39 +40,6 @@ const STALE_MS: number = 60 * 60_000
 const codeOf = (error: unknown): unknown => (error as { code?: unknown }).code
 
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
-
-/** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
-async function settle(step: () => Promise<unknown>): Promise<void> {
-	try {
-		await step()
-	} catch {
-		// reason: a database or role left behind is the next run's sweep's; the verdict is the replay's
-	}
-}
-
-/** Drops the replication slot `slot`, if it is still there */
-async function dropSlot(admin: Sql, slot: string): Promise<void> {
-	await admin.unsafe("SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1", [
-		slot,
-	])
-}
-
-/**
- * Drop `role`, unless something still depends on it or it is not this role's to drop: a later sweep
- * takes it. Two sessions dropping one role race in Postgres's catalog, and the loser fails without
- * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
- * is dropped
- */
-async function dropRole(admin: Sql, role: string): Promise<void> {
-	try {
-		await admin.unsafe(`DROP ROLE IF EXISTS ${sqlIdentifier(role)}`, [])
-	} catch (error) {
-		// reason: another replay's objects depend on the role, or another role made it: never this run's failure
-		if (codeOf(error) === "2BP01" || codeOf(error) === "42501") return
-		const [left] = await admin.unsafe("SELECT 1 FROM pg_roles WHERE rolname = $1", [role])
-		if (left !== undefined) throw error
-	}
-}
 
 /* every backend on the server: its pid, the database it is in, its application_name, and its start in microseconds where this role may read it */
 const SESSIONS =
@@ -154,70 +121,6 @@ async function leftovers(sql: Sql, now: number, droppable: boolean): Promise<Lef
 	return { databases, roles }
 }
 
-/**
- * Drop what replays over at `now` left, each drop settled: every replay database this role may
- * drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are ended (P4
- * of r22), and the tagged roles
- */
-async function sweep(admin: Sql, now: number): Promise<void> {
-	const { databases, roles } = await leftovers(admin, now, true)
-	for (const { name, pids } of databases) {
-		for (const pid of pids) await settle(() => admin.unsafe("SELECT pg_terminate_backend($1)", [pid]))
-		await settle(() => admin.unsafe(`DROP DATABASE IF EXISTS ${sqlIdentifier(name)}`, []))
-	}
-	for (const role of roles) await settle(() => dropRole(admin, role))
-}
-
-/* why comb loads postgres.js in an apply */
-const SWEEPS = "sweep what a killed check left on a postgres:// devUrl's server"
-
-/* how long apply waits to reach devUrl's server for its sweep, in seconds, where the URL sets no connect_timeout */
-const SWEEP_TIMEOUT = 5
-
-/**
- * The sweep, run on `target`'s dev server before an apply (P2 of r21): a check killed past its
- * cleanup leaves a role there, which apply's CREATE ROLE of it stops at where dev and target share
- * a server. Only that server matters, so apply asks the target's own server first, which it reaches
- * anyway, and connects to devUrl only when the target's holds what a sweep would take, waiting
- * SWEEP_TIMEOUT for it (PR7 of r22b). Housekeeping never stops an apply, so without the postgres
- * package, on Atlas's docker:// container or with nothing left it sweeps nothing, and a sweep that
- * fails is `print`ed and passed
- */
-async function sweepDev(
-	target: PgTarget,
-	print: (line: string) => void,
-	load: () => Promise<Connect> = () => loadPostgres(SWEEPS),
-): Promise<void> {
-	if (target.devUrl.startsWith("docker:")) return
-	await settle(async () => {
-		const connect = await load()
-		const server = connect({ ...postgresOptionsOf(target.url, "url"), max: 1, onnotice: () => undefined })
-		try {
-			const { databases, roles } = await leftovers(server, Date.now(), false)
-			if (databases.length + roles.length === 0) return
-		} finally {
-			await server.end()
-		}
-		const options = postgresOptionsOf(target.devUrl, "devUrl")
-		const admin = connect({
-			connect_timeout: SWEEP_TIMEOUT,
-			...options,
-			max: 1,
-			onnotice: () => undefined,
-		})
-		try {
-			await sweep(admin, Date.now())
-		} catch (error) {
-			// reason: housekeeping never stops an apply; what it left is said, and the next run that reaches devUrl sweeps it
-			print(
-				`Apply did not sweep what a killed check left on the target's server, as devUrl's server did not answer: ${failureOf(error, { field: "devUrl", url: target.devUrl, urls: [target.devUrl, target.url] })}; a CREATE ROLE of a role it left stops apply until a check or apply that reaches devUrl sweeps it`,
-			)
-		} finally {
-			await admin.end()
-		}
-	})
-}
-
 /** devUrl's options for one replay connection, notices unread; with `at`, the replay's own to its database, with its settings */
 function replayOptions(
 	devUrl: string,
@@ -281,19 +184,15 @@ async function copyExtensions(
 }
 
 export {
+	claim,
 	codeOf,
 	copyExtensions,
-	dropRole,
-	dropSlot,
 	extensionsOf,
+	leftovers,
 	literal,
 	makeDatabase,
-	claim,
 	replayOptions,
-	settle,
-	STALE_MS,
 	type Sql,
-	sweep,
-	sweepDev,
+	STALE_MS,
 	TAG,
 }
