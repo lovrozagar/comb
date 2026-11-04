@@ -209,9 +209,12 @@ declare class ShardRouter {
     getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>;
     /**
      * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
-     * parameter bounded by the interface `wrangler types` writes: the binding type its `SHARD_DB_0`
+     * parameter bounded by an env interface whose `SHARD_DB_0` is required: the binding type that key
      * holds, since shard 0 always exists, with every other `SHARD_DB_*` key it names a D1 binding
-     * (D2-1 and D2-2 of the area D round-two review). An env bounded by no shard key is refused.
+     * (D2-1 and D2-2 of the area D round-two review). An env bounded by no shard key is refused. So
+     * is a bound whose `SHARD_DB_0` is optional, as `wrangler types` writes it when no shard is bound
+     * at the top level: the helper widens its parameter to that env first, `const env: Env = given`,
+     * and the first overload then gives shard 0's binding (D3-1 of the round-three review).
      */
     getHandle<E extends {
         readonly SHARD_DB_0: D1DatabaseLike;

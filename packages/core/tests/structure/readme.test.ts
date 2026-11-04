@@ -228,6 +228,21 @@ describe("README external tools table", () => {
 	})
 })
 
+/* D3-1 of the area D round-three review: item 8 promised a helper bounded by any wrangler `Env` compiles */
+describe("README getHandle upgrade item", () => {
+	const item = /^\d+\. \*\*Drop the type argument from `getHandle`\.\*\*.*$/m.exec(README)?.[0] ?? ""
+	const helper = item.split(/(?<=\.) /).filter((sentence) => sentence.includes("helper"))
+
+	it("bounds the generic helper it promises by an env whose SHARD_DB_0 is required", () => {
+		expect(helper.find((sentence) => sentence.includes("`<E extends Env>(env: E)`"))).toMatch(/required/)
+	})
+
+	it("names wrangler's optional SHARD_DB_0 and the widening a helper bounded by it takes", () => {
+		const optional = helper.find((sentence) => sentence.includes("`SHARD_DB_0?: D1Database`"))
+		expect(optional).toContain("`const env: Env = given; router.getHandle(mapping, env)`")
+	})
+})
+
 /* K9 of r19: the table stopped at 0.14, and the three newest upgrade sections, read first, had no entry */
 describe("README table of contents", () => {
 	it("lists every section, in the order the README has them", () => {

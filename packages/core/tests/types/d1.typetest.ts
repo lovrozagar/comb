@@ -125,6 +125,26 @@ function fromWrangler<E extends WranglerEnv>(given: E): D1Database {
 }
 expectTypeOf(fromInterface(ienv)).toEqualTypeOf<D1Database>()
 expectTypeOf(fromWrangler(staging)).toEqualTypeOf<D1Database>()
+/*
+ * D3-1 of the area D round-three review: `wrangler types` writes shard 0 optional when no shard is
+ * bound at the top level. A helper bounded by that env fails to compile, as README item 8 states,
+ * and widening the parameter to the env first gives shard 0's binding
+ */
+interface OptionalShardEnv {
+	SHARD_DB_0?: D1Database
+	SHARD_DB_1?: D1Database
+}
+declare const optionalShard: OptionalShardEnv
+function fromOptionalShard<E extends OptionalShardEnv>(given: E) {
+	// @ts-expect-error a bound whose SHARD_DB_0 is optional names no binding shard 0 holds
+	return router.getHandle(mapping, given)
+}
+function fromWidened<E extends OptionalShardEnv>(given: E): D1Database {
+	const widened: OptionalShardEnv = given
+	return router.getHandle(mapping, widened).handle
+}
+expectTypeOf([fromOptionalShard]).toBeArray()
+expectTypeOf(fromWidened(optionalShard)).toEqualTypeOf<D1Database>()
 declare const plain: { DB: string; SHARD_DB_0: D1Database }
 expectTypeOf(router.getHandle(mapping, plain).handle).toEqualTypeOf<D1Database>()
 declare const optional: { SHARD_DB_0: D1Database; SHARD_DB_1?: D1Database }
