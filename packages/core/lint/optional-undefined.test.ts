@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import plugin from "./index.js"
 import { TAKEN_BACK } from "./optional-undefined.js"
-import { oxlintReports, reportsOf } from "./rule-harness.ts"
+import { oxlintReports, reportsOf, reportsOnDisk } from "./rule-harness.ts"
 
 const rule = plugin.rules["optional-undefined"]
 const MESSAGE =
@@ -97,6 +97,14 @@ describe("comb/optional-undefined on Partial<…>", () => {
 		expect(oxlintReports("optional-undefined", fixture)).toEqual([
 			{ file: "packages/core/src/query/shapes.ts", message: PARTIAL },
 		])
+		/* in process too, where each file reads the others from disk and its own as it is handed */
+		expect(reportsOnDisk(rule, fixture)).toEqual([{ file: "packages/core/src/query/shapes.ts", message: PARTIAL }])
+	})
+
+	it("follows a cycle of aliases once, to the input that reaches it", () => {
+		expect(
+			lint("type A = { p: Partial<{ a: number }>; b: B }\ntype B = { a: A }\nexport function f(b: B) { return b }\n"),
+		).toEqual([{ file: at, message: PARTIAL }])
 	})
 })
 

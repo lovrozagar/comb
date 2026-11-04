@@ -65,11 +65,11 @@ function walk(node: unknown, parent: Node | null, visitors: Visitors): void {
 	}
 }
 
-/** Runs `rule` in process over every fixture file, the way oxlint hands it each file. */
-export function reportsOf(rule: Rule, fixture: Fixture): Report[] {
+/** Runs `rule` in process over every fixture file, the way oxlint hands it each file, as if `repo` held them. */
+export function reportsOf(rule: Rule, fixture: Fixture, repo = "/repo"): Report[] {
 	const reports: Report[] = []
 	for (const [file, code] of Object.entries(fixture)) {
-		const filename = `/repo/${file}`
+		const filename = `${repo}/${file}`
 		const parsed = parseSync(filename, code)
 		const comments = parsed.comments as Comment[]
 		const visitors = rule.create({
@@ -85,6 +85,20 @@ export function reportsOf(rule: Rule, fixture: Fixture): Report[] {
 		walk(parsed.program, null, visitors)
 	}
 	return reports
+}
+
+/** Writes the fixture to a temp repo and runs `rule` over it in process, so a rule that reads other files from disk finds them */
+export function reportsOnDisk(rule: Rule, fixture: Fixture): Report[] {
+	const repo = mkdtempSync(join(tmpdir(), "comb-rule-"))
+	try {
+		for (const [file, code] of Object.entries(fixture)) {
+			mkdirSync(dirname(join(repo, file)), { recursive: true })
+			writeFileSync(join(repo, file), code)
+		}
+		return reportsOf(rule, fixture, repo)
+	} finally {
+		rmSync(repo, { force: true, recursive: true })
+	}
 }
 
 function insideGitCheckout(dir: string): boolean {
