@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { statementHead, statementTable, updatedColumns } from "./statement-head.ts"
+import { insertedColumns, statementHead, statementTable, updatedColumns } from "./statement-head.ts"
 
 describe("statementHead", () => {
 	it("starts at the statement's own verb, past comments and common table expressions", () => {
@@ -78,5 +78,27 @@ describe("updatedColumns, as SQLite writes an UPDATE", () => {
 		['update "m" set () = ()', []],
 	])("reads %s", (query, columns) => {
 		expect(updatedColumns(query)).toEqual(columns)
+	})
+})
+
+/* AB4 of area B: the SQLite handler blames a lone foreign key on an INSERT only where its list names it */
+describe("insertedColumns", () => {
+	it("reads an INSERT's column list, unquoted, past an alias, a comment and a CTE", () => {
+		expect(insertedColumns("INSERT INTO author (id, org_id) VALUES ('a', 'b')")).toEqual(["id", "org_id"])
+		expect(insertedColumns('insert or replace into "author"("id", [org_id], `x`) values (?, ?, ?)')).toEqual([
+			"id",
+			"org_id",
+			"x",
+		])
+		expect(insertedColumns('REPLACE INTO t AS n ("a)b", c) SELECT 1, 2')).toEqual(["a)b", "c"])
+		expect(insertedColumns("/* seed */ WITH s AS (SELECT 1) INSERT INTO main.t (a) SELECT * FROM s")).toEqual(["a"])
+	})
+
+	it("is undefined for an INSERT with no list, any other statement, no SQL, and reads an unclosed list to its end", () => {
+		expect(insertedColumns("INSERT INTO t VALUES (1)")).toBeUndefined()
+		expect(insertedColumns("INSERT INTO t DEFAULT VALUES")).toBeUndefined()
+		expect(insertedColumns("UPDATE t SET a = 1")).toBeUndefined()
+		expect(insertedColumns(undefined)).toBeUndefined()
+		expect(insertedColumns("INSERT INTO t (a, b")).toEqual(["a", "b"])
 	})
 })

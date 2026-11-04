@@ -126,6 +126,43 @@ export function updatedColumns(query: string | undefined): string[] | undefined 
 	return assignedIn(head.slice(set[0].length), /\b(?:where|from|returning)\b/i)
 }
 
+// per-process-constant: an INSERT or REPLACE up to its target table's end
+const INSERT_INTO = /* @__PURE__ */ new RegExp(`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into)\\s+${NAME}`, "i")
+
+/** The index of the `)` that closes the group opened at `open`, past literals and quoted names; the end when none does */
+function groupEnd(sql: string, open: number): number {
+	let depth = 0
+	for (let i = open; i < sql.length;) {
+		const end = skipped(sql, i)
+		if (end > i) {
+			i = end
+			continue
+		}
+		if (sql[i] === "(") depth++
+		if (sql[i] === ")" && --depth === 0) return i
+		i++
+	}
+	return sql.length
+}
+
+/**
+ * The columns an INSERT's column list names, unquoted; undefined when `query` is no INSERT or names
+ * no list, which assigns every column (AB4 of area B). The list follows the table and its alias, if
+ * any, in parentheses
+ */
+export function insertedColumns(query: string | undefined): string[] | undefined {
+	const head = statementHead(query ?? "")
+	const into = INSERT_INTO.exec(head)
+	if (into === null) return undefined
+	const rest = head.slice(into[0].length)
+	const open = /^\s*(?:as\s+\w+\s*)?\(/i.exec(rest)
+	if (open === null) return undefined
+	const list = rest.slice(open[0].length, groupEnd(rest, open[0].length - 1))
+	return topLevelPieces(list)
+		.flatMap((piece) => piece.trim().match(ONE_PART) ?? [])
+		.map(unquoted)
+}
+
 /** The columns a SET list assigns, unquoted, the list read up to the first top-level match of `end` */
 function assignedIn(list: string, end: RegExp): string[] {
 	const stop = blanked(list).search(end)

@@ -20,7 +20,7 @@ import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
 import { resourceOutcome } from "./resource-outcome.ts"
-import { statementHead, statementTable, updatedColumns, upsertColumns } from "../statement-head.ts"
+import { insertedColumns, statementHead, statementTable, updatedColumns, upsertColumns } from "../statement-head.ts"
 
 type Violation = { maps: readonly ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
@@ -146,6 +146,18 @@ function notNull(v: Violation): CombError {
 const STILL_REFERENCED = "The record is still referenced by other records"
 const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in use"
 
+/**
+ * Whether `query` is an INSERT that leaves `column`, the lone key a map lists, unset: SQLite's message
+ * names no key, so a key the INSERT's list doesn't name, a map key naming no column among them, may
+ * stand for one the map leaves out (AB4 of area B). An INSERT with no list sets every column it has,
+ * which the handler cannot tell a map key from, so it leaves each one unset.
+ */
+function insertLeaves(query: string | undefined, column: string | undefined): boolean {
+	if (!/^(?:insert|replace)\b/i.test(statementHead(query ?? ""))) return false
+	const inserted = insertedColumns(query) ?? []
+	return column === undefined || !inserted.some((name) => asciiFolded(name) === asciiFolded(column))
+}
+
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
  * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
  * fail on the other side, a row that references the deleted one, so no key of its own is blamed.
@@ -167,6 +179,7 @@ function foreignKey(v: Violation): CombError {
 	   a composite key's later column among them: which side failed is unknown (U23) */
 	const folded = new Set(keys?.map(asciiFolded))
 	const unlisted = assigned !== undefined && !assigned.some((name) => folded.has(asciiFolded(name)))
+	const unset = insertLeaves(v.read.query, column)
 	/* a statement that changes a key other tables reference may have failed on a row that references
 	   the old value, its own key valid: which side failed is unknown (U43) */
 	const referenced = new Set(v.maps.flatMap((map) => entryOf(map, table)?.referenced ?? []).map(asciiFolded))
@@ -186,7 +199,7 @@ function foreignKey(v: Violation): CombError {
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const
-	if (unlisted || changesReferenced) return toError(v, { entry: undefined, fallback, table })
+	if (unlisted || unset || changesReferenced) return toError(v, { entry: undefined, fallback, table })
 	return toError(v, {
 		column: entry === undefined ? undefined : shownColumn(v.maps, table, column),
 		entry,
