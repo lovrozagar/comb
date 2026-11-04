@@ -78,6 +78,9 @@ function primaryKey(v: Violation): CombError {
 	return toError(v, { entry, fallback, table })
 }
 
+/* a statement no wrapper recorded names no table */
+const NO_TABLE = { schema: undefined, table: undefined }
+
 function foreignKey(v: Violation): CombError {
 	const { constraint, keyColumns: columns, referenced } = v.read
 	const { table } = v
@@ -89,7 +92,7 @@ function foreignKey(v: Violation): CombError {
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 			status: "conflict",
 		} as const
-		return toError(v, { entry: undefined, fallback, table: statementTable(v.read.query) })
+		return toError(v, { entry: undefined, fallback, table: mapTable(v.maps, statementTable(v.read.query) ?? NO_TABLE) })
 	}
 	/* a composite key is found in the map by its first column, as codegen writes it, and names no
 	   column: one would blame half the key, and may sit beside a private one (Q18 of r17) */

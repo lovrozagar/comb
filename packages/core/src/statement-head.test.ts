@@ -30,18 +30,20 @@ describe("statementHead", () => {
 	})
 })
 
-/* U8 of the 0.12 round: a schema-qualified table is named by its table, as error maps key it */
+/* U8 of the 0.12 round and QE8 of r22b: a schema-qualified table is read as its schema and its
+ * table, so Postgres keys it as every other violation does and SQLite by its table */
 describe("statementTable on a schema-qualified table", () => {
 	it.each([
-		['delete from "app"."parent" where "id" = $1', "parent"],
-		['update "app"."pa""rent" set "x" = $1', 'pa"rent'],
-		["insert into app.parent (id) values ($1)", "parent"],
-		['delete from "app" . "parent"', "parent"],
-		["delete from `app`.`parent`", "parent"],
-		["delete from [app].[pa rent]", "pa rent"],
-		['delete from "parent"', "parent"],
-	])("reads %s as %s", (query, table) => {
-		expect(statementTable(query)).toBe(table)
+		['delete from "app"."parent" where "id" = $1', "app", "parent"],
+		['update "app"."pa""rent" set "x" = $1', "app", 'pa"rent'],
+		["insert into app.parent (id) values ($1)", "app", "parent"],
+		['delete from "app" . "parent"', "app", "parent"],
+		["delete from `app`.`parent`", "app", "parent"],
+		["delete from [my app].[pa rent]", "my app", "pa rent"],
+		['delete from db."app"."parent"', "app", "parent"],
+		['delete from "parent"', undefined, "parent"],
+	])("reads %s as %s.%s", (query, schema, table) => {
+		expect(statementTable(query)).toEqual({ schema, table })
 	})
 })
 

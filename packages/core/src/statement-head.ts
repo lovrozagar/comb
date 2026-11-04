@@ -83,11 +83,14 @@ function unquoted(part: string): string {
 
 /**
  * The table `query` writes to, or undefined when no wrapper recorded the SQL or it writes none: the
- * table itself, not its schema, as the constraint maps and the engines' errors name it (U8)
+ * table and the schema written before it, if any, each unquoted (U8). SQLite keys its maps by the
+ * table alone; Postgres resolves both to a map key as every other violation does (QE8 of r22b)
  */
-export function statementTable(query: string | undefined): string | undefined {
+export function statementTable(query: string | undefined): { schema: string | undefined; table: string } | undefined {
 	const name = STATEMENT_TABLE.exec(statementHead(query ?? ""))?.[1]
-	return name === undefined ? undefined : unquoted(name.match(ONE_PART)?.at(-1) as string)
+	if (name === undefined) return undefined
+	const parts = (name.match(ONE_PART) as string[]).map(unquoted)
+	return { schema: parts.at(-2), table: parts.at(-1) as string }
 }
 
 // per-process-constant: an UPDATE up to its SET list, past an alias and an INDEXED BY or NOT INDEXED

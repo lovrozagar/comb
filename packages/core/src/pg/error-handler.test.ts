@@ -159,6 +159,20 @@ describe("pgErrorHandler: which side of a foreign key failed, and long table nam
 		expect(thrown(error, [])).toMatchObject({ errorKey: "foreign_key_violation", table: "parent" })
 	})
 
+	/* QE8 of r22b: the referenced delete names the table by the key every other violation of it uses */
+	it("names a pgSchema parent by its qualified key, as its own violations do", () => {
+		const driver = nodePg({ code: "23503", detail: 'Key (id)=(10) is still referenced from table "c".', table: "c" })
+		const query = 'delete from "app"."parent" where "id" = $1'
+		const error = Object.assign(new Error(`Failed query: ${query}`, { cause: driver }), {
+			name: "DrizzleQueryError",
+			query,
+		})
+		const maps: ConstraintMap[] = [{ "app.parent": {}, "app.c": {} }]
+		const unique = nodePg({ code: "23505", detail: "Key (name)=(x) already exists.", schema: "app", table: "parent" })
+		expect(thrown(unique, maps)?.table).toBe("app.parent")
+		expect(thrown(error, maps)).toMatchObject({ errorKey: "foreign_key_violation", table: "app.parent" })
+	})
+
 	it("reads a missing parent as such when the child's key value spells the referenced phrase (Q-D6)", () => {
 		const error = nodePg({
 			code: "23503",

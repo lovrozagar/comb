@@ -56,7 +56,7 @@ function failedColumns(
 	{ maps, query }: { maps: readonly ConstraintMap[]; query: string | undefined },
 ): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
-	const known = statementTable(query)
+	const known = statementTable(query)?.table
 	const raw =
 		known !== undefined && list.startsWith(`${known}.`)
 			? list
@@ -77,7 +77,7 @@ function uniqueIndex(v: Violation, index: string): CombError {
 		errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION,
 		status: "conflict",
 	} as const
-	const table = statementTable(v.read.query)
+	const table = statementTable(v.read.query)?.table
 	const entry = lookup(v.maps, table, (t) => own(t.unique, index))
 	if (entry !== undefined) return toError(v, { entry, fallback, table })
 	const found = findNamed(v.maps, "unique", index)
@@ -122,7 +122,7 @@ function check(v: Violation): CombError {
 		status: "bad_request",
 	} as const
 	/* CHECK names are only unique per table: look in the statement's table before any other */
-	const table = statementTable(v.read.query)
+	const table = statementTable(v.read.query)?.table
 	if (table !== undefined)
 		return toError(v, { entry: lookup(v.maps, table, (t) => own(t.check, name)), fallback, table })
 	const found = findNamed(v.maps, "check", name)
@@ -152,7 +152,7 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
  * An UPDATE whose SET list assigns none of the foreign key columns the table's maps list blames no
  * key of its own either (U6), and says neither side: a map need not list every key (U23). */
 function foreignKey(v: Violation): CombError {
-	const table = statementTable(v.read.query)
+	const table = statementTable(v.read.query)?.table
 	let column: string | undefined
 	/* every foreign key column a map lists for the table: none, one or many; undefined when no map lists it */
 	let keys: string[] | undefined
@@ -232,7 +232,7 @@ const mismatchAt = (
 	{ maps, query }: { maps: readonly ConstraintMap[]; query: string | undefined },
 ) => {
 	const pair = /\bcolumn (.+)$/.exec(message)?.[1]
-	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query), maps)
+	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query)?.table, maps)
 	return { column: at?.column, table: at?.table }
 }
 
