@@ -11,8 +11,9 @@ import { describe, expect, it } from "vitest"
 const PACKAGE = join(import.meta.dirname, "../..")
 const REPO = join(PACKAGE, "../..")
 
-/* the plaintext password rule 0.20.0 removed from the column (C1 of r21) */
-const REMOVED = ["8 to 72", "printable ASCII", "bcrypt's limit"]
+/* the plaintext password rule 0.20.0 removed from the column (C1 of r21), as the sentences fdb49c98 deleted
+   wrote it: the bare words also describe other things, as Atlas's directive pattern in atlas-header.ts */
+const REMOVED = ["a password's 8 to 72", "a password's printable ASCII", "bcrypt's limit"]
 
 /** The README without its "## Upgrading to …" sections, which the prepack copies into the package */
 function readmeOutsideUpgrades(): string {
@@ -40,6 +41,13 @@ describe("a removed rule in the shipped docs (C4; siblings: the README outside i
 		const files = [...shipped("docs"), ...shipped("src")]
 		expect(files).toEqual(expect.arrayContaining(["docs/meta-contract.md", "src/password-text.ts"]))
 		expect(files.flatMap((file) => holding(file, readFileSync(join(PACKAGE, file), "utf8")))).toEqual([])
+	})
+
+	it("is the removed sentence, not its words in another module's text", () => {
+		expect(holding("a.ts", "the kind's own (a password's printable ASCII, an id's)")).toEqual([
+			"a.ts:1: a password's printable ASCII",
+		])
+		expect(holding("b.ts", "`atlas:<name>` after printable ASCII and its value")).toEqual([])
 	})
 
 	it("is in the README only within a dated upgrade note", () => {
