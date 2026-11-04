@@ -60,10 +60,31 @@ function atlasHeader(file: string): AtlasHeader {
 	return { directives, text: file.slice(0, blank), txmode: txmodeOf(txmodes) }
 }
 
+/**
+ * The first `atlas:` directive line of the comments `file` opens with when no blank line closes
+ * them (PA3n of r22b), by its line number from 1 and its text: Atlas reads it as a comment and runs
+ * the file in one transaction. A first-line `-- atlas:delimiter` is left out, as Atlas's lexer reads
+ * it where it stands, by atlas-scan.ts's rule
+ */
+function strayDirective(file: string): { line: number; text: string } | undefined {
+	const lines: string[] = []
+	let end = 0
+	for (const line of linesOf(file)) {
+		if (!line.startsWith("--") && !line.startsWith("#")) break
+		lines.push(line)
+		end += line.length
+	}
+	if (lines.length === 0 || /^(?:[ \t]*\r?\n|$)/.test(file.slice(end))) return undefined
+	const [, prefix, name] = DIRECTIVE.exec(lines[0] as string) ?? []
+	const from = prefix === "-- " && name === "delimiter" ? 1 : 0
+	const at = lines.findIndex((line, i) => i >= from && DIRECTIVE.test(line.trim()))
+	return at === -1 ? undefined : { line: at + 1, text: (lines[at] as string).trim() }
+}
+
 /* the header of a file that has none */
 const NONE: AtlasHeader = { directives: [], text: "", txmode: "file" }
 
 /** Whether Atlas runs `file` outside a transaction, as its header's `atlas:txmode none` asks */
 const outsideTransaction = (file: string): boolean => atlasHeader(file).txmode === "none"
 
-export { type AtlasHeader, atlasHeader, outsideTransaction, type Txmode }
+export { type AtlasHeader, atlasHeader, outsideTransaction, strayDirective, type Txmode }

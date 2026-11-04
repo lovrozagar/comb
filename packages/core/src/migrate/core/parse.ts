@@ -2,6 +2,7 @@
  * SQL parsing utilities for migrations
  */
 import { createHash } from "node:crypto"
+import { strayDirective } from "./atlas-header.ts"
 import { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings } from "./classify.ts"
 import { takenOptions } from "./classify-options.ts"
 import { classificationOf } from "./classify-verdict.ts"
@@ -101,12 +102,22 @@ export function parseMigration(sql: string, filename: string, options: ClassifyO
 	return parseRead({ ...fileRead(sql, taken.dialect ?? "sqlite"), filename }, taken)
 }
 
+/** Refuses `sql`, the file `filename`, when Atlas reads a leading `atlas:` line of it as a comment (PA3n of r22b) */
+function refuseStrayDirective(sql: string, filename: string): void {
+	const stray = strayDirective(sql)
+	if (stray === undefined) return
+	throw new Error(
+		`${filename} line ${stray.line}: Atlas reads ${JSON.stringify(stray.text)} as a comment, since no blank line closes the comments the file opens with, and runs the file in a transaction; add a blank line after the line, or remove it`,
+	)
+}
+
 /** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
 export function parseRead(
 	file: FileRead & { filename: string },
 	{ before, kind, schema }: Omit<ClassifyOptions, "dialect">,
 ): ParsedMigration {
 	const { dialect, filename, sql } = file
+	refuseStrayDirective(sql, filename)
 	const reads = readings(sql, { before, dialect, schema }, dialect === "postgres" ? file.read : undefined)
 	return {
 		classification: classificationOf(reads, sql, { kind }),
