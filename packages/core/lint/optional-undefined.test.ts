@@ -350,3 +350,31 @@ describe("comb/optional-undefined on a class's optional method", () => {
 		expect(lint("export class C { private m?(): void; #n?(): void; o(): void {} }\n")).toEqual([])
 	})
 })
+
+/* D5-3 of the area D round-five review: a generic class and an `import("…")` type flow as a generic alias does (Q1-Q3) */
+describe("comb/optional-undefined on a generic class and an import type", () => {
+	const BOX = "export class Box<T> { put(_value: T): void {} }\n"
+
+	it("follows a generic class's method parameter, declared here or imported, and a caller-set field (Q1)", () => {
+		expect(reported({ [PROBE]: made(BOX, "Box") })).toEqual([PROBE])
+		expect(reported({ [PROBE]: taken(BOX, "Box") })).toEqual([])
+		expect(reported({ [ALIAS]: BOX, [PROBE]: made("import type { Box } from './alias.ts'", "Box") })).toEqual([PROBE])
+		expect(reported({ [ALIAS]: BOX, [PROBE]: taken("import { Box } from './alias.ts'", "Box") })).toEqual([])
+		const held = "export class Held<T> { value: T; constructor(value: T) { this.value = value } }\n"
+		expect(reported({ [PROBE]: made(held, "Held") })).toEqual([PROBE])
+		expect(reported({ [PROBE]: taken(held, "Held") })).toEqual([PROBE])
+	})
+
+	it("follows an import type's relative file as a named import does, in a return type and a parameter (Q2, Q3)", () => {
+		const alias = { [ALIAS]: `export ${SETTER}` }
+		expect(reported({ ...alias, [PROBE]: made("", "import('./alias.ts').Setter") })).toEqual([PROBE])
+		expect(reported({ ...alias, [PROBE]: taken("", "import('./alias.ts').Setter") })).toEqual([])
+		expect(reported({ [ALIAS]: BOX, [PROBE]: taken("", "import('./alias.ts').Box") })).toEqual([])
+		/* a package's import type names no file of src, so its type arguments flow as written */
+		expect(reported({ ...alias, [PROBE]: taken("", "import('zod').Setter") })).toEqual([PROBE])
+		expect(reported({ ...alias, [PROBE]: made("", "import('./gone.ts').Setter") })).toEqual([])
+		/* a module's import type, `typeof import("…")`, names no generic */
+		const module = "export type Module = typeof import('./alias.ts')"
+		expect(reported({ ...alias, [PROBE]: taken(module, "import('./alias.ts').Setter") })).toEqual([])
+	})
+})

@@ -51,7 +51,7 @@ const METHODS = new Set(["MethodDefinition", "TSAbstractMethodDefinition", "TSMe
 const MEMBERS = new Set(["MethodDefinition", "PropertyDefinition"])
 
 /* what a reference names: a type reference's type, or the type an interface extends or a class
- * implements, a namespace's member as `A.Name` */
+ * implements, a namespace's member as `A.Name`, and an import type's as `import("./file.ts").Name` */
 const HERITAGE = new Set(["TSClassImplements", "TSInterfaceHeritage"])
 const nameOf = (name) =>
 	name?.type === "Identifier"
@@ -59,8 +59,14 @@ const nameOf = (name) =>
 		: name?.type === "TSQualifiedName" && name.left.type === "Identifier"
 			? `${name.left.name}.${name.right.name}`
 			: null
+const importedBy = (node) => {
+	const name = nameOf(node.qualifier)
+	return name === null ? null : `import(${JSON.stringify(node.source.value)}).${name}`
+}
 const namedBy = (node) =>
-	nameOf(node.type === "TSTypeReference" ? node.typeName : HERITAGE.has(node.type) ? node.expression : null)
+	node.type === "TSImportType"
+		? importedBy(node)
+		: nameOf(node.type === "TSTypeReference" ? node.typeName : HERITAGE.has(node.type) ? node.expression : null)
 
 /** Calls `found` with every node under `node` and the path to it, `node` itself first */
 function walk(node, path, found) {
@@ -73,6 +79,9 @@ function walk(node, path, found) {
 		}
 	}
 }
+
+/* the declarations a type in them flows as, by name */
+const ALIASES = new Set(["TSInterfaceDeclaration", "TSTypeAliasDeclaration"])
 
 /**
  * How type argument `index` of `owner` flows inside the generic alias or interface of src it
@@ -104,7 +113,8 @@ function argumentFlow(owner, index, scope) {
  * hands out a callback's. A type argument of a generic alias of src flows as that alias's type
  * parameter does there. At the top of the file it is comb's own value ("output"), a type a type
  * parameter or a caller-set class field holds is a caller's ("input"), and one in an alias or
- * interface flows as that type does, flipped or not.
+ * interface flows as that type does, flipped or not, as does one in the generic class a walk for a
+ * type argument starts from (`at === 1`; D5-3 of the area D round-five review).
  */
 function placeOf(path, scope) {
 	let flip = false
@@ -118,7 +128,7 @@ function placeOf(path, scope) {
 			if (flow === "both") return "input"
 			if (flow) flip = !flip
 		} else if (key === "params") flip = !flip
-		if (parent.type === "TSTypeAliasDeclaration" || parent.type === "TSInterfaceDeclaration")
+		if (ALIASES.has(parent.type) || (at === 1 && parent.type === "ClassDeclaration"))
 			return { alias: parent.id.name, flip }
 	}
 	return flip ? "input" : "output"
