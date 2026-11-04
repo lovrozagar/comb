@@ -49,6 +49,20 @@ describe("the D1 proof's scoped copy answers every corpus file as the whole sche
 })
 
 describe("observable: what the scoped copy creates and seeds", () => {
+	it("creates and seeds the table an FTS table reads its rows from, however its content option names it", () => {
+		const objects = [
+			table("post", "CREATE TABLE post (id INTEGER PRIMARY KEY, body TEXT)"),
+			table("It's", 'CREATE TABLE "It\'s" (id INTEGER PRIMARY KEY, body TEXT)'),
+			table("a", "CREATE VIRTUAL TABLE a USING fts5(body, content=post)"),
+			table("b", "CREATE VIRTUAL TABLE b USING fts5(body, content='It''s', content_rowid='id')"),
+			table("cl", "CREATE VIRTUAL TABLE cl USING fts5(body, content='')"),
+		]
+		const scope = observable(objects, [{ sql: "SELECT * FROM a, b, cl;" }], "h")
+		expect(scope.objects.map(({ name }) => name)).toEqual(["post", "It's", "a", "b", "cl"])
+		expect([...scope.seeded].toSorted()).toEqual(["a", "b", "cl", "it's", "post"])
+		expect(observable(objects, [{ sql: "SELECT * FROM cl;" }], "h").objects.map(({ name }) => name)).toEqual(["cl"])
+	})
+
 	it("reads a shadow table's name as its virtual table's, and a key to a table the schema lacks as none", () => {
 		const objects = [
 			table("docs", "CREATE VIRTUAL TABLE docs USING fts5 (body)"),

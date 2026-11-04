@@ -37,9 +37,12 @@ function shadowsOf(object: LiveObject): string[] {
 
 // per-process-constant: a foreign key's parent, as a column or table constraint names it
 const REFERENCES = /* @__PURE__ */ new RegExp(`\\bREFERENCES\\s+(${IDENT})`, "gi")
+// per-process-constant: the table an external-content FTS table reads its rows from, as its content option names it
+const CONTENT = /* @__PURE__ */ new RegExp(`\\bcontent\\s*=\\s*('(?:[^']|'')*'|${IDENT})`, "gi")
 
-/** A written name part as SQLite resolves it */
-const nameOf = (part: string): string => [...sqliteNames(part)][0] as string
+/** A written name part as SQLite resolves it, a string as its whole text */
+const nameOf = (part: string): string =>
+	part.startsWith("'") ? asciiFold(part.slice(1, -1).replaceAll("''", "'")) : ([...sqliteNames(part)][0] as string)
 
 /** What a copy scoped to pending files holds: the live objects it creates, in their order, and the tables it seeds, folded */
 type Scope = { objects: LiveObject[]; seeded: Set<string> }
@@ -70,7 +73,8 @@ function graphOf(objects: readonly LiveObject[]) {
 	const childrenOf = new Map<string, string[]>()
 	for (const object of objects.filter((each) => each.type === "table")) {
 		const child = asciiFold(object.name)
-		const parents = [...object.sql.matchAll(REFERENCES)]
+		/* an FTS table's content table is a parent too: the table's index and every read of it are that table's rows */
+		const parents = [...object.sql.matchAll(REFERENCES), ...(isVirtual(object) ? object.sql.matchAll(CONTENT) : [])]
 			.map((match) => nameOf(match[1] as string))
 			.filter((parent) => tables.has(parent))
 		parentsOf.set(child, parents)

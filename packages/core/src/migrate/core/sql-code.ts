@@ -131,11 +131,12 @@ function codeOf(stmt: string, dialect: Dialect): string {
 }
 
 /**
- * Every name SQLite code spells, as SQLite resolves one: each bare word and each quoted name unquoted, folded by
- * asciiFold; never a word of a string or a comment (8.5 of plan 21)
+ * Every name SQLite code can spell, as SQLite resolves one: each bare word and each quoted name unquoted, and each
+ * word of a string, which SQLite reads as a name where one stands (`FROM 'post'`) and a module as its option's
+ * (`content='post'`), folded by asciiFold; never a word of a comment (8.5 of plan 21)
  */
 function sqliteNames(sql: string): Set<string> {
-	return new Set([...joined(sql, "sqlite", false).matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")))
+	return new Set([...joined(sql, "sqlite", true).matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")))
 }
 
 /* a bare word in Postgres code, which may be a name */

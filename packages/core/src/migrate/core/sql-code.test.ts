@@ -67,10 +67,10 @@ describe("namesIn", () => {
 })
 
 describe("sqliteNames: the names SQLite code spells (8.5 of plan 21)", () => {
-	it("reads each bare and quoted name folded as SQLite resolves it, and no word of a string or a comment", () => {
-		const sql = `UPDATE "My""T" SET [Col] = \`B\` -- Gone\nWHERE x = 'Inside' /* Away */ AND Über = 1;`
+	it("reads each bare and quoted name folded as SQLite resolves it, and each word of a string, but no comment", () => {
+		const sql = `UPDATE "My""T" SET [Col] = \`B\` -- Gone\nWHERE x = 'Inside Out' /* Away */ AND Über = 1;`
 		expect([...sqliteNames(sql)].toSorted()).toEqual(
-			["and", "b", "col", 'my"t', "set", "update", "where", "x", "Über"].toSorted(),
+			["and", "b", "col", "inside", 'my"t', "out", "set", "update", "where", "x", "Über"].toSorted(),
 		)
 	})
 })

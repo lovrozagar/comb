@@ -125,11 +125,35 @@ function shapes(): string[] {
 	]
 }
 
+const EXTERNAL =
+	"CREATE TABLE post (id INTEGER PRIMARY KEY, body TEXT);\nCREATE VIRTUAL TABLE ext USING fts5(body, content='post', content_rowid='id');"
+const SRC = "CREATE TABLE src (id INTEGER PRIMARY KEY, body TEXT);"
+
+/* an FTS table that reads another for its rows, and a table a file names only as a string, as SQLite reads one */
+function ftsCases(): ScopeCase[] {
+	return [
+		["an external-content rebuild", EXTERNAL, "INSERT INTO ext(ext) VALUES ('rebuild');"],
+		["an external-content delete-all", EXTERNAL, "INSERT INTO ext(ext) VALUES ('delete-all');"],
+		["a read of an external-content table", EXTERNAL, "CREATE TABLE hits AS SELECT rowid, body FROM ext;"],
+		[
+			"an FTS table made over a table named in its content option",
+			SRC,
+			"CREATE VIRTUAL TABLE notes USING fts5(body, content='src', content_rowid='id');\nINSERT INTO notes(notes) VALUES ('rebuild');",
+		],
+		["a table named as a string", SRC, "CREATE TABLE cp AS SELECT * FROM 'src';"],
+	].map(([label, schema, file]) => ({
+		file: file as string,
+		label: `fts: ${label as string}`,
+		schema: schema as string,
+	}))
+}
+
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
 	return [
 		...d1Cases(),
 		...triggerCases(),
+		...ftsCases(),
 		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
 	]
 }
