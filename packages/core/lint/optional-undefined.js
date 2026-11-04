@@ -17,6 +17,8 @@ const MESSAGE =
 	"an optional property takes undefined, which comb reads as the key left out: declare it `name?: T | undefined`, a method as `name?: ((…) => R) | undefined`"
 const MAPPED =
 	"an optional mapped key takes undefined, which comb reads as the key left out: declare it `{ [K in …]?: T | undefined }`"
+const TUPLE =
+	"an optional tuple element takes undefined, which comb reads as the element left out: declare it `[name?: T | undefined]`, an unnamed one `[(T | undefined)?]`"
 const PARTIAL =
 	"a Partial<…> that comb reads refuses undefined, which comb reads as the key left out: declare the input `{ [K in …]?: T | undefined }`; Partial<…> is for what comb hands back, in a return type or an alias only return types reach"
 
@@ -28,13 +30,22 @@ export const TAKEN_BACK = new Map([
 	],
 ])
 
-/* the types that already admit undefined: undefined itself, unknown, any, and a union holding undefined */
+/* the types that already admit undefined: undefined itself, unknown, any, and a union holding undefined, in parentheses or not */
 const ADMITS = new Set(["TSAnyKeyword", "TSUndefinedKeyword", "TSUnknownKeyword"])
 const admitsUndefined = (type) =>
-	ADMITS.has(type.type) || (type.type === "TSUnionType" && type.types.some((member) => admitsUndefined(member)))
+	ADMITS.has(type.type) ||
+	(type.type === "TSParenthesizedType" && admitsUndefined(type.typeAnnotation)) ||
+	(type.type === "TSUnionType" && type.types.some((member) => admitsUndefined(member)))
 
 /* a private or #-named class field is comb's own state, which no caller sets (D2-6 of the area D round-two review) */
 const ownField = (node) => node.accessibility === "private" || node.key.type === "PrivateIdentifier"
+
+/* a class field a caller or a subclass sets, an abstract one included (D3-3 of the area D round-three review) */
+const FIELDS = new Set(["PropertyDefinition", "TSAbstractPropertyDefinition"])
+const callerField = (node) => FIELDS.has(node.type) && !ownField(node)
+
+/* an optional method's type is a function, which never admits undefined */
+const METHODS = new Set(["TSAbstractMethodDefinition", "TSMethodSignature"])
 
 /* what a reference names: a type reference's type, or the type an interface extends or a class implements */
 const HERITAGE = new Set(["TSClassImplements", "TSInterfaceHeritage"])
@@ -56,10 +67,10 @@ function walk(node, path, found) {
 }
 
 /**
- * How type argument `index` of `owner` flows inside the generic alias or interface of this file it
+ * How type argument `index` of `owner` flows inside the generic alias or interface of src it
  * names: flipped (true) when its type parameter sits in a function parameter there, as it is (false)
  * when it is unused or no such alias holds it, and "both" when comb reads it and hands it out alike.
- * `scope` holds this file's generic aliases by name, and in `seen` those already followed, so a
+ * `scope` holds src's generic aliases by name, this file's over those other files export, and in `seen` those already followed, so a
  * cycle adds nothing.
  */
 function argumentFlow(owner, index, scope) {
@@ -80,7 +91,7 @@ function argumentFlow(owner, index, scope) {
 /**
  * Which way a type written at the end of `path` (its ancestors, outermost first, each with the key
  * it hangs by) flows. Each function parameter it sits in flips it: comb reads its own parameter and
- * hands out a callback's. A type argument of a generic alias of this file flows as that alias's type
+ * hands out a callback's. A type argument of a generic alias of src flows as that alias's type
  * parameter does there. At the top of the file it is comb's own value ("output"), a type a type
  * parameter or a caller-set class field holds is a caller's ("input"), and one in an alias or
  * interface flows as that type does, flipped or not.
@@ -90,7 +101,7 @@ function placeOf(path, scope) {
 	for (let at = path.length - 1; at > 0; at--) {
 		const { key, node } = path[at]
 		const parent = path[at - 1].node
-		if (key === "typeParameters" || (parent.type === "PropertyDefinition" && !ownField(parent))) return "input"
+		if (key === "typeParameters" || callerField(parent)) return "input"
 		/* a type argument list hangs its types by `params` too; only a function's parameters flip */
 		if (key === "params" && parent.type === "TSTypeParameterInstantiation") {
 			const flow = argumentFlow(path[at - 2].node, parent.params.indexOf(node), scope)
@@ -103,14 +114,20 @@ function placeOf(path, scope) {
 	return flip ? "input" : "output"
 }
 
-/** Every named type reference in `program`, by name, with where each sits */
-function referencesIn(program) {
+/** The generic aliases and interfaces `program` declares at its top, by name: only those it exports when `exported` */
+function genericsIn(program, exported) {
 	const generics = new Map()
 	for (const node of program.body) {
-		const declared = node.type === "ExportNamedDeclaration" ? node.declaration : node
+		const declared = node.type === "ExportNamedDeclaration" ? node.declaration : exported ? null : node
 		const generic = declared?.type === "TSTypeAliasDeclaration" || declared?.type === "TSInterfaceDeclaration"
 		if (generic && declared.typeParameters) generics.set(declared.id.name, declared)
 	}
+	return generics
+}
+
+/** Every named type reference in `program`, by name, with where each sits; `shared` holds the generics other files export */
+function referencesIn(program, shared) {
+	const generics = new Map([...shared, ...genericsIn(program, false)])
 	const found = []
 	walk(program, [{ key: null, node: program }], (node, path) => {
 		const name = namedBy(node)
@@ -119,12 +136,13 @@ function referencesIn(program) {
 	return found
 }
 
-/* the references of every source file under a src root, as read from disk once per lint run */
+/* the generics every source file under a src root exports, and each file's references, as read from disk once per lint run */
 const roots = new Map()
 function diskReferences(root) {
 	const cached = roots.get(root)
 	if (cached) return cached
 	const byFile = new Map()
+	const generics = new Map()
 	let files = []
 	try {
 		files = readdirSync(root, { encoding: "utf8", recursive: true })
@@ -132,16 +150,20 @@ function diskReferences(root) {
 		/* a root with no source on disk, as the in-process rule harness's fixtures have, holds none */
 		files = []
 	}
-	for (const file of files.filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))) {
-		const path = join(root, file)
-		const parsed = parseSync(path, readFileSync(path, "utf8"))
+	const programs = files
+		.filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+		.map((file) => join(root, file))
+		.map((path) => [path, parseSync(path, readFileSync(path, "utf8")).program])
+	for (const [, program] of programs)
+		for (const [name, declared] of genericsIn(program, true)) generics.set(name, declared)
+	for (const [path, program] of programs)
 		byFile.set(
 			path,
-			referencesIn(parsed.program).map(({ name, place }) => ({ name, place })),
+			referencesIn(program, generics).map(({ name, place }) => ({ name, place })),
 		)
-	}
-	roots.set(root, byFile)
-	return byFile
+	const disk = { byFile, generics }
+	roots.set(root, disk)
+	return disk
 }
 
 /**
@@ -171,10 +193,7 @@ export const rule = {
 		/** Reports an optional member whose declared type refuses undefined; one with no type is any */
 		const check = (node) => {
 			if (node.optional !== true || (node.type === "PropertyDefinition" && ownField(node))) return
-			if (
-				node.type === "TSMethodSignature" ||
-				(node.typeAnnotation && !admitsUndefined(node.typeAnnotation.typeAnnotation))
-			)
+			if (METHODS.has(node.type) || (node.typeAnnotation && !admitsUndefined(node.typeAnnotation.typeAnnotation)))
 				context.report({ message: MESSAGE, node })
 		}
 		/** Reports an optional mapped key whose type refuses undefined; `-?` makes it required */
@@ -183,12 +202,19 @@ export const rule = {
 			if (optional && node.typeAnnotation && !admitsUndefined(node.typeAnnotation))
 				context.report({ message: MAPPED, node })
 		}
+		/** Reports an optional tuple element whose type refuses undefined, `[name?: T]` or `[T?]` */
+		const tuple = (node) => {
+			const type =
+				node.type === "TSOptionalType" ? node.typeAnnotation : node.optional === true ? node.elementType : null
+			if (type !== null && !admitsUndefined(type)) context.report({ message: TUPLE, node })
+		}
 		/** Reports a Partial<…> an input reaches: this file's references read afresh, every other file's from disk */
 		const partials = (program) => {
-			const here = referencesIn(program)
+			const disk = diskReferences(root)
+			const here = referencesIn(program, disk.generics)
 			const places = new Map()
 			const add = (name, place) => places.set(name, [...(places.get(name) ?? []), place])
-			for (const [path, references] of diskReferences(root)) {
+			for (const [path, references] of disk.byFile) {
 				if (path.replaceAll("\\", "/") !== filename) for (const { name, place } of references) add(name, place)
 			}
 			for (const { name, place } of here) add(name, place)
@@ -205,8 +231,12 @@ export const rule = {
 		return {
 			Program: partials,
 			PropertyDefinition: check,
+			TSAbstractMethodDefinition: check,
+			TSAbstractPropertyDefinition: check,
 			TSMappedType: mapped,
 			TSMethodSignature: check,
+			TSNamedTupleMember: tuple,
+			TSOptionalType: tuple,
 			TSPropertySignature: check,
 		}
 	},

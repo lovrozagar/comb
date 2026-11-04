@@ -208,3 +208,46 @@ describe("comb/optional-undefined on what comb takes back", () => {
 		for (const name of TAKEN_BACK.keys()) expect(declared).toContain(name)
 	})
 })
+
+/* D3-3 of the area D round-three review: K1, K2, K3, K4 and K11 of its probe, each with its control */
+const TUPLE =
+	"an optional tuple element takes undefined, which comb reads as the element left out: declare it `[name?: T | undefined]`, an unnamed one `[(T | undefined)?]`"
+
+describe("comb/optional-undefined across files, in tuples and on abstract members", () => {
+	it("reads a generic alias another src file declares the way its parameter flows there (K1, K2)", () => {
+		const fixture = {
+			"packages/core/src/query/alias.ts": "export type Setter<T> = (value: T) => void\n",
+			"packages/core/src/query/make.ts":
+				"import type { Setter } from './alias.ts'\nexport function make(): Setter<Partial<{ a: number }>> { return (v) => void v.a }\n",
+			"packages/core/src/query/on.ts":
+				"import type { Setter } from './alias.ts'\nexport function on(listener: Setter<Partial<{ a: number }>>) { listener({}) }\n",
+		}
+		expect(oxlintReports("optional-undefined", fixture)).toEqual([
+			{ file: "packages/core/src/query/make.ts", message: PARTIAL },
+		])
+		expect(reportsOnDisk(rule, fixture)).toEqual([{ file: "packages/core/src/query/make.ts", message: PARTIAL }])
+	})
+
+	it("rejects an optional tuple element whose type refuses undefined, named or not (K3, K4)", () => {
+		expect(lint("export function f(args: [a: string, b?: number]) { return args }\n")).toEqual([
+			{ file: at, message: TUPLE },
+		])
+		expect(lint("export function f(args: [string, number?]) { return args }\n")).toEqual([{ file: at, message: TUPLE }])
+		expect(
+			lint(
+				"export type T = [a: string, b?: number | undefined]\nexport type U = [string, (number | undefined)?]\nexport type R = [a: string, b: number]\nexport type P = { a?: (number | undefined) }\n",
+			),
+		).toEqual([])
+	})
+
+	it("rejects an abstract optional member whose type refuses undefined, and reads an abstract field as an input (K11)", () => {
+		expect(lint("export abstract class C { abstract log?: number; abstract flush?(): void }\n")).toEqual([
+			{ file: at, message: MESSAGE },
+			{ file: at, message: MESSAGE },
+		])
+		expect(lint("export abstract class C { abstract seen: Partial<{ a: number }> }\n")).toEqual([
+			{ file: at, message: PARTIAL },
+		])
+		expect(lint("export abstract class C { abstract log?: number | undefined; abstract flush(): void }\n")).toEqual([])
+	})
+})

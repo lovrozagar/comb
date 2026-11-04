@@ -103,7 +103,7 @@ function migrateInit(argv: readonly string[], io: CliContext): void {
 async function migrateDiff(argv: readonly string[], io: CliContext): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
 	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
-	const [db, name] = args.positionals as [string, string?]
+	const [db, name] = args.positionals as [string, (string | undefined)?]
 	const env = args.options["env"] as string | undefined
 	const { d1, expected, exported, fts, migrationsDir, pg, provider, target } = await diffTarget(db, env, io)
 	/* a diff starts a missing directory, and refuses a file before anything runs (D2-7 of the area D round-two review) */
