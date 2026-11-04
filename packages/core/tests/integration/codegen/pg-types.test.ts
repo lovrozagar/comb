@@ -49,6 +49,14 @@ const CASES: Case[] = [
 	/* stricter than Postgres, listed in the 0.14 changelog: its special inputs, and a year past 9999 */
 	["d", "tomorrow", false, true],
 	["d", "10000-01-01", false, true],
+	/* A2-3 of r22: year 0000, which zod's ISO date takes and Postgres refuses with a 22008 */
+	["d", "0000-01-01", false, false],
+	["d", "0000-02-29", false, false],
+	["d", "0001-01-01", true, true],
+	["d", "0400-02-29", true, true],
+	["ts", "0000-01-01T00:00:00", false, false],
+	["tz", "0000-01-01T00:00:00Z", false, false],
+	["tz", "0001-01-01T00:00:00Z", true, true],
 	["ts", "2024-01-01T10:00:00", true, true],
 	["ts", "2024-01-01T10:00:00.123456", true, true],
 	["ts", "2024-13-01T10:00:00", false, false],
@@ -228,10 +236,24 @@ const CASES: Case[] = [
 	/* AA6 of r22: a comma for the seconds' decimal mark, which Postgres refuses with a 22007 */
 	["iv", "PT1,5S", false, false],
 	["iv", "PT1M1,25S", false, false],
+	/* A2-3 of r22: a part past what Postgres holds alone, a 22015; each at the most digits it holds */
+	["iv", "P2147483648D", false, false],
+	["iv", "PT9999999999H", false, false],
+	["iv", "PT999999999999H", false, false],
+	["iv", "P999999999999W", false, false],
+	["iv", "P99999999Y", true, true],
+	["iv", "P999999999M", true, true],
+	["iv", "P99999999W", true, true],
+	["iv", "P999999999D", true, true],
+	["iv", "PT999999999H", true, true],
+	["iv", "PT99999999999M", true, true],
+	["iv", "PT999999999999.999999S", true, true],
 	/* stricter than Postgres, listed in the 0.14 changelog: a negative or fractional part, the alternative format, and Postgres's own spelling */
 	["iv", "P-1D", false, true],
 	["iv", "P1.5Y", false, true],
 	["iv", "P0001-02-03T04:05:06", false, true],
+	/* A2-3: a part Postgres holds, past the most digits the DTO takes of it, which every part takes */
+	["iv", "PT2562047788H", false, true],
 	["iv", "1 day", false, true],
 	/* F3 of the 0.14.1 review: a uuid is z.guid(), the canonical spelling */
 	["u", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", true, true],
@@ -355,6 +377,21 @@ describe("a plain Postgres column's stored values and refusals beyond its DTO (F
 			.query("INSERT INTO kinds (id, tt) VALUES ('k', $1)", ["10:00:00+16"])
 			.catch((caught: unknown) => caught)
 		expect((error as { code?: string }).code).toBe("22009")
+		expect(classifyPgError(error, [])).toMatchObject({ errorKey: "invalid_value", status: 400 })
+	})
+
+	/* A2-3 of r22: parts the DTO takes, each one Postgres holds, whose sum it does not: the handler's 400 */
+	it.each([
+		["P99999999Y999999999M", "22008"],
+		["PT999999999H99999999999M999999999999S", "22015"],
+	])("answers the interval %s, past Postgres's range by its sum, with a 400 (%s)", async (value, code) => {
+		const { create } = await kindsDtos()
+		expect(create.safeParse({ id: "k", iv: value }).success).toBe(true)
+		const error = await sessions
+			.pg()
+			.query("INSERT INTO kinds (id, iv) VALUES ('k', $1)", [value])
+			.catch((caught: unknown) => caught)
+		expect((error as { code?: string }).code).toBe(code)
 		expect(classifyPgError(error, [])).toMatchObject({ errorKey: "invalid_value", status: 400 })
 	})
 })

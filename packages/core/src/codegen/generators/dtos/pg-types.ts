@@ -73,10 +73,11 @@ const OFFSET = "(?:Z|[+-](?:0[0-9]|1[0-5]):[0-5][0-9])"
  * holds each copy to zod's own, read as it runs): zod's publish \d, which Rust's regex reads as any
  * Unicode digit, so comb publishes its own, which ECMAScript, Go's RE2 and Rust's regex read alike
  * (AA7 of r22). Each is a z.stringFormat of zod's format name, which checks and publishes the regex it
- * is given: zod's types refuse a `pattern` param on z.iso.*, which a consumer's tsc reads
+ * is given: zod's types refuse a `pattern` param on z.iso.*, which a consumer's tsc reads. One
+ * departure: the date's year is 0001 at least, as Postgres's year 0000 is a 22008 (A2-3 of r22)
  */
-const ISO_DATE =
-	"(?:(?:[0-9][0-9][2468][048]|[0-9][0-9][13579][26]|[0-9][0-9]0[48]|[02468][048]00|[13579][26]00)-02-29|[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|(?:02)-(?:0[1-9]|1[0-9]|2[0-8])))"
+const YEAR = "(?:000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})"
+const ISO_DATE = `(?:(?:[0-9][0-9][2468][048]|[0-9][0-9][13579][26]|[0-9][0-9]0[48]|(?:[2468][048]|0[48])00|[13579][26]00)-02-29|${YEAR}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|(?:02)-(?:0[1-9]|1[0-9]|2[0-8])))`
 const ISO_CLOCK = "(?:[01][0-9]|2[0-3]):[0-5][0-9]"
 const ISO_SECOND = "(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?"
 const ISO_WALL = `${ISO_CLOCK}(?::[0-5][0-9](?:\\.[0-9]+)?)?`
@@ -131,10 +132,19 @@ function timeRule({ precision, withTimeZone }: { precision: number | null; withT
 
 /* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it (CS3 of
  * r22b): weeks alone, or at least one date or time part, the seconds alone taking a fraction. Its
- * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007 (AA6 of r22) */
-const SECONDS = "[0-9]+(?:\\.[0-9]+)?S"
-const TIME_PART = `T(?:[0-9]+H(?:[0-9]+M)?(?:${SECONDS})?|[0-9]+M(?:${SECONDS})?|${SECONDS})`
-const DURATION = `^P(?:[0-9]+W|(?:[0-9]+Y(?:[0-9]+M)?(?:[0-9]+D)?|[0-9]+M(?:[0-9]+D)?|[0-9]+D)(?:${TIME_PART})?|${TIME_PART})$`
+ * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007 (AA6 of r22). Each
+ * part takes at most the digits whose every value Postgres holds alone, past which it is a 22015
+ * (A2-3 of r22): 8 for years and weeks, 9 for months, days and hours, 11 for minutes, 12 for whole
+ * seconds. A sum past its range is the handler's 400, a 22008 or 22015 */
+const YEARS = "[0-9]{1,8}"
+const MONTHS = "[0-9]{1,9}"
+const WEEKS = "[0-9]{1,8}"
+const DAYS = "[0-9]{1,9}"
+const HOURS = "[0-9]{1,9}"
+const MINUTES = "[0-9]{1,11}"
+const SECONDS = "[0-9]{1,12}(?:\\.[0-9]+)?S"
+const TIME_PART = `T(?:${HOURS}H(?:${MINUTES}M)?(?:${SECONDS})?|${MINUTES}M(?:${SECONDS})?|${SECONDS})`
+const DURATION = `^P(?:${WEEKS}W|(?:${YEARS}Y(?:${MONTHS}M)?(?:${DAYS}D)?|${MONTHS}M(?:${DAYS}D)?|${DAYS}D)(?:${TIME_PART})?|${TIME_PART})$`
 
 // lookup-table: the ISO 8601 duration an interval's last field keeps, as a regex of no lookaround
 const KEPT_BY: Readonly<Record<Exclude<IntervalField, "second">, string>> = {

@@ -265,7 +265,13 @@ describe("a timetz and a timestamptz take one offset spelling (CD11 of r22b; sib
 /** The pattern zod publishes for a format, its regex's source */
 const zodPattern = (schema: z.ZodType): string => (z.toJSONSchema(schema) as { pattern: string }).pattern
 
-describe("comb's ISO patterns are zod's, each \\d written as [0-9] (AA7 of r22)", () => {
+/* the one departure, A2-3 of r22: no year 0000, a 22008 in Postgres, in the leap branch or the rest */
+const YEAR_0001: readonly (readonly [string, string])[] = [
+	["[02468][048]00", "(?:[2468][048]|0[48])00"],
+	["[0-9]{4}-", "(?:000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-"],
+]
+
+describe("comb's ISO patterns are zod's, each \\d written as [0-9], its year 0001 at least (AA7, A2-3 of r22)", () => {
 	it.each([
 		['date("v")', z.iso.date()],
 		['timestamp("v", { mode: "string" })', z.iso.datetime({ local: true })],
@@ -273,7 +279,11 @@ describe("comb's ISO patterns are zod's, each \\d written as [0-9] (AA7 of r22)"
 		['time("v")', z.iso.time()],
 	] as const)("%s", (column, zod) => {
 		const comb = /^z\.stringFormat\("[a-z]+", \/(.*?)\/u\)/.exec(rule(column) as string)?.[1]
-		expect(comb).toBe(zodPattern(zod).replaceAll(String.raw`\d`, "[0-9]"))
+		const departed = YEAR_0001.reduce(
+			(pattern, [from, to]) => pattern.replace(from, to),
+			zodPattern(zod).replaceAll(String.raw`\d`, "[0-9]"),
+		)
+		expect(comb).toBe(departed)
 	})
 })
 
