@@ -273,12 +273,28 @@ describe("a malformed order is an issue on order (QL7 of r22b; sibling: the publ
 		[".desc", '".desc"'],
 		[",", '""'],
 		["title.asc,", '""'],
+		/* AB9 of area B: an entry with whitespace around it, which the pattern refuses, is named as sent */
+		[" title.asc", '" title.asc"'],
+		["title.asc ", '"title.asc "'],
+		["title.asc, created_at.desc", '" created_at.desc"'],
+		["\ttitle", '"\\ttitle"'],
+		["   ", '"   "'],
 	])("refuses %j, naming the entry, as the published pattern does", (order, named) => {
 		const result = schema.safeParse({ order })
 		expect(result.error?.issues).toEqual([
 			expect.objectContaining({ message: `Malformed sort entry: ${named}`, path: ["order"] }),
 		])
 		expect(pattern.test(order)).toBe(false)
+	})
+
+	/* AB9 of area B: the last entry won sortOrderBy while parsedSort kept both, so the two disagreed */
+	it("refuses a field named twice, naming it once, so sortOrderBy and parsedSort agree", () => {
+		for (const order of ["title.asc,title.desc", "title,created_at,title.desc"]) {
+			const result = schema.safeParse({ order })
+			expect(result.error?.issues, order).toEqual([
+				expect.objectContaining({ message: 'Sort field named twice: "title"', path: ["order"] }),
+			])
+		}
 	})
 
 	it("takes a well-formed order, as the pattern does", () => {

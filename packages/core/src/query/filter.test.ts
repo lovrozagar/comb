@@ -15,8 +15,9 @@ describe("parseOrder", () => {
 		expect(parseOrder("")).toEqual([])
 	})
 
-	it("returns empty for whitespace-only", () => {
-		expect(parseOrder("   ")).toEqual([])
+	/* AB9 of area B: an entry with whitespace around it is malformed, as the published pattern says */
+	it("refuses whitespace-only, as an entry naming no field", () => {
+		expect(parseOrder("   ")).toBeNull()
 	})
 
 	/* single-field direction */
@@ -80,8 +81,10 @@ describe("parseOrder — multiple and computed fields", () => {
 		expect(parseOrder(",name.asc,,")).toBeNull()
 	})
 
-	it("trims whitespace around parts", () => {
-		expect(parseOrder(" col1.desc , col2.asc ")?.map(({ field }) => field)).toEqual(["col1", "col2"])
+	it("refuses whitespace around a part, and a field named twice (AB9 of area B)", () => {
+		expect(parseOrder(" col1.desc , col2.asc ")).toBeNull()
+		expect(parseOrder("col1.desc,\tcol2.asc")).toBeNull()
+		expect(parseOrder("col1.desc,col1.asc")).toBeNull()
 	})
 
 	/* computed fields (anyrow @ prefix) */

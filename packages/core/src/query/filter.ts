@@ -34,18 +34,30 @@ import type { SortDirection, SortField } from "./types.ts"
  *   "col1.desc,col2.asc.nullsfirst"
  *     → [{field:"col1",direction:"desc"}, {field:"col2",direction:"asc",nulls:"first"}]
  *
- * An entry that is empty or names no field (`asc`, `.desc`, a trailing comma) refuses the whole
- * order as null, as parseFilter refuses a filter, rather than drop it and widen the request to the
- * default order (QL7 of r22b).
+ * An entry that is empty, names no field (`asc`, `.desc`, a trailing comma) or has whitespace around
+ * it, and a field named twice, refuse the whole order as null, as parseFilter refuses a filter, rather
+ * than drop it and widen the request to the default order (QL7 of r22b).
  */
 function parseOrder(input: string | null | undefined): SortField[] | null {
 	const entries = orderEntries(input)
-	return entries.every((entry) => typeof entry !== "string") ? entries : null
+	const fields = entries.filter((entry) => typeof entry !== "string")
+	return fields.length === entries.length && namedTwice(fields).length === 0 ? fields : null
 }
 
-/** Each entry of `order` read as a sort field, or kept as its trimmed text when it is empty or names no field */
+/** Each field `fields` names more than once, once each */
+function namedTwice(fields: readonly SortField[]): string[] {
+	const seen = new Set<string>()
+	const twice = new Set<string>()
+	for (const { field } of fields) (seen.has(field) ? twice : seen).add(field)
+	return [...twice]
+}
+
+/**
+ * Each entry of `order` read as a sort field, or kept as its text when it is empty, names no field or
+ * has whitespace around it, which the published pattern refuses too
+ */
 function orderEntries(input: string | null | undefined): Array<SortField | string> {
-	if (!input || input.trim() === "") return []
+	if (!input) return []
 
 	const fields: Array<SortField | string> = []
 	const parts = input.split(",")
@@ -75,8 +87,8 @@ function orderEntries(input: string | null | undefined): Array<SortField | strin
 		}
 
 		const field = tokens.join(".")
-		if (!field) {
-			fields.push(trimmed)
+		if (!field || part !== trimmed) {
+			fields.push(part)
 			continue
 		}
 
@@ -94,6 +106,7 @@ export {
 	OPERATORS_BY_TYPE,
 	parseFilter,
 	parseFilterNumber,
+	namedTwice,
 	orderEntries,
 	parseOrder,
 	validateFilter,

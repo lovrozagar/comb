@@ -4,7 +4,7 @@
  */
 import type * as z from "zod"
 
-import { type FilterLimits, orderEntries, validateFilter } from "./filter.ts"
+import { type FilterLimits, namedTwice, orderEntries, validateFilter } from "./filter.ts"
 import type { FieldType, FilterAST, SortDirection, SortField } from "./types.ts"
 
 type FilterParam = { fields: Record<string, FieldType>; limits: FilterLimits }
@@ -36,6 +36,10 @@ function parsedSortOf<TSortField extends string>(
 		ctx.addIssue({ code: "custom", message: `Malformed sort entry: ${JSON.stringify(malformed)}`, path: ["order"] })
 	}
 	const rawSort = entries.filter((entry) => typeof entry !== "string")
+	/* a field named twice would sort by its first entry while sortOrderBy kept its last (AB9 of area B) */
+	for (const field of namedTwice(rawSort)) {
+		ctx.addIssue({ code: "custom", message: `Sort field named twice: ${JSON.stringify(field)}`, path: ["order"] })
+	}
 	if (rawSort.length > maxSortKeys) {
 		ctx.addIssue({
 			code: "custom",
