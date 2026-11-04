@@ -1,12 +1,20 @@
+import { RE2JS } from "re2js"
 import { describe, expect, it } from "vitest"
-import { patternLiteral } from "./pattern.ts"
+import { patternLiteral as emitted } from "./pattern.ts"
+
+/* A3-2 of r23: every pattern comb takes here compiles under RE2's syntax, as Go's validators read it */
+function patternLiteral(pattern: string, place: string): string {
+	const literal = emitted(pattern, place)
+	expect(() => RE2JS.compile(literal.slice(1, -2)), literal).not.toThrow()
+	return literal
+}
 
 describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 	it("writes a pattern back as a literal that compiles under u, a slash and a line terminator escaped", () => {
 		expect(patternLiteral("/^a+$/", "x")).toBe("/^a+$/u")
 		expect(patternLiteral("/^a/b$/", "x")).toBe(String.raw`/^a\/b$/u`)
 		expect(patternLiteral(String.raw`/^a\/b$/`, "x")).toBe(String.raw`/^a\/b$/u`)
-		expect(patternLiteral("/^a\nb\u2028$/u", "x")).toBe(String.raw`/^a\nb\u2028$/u`)
+		expect(patternLiteral("/^a\nb\r$/u", "x")).toBe(String.raw`/^a\nb\r$/u`)
 		/* the engine's own source, which a regex in the tables file publishes as: a slash in a class stays */
 		expect(patternLiteral("/^[A-Za-z_/]+$/", "x")).toBe("/^[A-Za-z_/]+$/u")
 		expect(patternLiteral("/[^/]/b/", "x")).toBe(String.raw`/[^/]\/b/u`)
@@ -122,5 +130,86 @@ describe("patternLiteral: a pattern each engine reads as one rule (A2-7 of r22)"
 			String.raw`/^(?<year>[0-9]{4})(?:-[0-9]{2})?$/u`,
 		)
 		expect(patternLiteral(String.raw`/^[^\n\r]{2}\x00$/`, "x")).toBe(String.raw`/^[^\n\r]{2}\x00$/u`)
+	})
+})
+
+/* A3-2 of r23: each construct an engine comb names reads otherwise, and what the refusal names */
+const PROPERTY =
+	"which Go's RE2 or Rust's regex does not compile, or reads as another set: write a General_Category value as Go's RE2 names it, such as \\p{L}, \\p{Lu} or \\p{Nd}, or the ranges meant"
+
+const REFUSED: ReadonlyArray<readonly [string, string]> = [
+	[String.raw`/^\u0041$/u`, String.raw`\u0041, which Go's RE2 does not compile: write \x41`],
+	[String.raw`/^\u00e9\u{1F600}$/u`, String.raw`\u00e9, which Go's RE2 does not compile: write \xE9`],
+	[
+		String.raw`/^\u{1F600}$/u`,
+		String.raw`\u{1F600}, which Go's RE2 does not compile: write the character itself, U+1F600`,
+	],
+	[
+		String.raw`/^\uD83D\uDE00$/u`,
+		String.raw`\uD83D\uDE00, which Go's RE2 does not compile: write the character itself, U+1F600`,
+	],
+	/* the engine's own source, which comb publishes, writes a line terminator as its \u escape */
+	[
+		"/^a\u2028$/u",
+		String.raw`\u2028, a line terminator a regex literal holds only as an escape, which Go's RE2 does not compile: write \p{Zl}`,
+	],
+	[
+		"/^[\u2029]$/u",
+		String.raw`\u2029, a line terminator a regex literal holds only as an escape, which Go's RE2 does not compile: write \p{Zp}`,
+	],
+	[String.raw`/^\p{Script=Greek}$/u`, String.raw`\p{Script=Greek}, ${PROPERTY}`],
+	[String.raw`/^\p{sc=Greek}$/u`, String.raw`\p{sc=Greek}, ${PROPERTY}`],
+	[String.raw`/^\P{General_Category=Lu}$/u`, String.raw`\P{General_Category=Lu}, ${PROPERTY}`],
+	[String.raw`/^\p{Emoji}$/u`, String.raw`\p{Emoji}, ${PROPERTY}`],
+	[String.raw`/^[\p{ASCII}]$/u`, String.raw`\p{ASCII}, ${PROPERTY}`],
+	[String.raw`/^\p{Letter}$/u`, String.raw`\p{Letter}, ${PROPERTY}`],
+	[String.raw`/^\p{Cs}$/u`, String.raw`\p{Cs}, ${PROPERTY}`],
+	[String.raw`/^\cJ$/u`, String.raw`\cJ, a control escape, which Go's RE2 and Rust's regex do not compile: write \x0A`],
+	[
+		String.raw`/^[]$/u`,
+		"[], a class of no character, which Go's RE2 and Rust's regex do not compile: write the rule without it",
+	],
+	[
+		String.raw`/^a[^]$/u`,
+		String.raw`[^], a class of every character, which Go's RE2 and Rust's regex do not compile: write [\p{L}\P{L}]`,
+	],
+	[
+		String.raw`/^[a&&b]$/u`,
+		String.raw`&& in a class, which Rust's regex reads as a set operation: write & once, or as \x26`,
+	],
+	[
+		String.raw`/^[+--]$/u`,
+		String.raw`-- in a class, which Rust's regex reads as a set operation: write - once, or as \x2D`,
+	],
+	[
+		String.raw`/^[a~~b]$/u`,
+		String.raw`~~ in a class, which Rust's regex reads as a set operation: write ~ once, or as \x7E`,
+	],
+	[String.raw`/^[a[]$/u`, String.raw`[ in a class, which Rust's regex reads as a nested class: write \[`],
+	[
+		String.raw`/^a{1001}$/u`,
+		"{1001}, a count past 1000, which Go's RE2 does not compile: write the rule with a count of at most 1000",
+	],
+	[
+		String.raw`/^a{2,1001}$/u`,
+		"{2,1001}, a count past 1000, which Go's RE2 does not compile: write the rule with a count of at most 1000",
+	],
+]
+
+describe("patternLiteral: only the escapes and classes every engine reads alike (A3-2 of r23)", () => {
+	it.each(REFUSED)("refuses %s, naming the portable spelling", (pattern, held) => {
+		expect(() => emitted(pattern, "t.code")).toThrow(`t.code: pattern ${pattern} holds ${held}`)
+	})
+
+	it("takes a General_Category, \\xHH, \\t \\n \\r \\f \\v and an escaped syntax character", () => {
+		for (const pattern of [
+			String.raw`/^\p{Lu}+$/u`,
+			String.raw`/^\x41$/u`,
+			String.raw`/^\P{Nd}\p{LC}[\p{L}\P{L}]\p{Zl}\p{Zp}$/u`,
+			String.raw`/^[\t\n\r\f\v]\t\n\r\f\v$/u`,
+			String.raw`/^\^\$\\\.\*\+\?\(\)\[\]\{\}\|\/$/u`,
+			String.raw`/^[\-\[\]&~]a{1000}b{2,1000}c{3,}$/u`,
+		])
+			expect(patternLiteral(pattern, "x")).toBe(pattern)
 	})
 })
