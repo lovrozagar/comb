@@ -304,6 +304,20 @@ describe("a minted cursor is one comb reads (QL5 of r22b; sibling: what openCurs
 		})
 	})
 
+	it("refuses a computed sort before any field, as buildListQuery does, whatever the row holds", () => {
+		const unsupported = {
+			cause: "Cursor pagination needs every sort key to be a column; use page instead",
+			errorKey: "cursor_pagination_unsupported",
+			status: 400,
+		}
+		const byRelevance: SortField[] = [{ direction: "desc", field: "@relevance" }, ...BY_K]
+		for (const row of [{ id: "a" }, { "@relevance": 0.5, id: "a", k: 1 }, {}])
+			expect(
+				thrown(() => mintCursor(row, byRelevance, SEALED)),
+				JSON.stringify(row),
+			).toMatchObject(unsupported)
+	})
+
 	it("refuses a row without a sort field or without its id, naming each", () => {
 		expect(thrown(() => mintCursor({ id: "a" }, BY_K, SEALED))).toMatchObject({
 			cause: "the next cursor is minted from each row's k; select them, and the built query's extras",

@@ -191,16 +191,21 @@ describe("buildListQuery — sort and cursors", () => {
 	})
 
 	it("refuses a cursor under a computed sort, which keyset cannot express", () => {
-		const cursor = createCursor({ id: "o1" }, [{ direction: "desc", field: "@relevance" }], SEALED)
-		const parsed = {
-			...offsetPage,
-			cursor,
-			validated: true as const,
-			parsedSort: [{ direction: "desc" as const, field: "@relevance" }],
-		}
-		expect(() =>
-			buildListQuery({ ...SEALED, computedSorts: { "@relevance": customSort }, parsed, table: organization }),
-		).toThrow(expect.objectContaining({ errorKey: "cursor_pagination_unsupported" }))
+		const parsedSort = [{ direction: "desc" as const, field: "@relevance" }]
+		const built = (cursor: string) => () =>
+			buildListQuery({
+				...SEALED,
+				computedSorts: { "@relevance": customSort },
+				parsed: { ...offsetPage, cursor, parsedSort, validated: true as const },
+				table: organization,
+			})
+		const unsupported = expect.objectContaining({ errorKey: "cursor_pagination_unsupported" })
+		/* minting one is refused as building on one is (QL5 of r22b, comb-9d's ruling) */
+		expect(() => built(createCursor({ id: "o1" }, [{ direction: "desc", field: "@relevance" }], SEALED))()).toThrow(
+			unsupported,
+		)
+		/* a cursor minted under another order meets the same refusal at build */
+		expect(built(createCursor({ id: "o1" }, [], SEALED))).toThrow(unsupported)
 	})
 })
 

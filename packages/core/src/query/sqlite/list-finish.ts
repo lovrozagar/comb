@@ -6,7 +6,7 @@ import { and, Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import type { CursorOptions } from "../cursor.ts"
+import { type CursorOptions, NO_KEYSET_CAUSE } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { COMB_ID, type ListExtra, type ListPagination, type PaginationFacts, paginationOf } from "../pagination.ts"
 import type { ListDialect } from "../list-dialect.ts"
@@ -231,7 +231,7 @@ function finishCursor(list: Finish, cursor: string): Finished {
 	const { keyset, parsed, sort, table, tiebreak } = list
 	if (!keyset.keys || !tiebreak) {
 		throw new CombError({
-			cause: "Cursor pagination needs every sort key to be a column; use page instead",
+			cause: NO_KEYSET_CAUSE,
 			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
 			status: "bad_request",
 		})

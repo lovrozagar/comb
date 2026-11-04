@@ -120,6 +120,23 @@ function refuseRoundedId(record: Record<string, unknown>, idField: string): void
 	})
 }
 
+/** The cause of `cursor_pagination_unsupported` for an order no keyset can resume: a computed sort, or no tiebreak column */
+const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a column; use page instead"
+
+/**
+ * Refuse a mint under a computed sort (`@relevance`), which no keyset can resume whatever the row
+ * holds, as buildListQuery refuses a cursor under one; checked before any field, so the caller learns
+ * the order cannot page by cursor, not that the row lacks a value it could never carry
+ */
+function refuseComputedSort(parsedSort: readonly SortField[]): void {
+	if (!parsedSort.some(({ field }) => field.startsWith("@"))) return
+	throw new CombError({
+		cause: NO_KEYSET_CAUSE,
+		errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+		status: "bad_request",
+	})
+}
+
 /** What a value no cursor carries is, for the 500 that names it */
 function kindOf(value: unknown): string {
 	if (Array.isArray(value)) return "an array"
@@ -169,6 +186,7 @@ function mintCursor(
 	options: CursorOptions & { idField?: string | undefined },
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
+	refuseComputedSort(parsedSort)
 	refuseRoundedId(record, idField)
 	refuseUncarried(record, parsedSort, idField)
 	return encodeCursor(
@@ -220,6 +238,7 @@ export {
 	encodeCursor,
 	lossy,
 	mintCursor,
+	NO_KEYSET_CAUSE,
 	readCursor,
 	refuseRoundedId,
 	sortSignature,

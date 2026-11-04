@@ -760,6 +760,8 @@ declare const lossy: (value: unknown) => value is number;
  * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
  */
 declare function refuseRoundedId(record: Record<string, unknown>, idField: string): void;
+/** The cause of `cursor_pagination_unsupported` for an order no keyset can resume: a computed sort, or no tiebreak column */
+declare const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a column; use page instead";
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
@@ -781,7 +783,7 @@ declare function openCursor(cursor: string, options: CursorOptions): DecodedCurs
  * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
