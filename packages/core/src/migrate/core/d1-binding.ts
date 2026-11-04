@@ -71,9 +71,22 @@ function resolveBinding(read: ReadConfig, target: D1Target): string {
 	return d1.migrations_table ?? D1_MIGRATIONS_TABLE
 }
 
+/**
+ * `target`'s wrangler config as `read` reads it; one it fails on is named with the reason as its
+ * cause, as comb's other config loaders name theirs (D2-8 of the area D round-two review)
+ */
+function readNamed(read: ReadConfig, target: D1Target): WranglerConfig {
+	try {
+		return read({ config: target.wranglerConfig, env: target.wranglerEnv })
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		throw new Error(`${target.wranglerConfig} failed to load: ${message}`, { cause: error })
+	}
+}
+
 /** The binding `target` names in its wrangler config, and where comb says it read it */
 function bindingOf(read: ReadConfig, target: D1Target): { d1: WranglerD1; where: string } {
-	const config = read({ config: target.wranglerConfig, env: target.wranglerEnv })
+	const config = readNamed(read, target)
 	const where = `${target.wranglerConfig}${target.wranglerEnv === undefined ? "" : ` (env ${target.wranglerEnv})`}`
 	const d1 = config.d1_databases.find((db) => db.database_name === target.name || db.binding === target.name)
 	if (d1 === undefined) throw new Error(`${where} has no D1 database named or bound as ${target.name}`)
