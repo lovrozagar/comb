@@ -27,6 +27,11 @@ type ManifestColumn = {
 	name: string
 	/** The `c.*` helper that declared it — text, integer, enum, json, ref, … */
 	kind: string
+	/**
+	 * The column's SQL type, its modifier included, as drizzle writes it (`timestamp(3) with time
+	 * zone`, `interval day`, `numeric(3, -2)`): with `kind`, the check a plain Postgres type's rule is (AA8 of r22)
+	 */
+	sqlType: string
 	notNull: boolean
 	primaryKey: boolean
 	/** Declared values for an enum column, or null when not an enum or the list is a const reference */
@@ -35,13 +40,13 @@ type ManifestColumn = {
 	 * The bounds a written value is held to, as the write DTO enforces them (C2 of r20): a text's
 	 * length, its kind's and the declared together, a number's value, clamped to what the column
 	 * holds; an array's are each element's. Null where none, and on a plain Postgres column whose
-	 * type has a rule of its own (a uuid, an inet, a real), which `kind` names
+	 * type has a rule of its own (a uuid, an inet, a real), which `kind` and `sqlType` name
 	 */
 	max: number | null
 	/** The most bytes a written JSON value takes serialized, null for none and for any other column */
 	maxBytes: number | null
 	min: number | null
-	/** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind`'s */
+	/** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind` and `sqlType`'s */
 	patterns: string[]
 	/** A text column's format, null for any other (C8 of r19) */
 	textKind: "email" | "imageUri" | "name" | "password" | "url" | null
@@ -129,6 +134,7 @@ function toColumn(field: FieldMeta, dialect: GeneratorContext["dialect"]): Manif
 		textKind: textKindOf(constraints),
 		transform: transformsOf(constraints, true),
 		private: constraints.private,
+		sqlType: field.sqlType,
 		states: field.states
 			? {
 					initial: field.states.initial,

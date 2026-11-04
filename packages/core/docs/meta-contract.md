@@ -642,7 +642,7 @@ every entity is, and its `column` and `refColumn` by their names among each enti
 reader joins through the manifest alone. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
-declared it, the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
+declared it, its `sqlType`, the column's SQL type with its modifier as drizzle writes it (`timestamp(3) with time zone`, `interval day`, `numeric(3, -2)`), the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
 `"password"`, `"name"`, or null), `transform`, the list the DTO publishes as `x-comb-transform`
 (§2.1), and `generated`, `immutable` and `private` flags. `min`, `max`, `patterns` and `maxBytes`
 are what the create DTO enforces, not what the column declares, from `writeRules`, which reads
@@ -650,7 +650,7 @@ the rules the DTO's builders read: a text's declared bounds with comb's own (a r
 format's floor, an id's 1 to 48), an integer's clamped to what the column
 holds on the dialect, a timestamp's to a JS number's exact range, and none on a boolean, an enum
 or a timestamp comb fills. A plain Postgres column whose type has a write rule of its own (a uuid, a date, an inet, a real, a numeric with a precision) states none either: its
-rule is its type's, which `kind` names, as an inet's union of formats or a numeric's exclusive
+rule is its type's, which `kind` and `sqlType` name together, as a precision, a time zone, an interval's fields and a numeric's scale each change it, and as an inet's union of formats or a numeric's exclusive
 bounds fit no `min`, `max` or pattern; a reader applies the type's own check. `patterns` lists every regex the value must match, the declared one and
 the kind's own (an id's, a url's https, a name's, an image URI's), as regex literals in the order
 the chain checks them; an email's own check is its format, which `textKind` names. A password

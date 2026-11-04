@@ -161,3 +161,38 @@ describe("a bound past a JS number's exact range is clamped to it (CD8 of r22b; 
 		}
 	})
 })
+
+/*
+ * AA8 of r22: a plain Postgres column's rule is its type's, and CD5 and CD6 made that rule read the
+ * modifier, so a reader tells each type's check by `kind` and `sqlType` together: drizzle's own SQL
+ * type, modifier and all, which no two columns of different rules share
+ */
+describe("the manifest names a plain Postgres column's SQL type (AA8 of r22)", () => {
+	const TYPES: Record<string, [source: string, sqlType: string]> = {
+		ivDay: ['interval("iv_day", { fields: "day" })', "interval day"],
+		iv: ['interval("iv")', "interval"],
+		n52: ['numeric("n52", { precision: 5, scale: 2 })', "numeric(5, 2)"],
+		nNeg: ['numeric("n_neg", { precision: 3, scale: -2 })', "numeric(3, -2)"],
+		t: ['time("t")', "time"],
+		ts: ['timestamp("ts", { mode: "string" })', "timestamp"],
+		tstz3: ['timestamp("tstz3", { mode: "string", withTimezone: true, precision: 3 })', "timestamp(3) with time zone"],
+		ttz0: ['time("ttz0", { withTimezone: true, precision: 0 })', "time(0) with time zone"],
+	}
+
+	it("states each column's sqlType, and no two columns of different DTO rules share kind and sqlType", () => {
+		const columns = Object.fromEntries(Object.entries(TYPES).map(([name, [source]]) => [name, source]))
+		const table = tableOf("typed", columns, { dialect: "postgres" })
+		const [entity] = buildManifest([table], "test", "postgres").entities
+		const stated = Object.fromEntries((entity?.columns ?? []).map((column) => [column.name, column.sqlType]))
+		expect(stated).toEqual(Object.fromEntries(Object.entries(TYPES).map(([name, [, sqlType]]) => [name, sqlType])))
+		const imports: ImportsMeta = { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
+		const ruleOf = new Map<string, string>()
+		for (const column of entity?.columns ?? []) {
+			const field = table.fields.find((each) => each.name === column.name) as FieldMeta
+			const rule = generateFieldSchema(field, "create", { dialect: "postgres", imports }) as string
+			const named = `${column.kind} ${column.sqlType}`
+			expect(ruleOf.get(named) ?? rule, `${column.name}: ${named}`).toBe(rule)
+			ruleOf.set(named, rule)
+		}
+	})
+})
