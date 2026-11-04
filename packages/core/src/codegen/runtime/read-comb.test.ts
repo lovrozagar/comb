@@ -75,7 +75,10 @@ describe("statesOf", () => {
 })
 
 /* CD2, CD3 of r22b: a c.json schema is the stored document */
-describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT NULL one that takes null", () => {
+/* a NOT NULL column no default fills */
+const NOT_NULL = { filled: false, notNull: true }
+
+describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT NULL one that takes null or undefined", () => {
 	const STORED = "t.c: a c.json schema is the stored document"
 	type Tree = { children: Tree[]; name: string }
 	const tree: z.ZodType<Tree> = z.lazy(() => z.object({ children: z.array(tree), name: z.string().trim() }))
@@ -91,7 +94,7 @@ describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT 
 		["a transform in a union's option", z.union([z.number(), z.string().transform(Number)])],
 		["a transform in a recursive lazy", changing],
 	])("refuses %s, naming the column", (_, schema) => {
-		expect(() => refuseJsonDocument(schema, "t.c", false)).toThrow(STORED)
+		expect(() => refuseJsonDocument(schema, "t.c", { filled: false, notNull: false })).toThrow(STORED)
 	})
 
 	it.each([
@@ -101,16 +104,26 @@ describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT 
 		["a refine", z.string().refine((text) => text !== "x")],
 		["a recursive lazy of overwrites", tree],
 	])("keeps %s, whose output parses again", (_, schema) => {
-		expect(() => refuseJsonDocument(schema, "t.c", true)).not.toThrow()
+		expect(() => refuseJsonDocument(schema, "t.c", NOT_NULL)).not.toThrow()
 	})
 
 	it("refuses a schema that takes null on a NOT NULL column, and keeps it on a nullable one (sibling)", () => {
 		const nullable = z.object({ a: z.string() }).nullable()
-		expect(() => refuseJsonDocument(nullable, "t.c", true)).toThrow(
+		expect(() => refuseJsonDocument(nullable, "t.c", NOT_NULL)).toThrow(
 			"t.c: its schema takes null and the column is NOT NULL: make the column nullable, or pass the schema's non-null form",
 		)
-		expect(() => refuseJsonDocument(nullable, "t.c", false)).not.toThrow()
-		expect(() => refuseJsonDocument(z.unknown(), "t.c", true)).toThrow("takes null")
+		expect(() => refuseJsonDocument(nullable, "t.c", { filled: false, notNull: false })).not.toThrow()
+		expect(() => refuseJsonDocument(z.unknown(), "t.c", NOT_NULL)).toThrow("takes null")
+	})
+
+	/* AA4 of area A's review: the sibling through .optional(), unless a default fills the column */
+	it("refuses a schema that takes undefined on a NOT NULL column nothing fills, and keeps it where a default does", () => {
+		const optional = z.object({ a: z.string() }).optional()
+		expect(() => refuseJsonDocument(optional, "t.c", NOT_NULL)).toThrow(
+			"t.c: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default",
+		)
+		expect(() => refuseJsonDocument(optional, "t.c", { filled: true, notNull: true })).not.toThrow()
+		expect(() => refuseJsonDocument(optional, "t.c", { filled: false, notNull: false })).not.toThrow()
 	})
 })
 

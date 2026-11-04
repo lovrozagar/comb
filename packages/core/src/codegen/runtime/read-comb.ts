@@ -115,17 +115,29 @@ function changesValue(schema: unknown): boolean {
  * A c.json column's schema is the stored document: the write DTOs store its output and the read DTO
  * parses the stored row with it (CD2 of r22b), so one whose output its input refuses is an error
  * naming the column; and a NOT NULL column of one value refuses a schema that takes null, whose
- * write DTO would take a body the insert fails (CD3, the sibling of r19 C5). `notNull` is false for
- * a Postgres array of documents, which holds null elements whatever the column's own NOT NULL
+ * write DTO would take a body the insert fails (CD3, the sibling of r19 C5), as does one that takes
+ * undefined where no default fills the column, a body that leaves the field out (AA4 of area A's
+ * review). `notNull` is false for a Postgres array of documents, which holds null elements whatever
+ * the column's own NOT NULL; `filled` says a default fills the column
  */
-function refuseJsonDocument(schema: unknown, at: string, notNull: boolean): void {
+function refuseJsonDocument(
+	schema: unknown,
+	at: string,
+	{ filled, notNull }: { filled: boolean; notNull: boolean },
+): void {
 	if (changesValue(schema))
 		throw new Error(
 			`${at}: a c.json schema is the stored document; its transform's output is what gets stored, and the read DTO could not parse it. Move the transform to the request body's schema.`,
 		)
-	if (notNull && (schema as { safeParse(value: unknown): { success: boolean } }).safeParse(null).success)
+	const takes = (value: unknown) =>
+		(schema as { safeParse(value: unknown): { success: boolean } }).safeParse(value).success
+	if (notNull && takes(null))
 		throw new Error(
 			`${at}: its schema takes null and the column is NOT NULL: make the column nullable, or pass the schema's non-null form`,
+		)
+	if (notNull && !filled && takes(undefined))
+		throw new Error(
+			`${at}: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default`,
 		)
 }
 

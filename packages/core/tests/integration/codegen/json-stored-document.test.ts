@@ -4,7 +4,8 @@
  * own input refuses (a transform, a pipe, a preprocess) made every read of a row the create DTO
  * stored fail; codegen refuses it, naming the column, and keeps the rewrites whose output parses
  * again. A NOT NULL column whose schema takes null gave a write DTO that took a body the insert
- * fails, the c.json sibling of r19 C5's plain json.
+ * fails, the c.json sibling of r19 C5's plain json; one whose schema takes undefined, with no default
+ * for drizzle to write, the same through .optional() (AA4 of area A's review).
  */
 import path from "node:path"
 import { drizzle as libsqlDrizzle } from "drizzle-orm/libsql"
@@ -125,5 +126,25 @@ describe("a c.json schema is the stored document (CD2, CD3; sibling: r19 C5's NO
 			const create = dtos["row"]?.["rowDtoCreateSchema"] as z.ZodType
 			expect(create.safeParse({ doc: null, id: "r1" }).success).toBe(true)
 		})
+	})
+})
+
+/* AA4 of area A's review: CD3's class through .optional(), whose create DTO took {} and the insert failed */
+describe.each(DIALECTS)("a NOT NULL c.json whose schema takes undefined (AA4) on %s", (dialect) => {
+	it("refuses a NOT NULL column with no default whose schema takes undefined, naming the column", async () => {
+		await expect(
+			generatedDtos(`aa4-${dialect}`, table(dialect, "z.object({ a: z.string() }).optional()"), { dialect }),
+		).rejects.toThrow(
+			"row.doc: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default",
+		)
+	})
+
+	it("takes it where the column has a default, which drizzle writes for a body that leaves it out (sibling)", async () => {
+		const dtos = await generatedDtos(
+			`aa4-default-${dialect}`,
+			table(dialect, "z.object({ a: z.string() }).optional()", 'c.json("doc", Doc).notNull().default({ a: "x" })'),
+			{ dialect },
+		)
+		expect(dtos["row"]?.["rowDtoCreateSchema"]).toBeDefined()
 	})
 })

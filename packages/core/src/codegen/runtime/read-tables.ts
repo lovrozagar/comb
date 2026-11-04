@@ -4,12 +4,12 @@
  * Objects a generated file must import, a c.json schema or a c.enum values array, are located by
  * identity among the exports of the project modules the tables module loads.
  */
-import { Column, getTableColumns, getTableName, is, type SQL, type Table } from "drizzle-orm"
+import { Column, getTableColumns, is, type SQL, type Table } from "drizzle-orm"
 import { ExtraConfigColumn, getTableConfig as pgConfig, IndexedColumn, PgDialect, PgTable } from "drizzle-orm/pg-core"
 import { getTableConfig as sqliteConfig, SQLiteDialect, SQLiteTable } from "drizzle-orm/sqlite-core"
-import { pgObjectName } from "../../identifier.ts"
 import { byCodeUnit } from "../utils/order.ts"
 import { combColumnMeta } from "../../meta/column.ts"
+import { dimensionsOf, filledByDefault, type ReadColumn, unnamedUnique } from "./read-column.ts"
 import { constraintsOf, refuseJsonDocument, statesOf, STRING_LIST } from "./read-comb.ts"
 import type {
 	ModuleExport,
@@ -49,7 +49,7 @@ type Context = {
 	unloaded: readonly string[]
 }
 
-function combOf(column: Column, at: string, context: Context): SnapshotComb | null {
+function combOf(column: ReadColumn, at: string, context: Context): SnapshotComb | null {
 	const meta = combColumnMeta(column)
 	if (meta === undefined) return null
 	const located = (value: unknown) =>
@@ -62,56 +62,19 @@ function combOf(column: Column, at: string, context: Context): SnapshotComb | nu
 			`${at}: no module of the project exports the schema its c.json is given${skipped}; export it, so the generated DTOs can import it`,
 		)
 	}
-	if (meta.kind === "json") refuseJsonDocument(meta.schema, at, column.notNull && !(column as ReadColumn).dimensions)
+	if (meta.kind === "json")
+		refuseJsonDocument(meta.schema, at, {
+			filled: filledByDefault(column),
+			notNull: column.notNull && !column.dimensions,
+		})
 	return {
 		constraints: constraintsOf(meta.constraints, at),
 		kind: meta.kind,
 		prefix: meta.prefix ?? null,
 		schema,
-		states: statesOf(meta.states, at, column as ReadColumn),
+		states: statesOf(meta.states, at, column),
 		values: meta.values === undefined ? null : [...meta.values],
 	}
-}
-
-type ReadColumn = Column & {
-	autoIncrement?: boolean | undefined
-	defaultFn?: unknown
-	dimensions?: number | null | undefined
-	generated?: unknown
-	generatedIdentity?: unknown
-	isUnique?: boolean | undefined
-	length?: number | undefined
-	onUpdateFn?: unknown
-	table: Table
-	uniqueName?: string | undefined
-}
-
-/**
- * The name an unnamed `.unique()` has in the database: drizzle-kit writes it named on SQLite, and as
- * a bare UNIQUE on Postgres, which Postgres names `<table>_<column>_key` (F31)
- */
-const unnamedUnique = (column: ReadColumn): string =>
-	is(column.table, PgTable)
-		? pgObjectName(getTableName(column.table), column.name, "key")
-		: `${getTableName(column.table)}_${column.name}_unique`
-
-/**
- * Whether a write that leaves the column out still fills it: a default, a default or update
- * function, an identity, or a Postgres serial. Not drizzle's own hasDefault, which an SQLite
- * integer key has for its rowid, a value the engine fills only when none is given
- */
-const filledByDefault = (column: ReadColumn) =>
-	column.default !== undefined ||
-	column.defaultFn !== undefined ||
-	column.onUpdateFn !== undefined ||
-	column.generatedIdentity !== undefined ||
-	/^Pg(?:Big|Small)?Serial/.test(column.columnType)
-
-/** A Postgres array's dimensions, which drizzle reads from `.array("[][]")`; an error for one it could not read */
-function dimensionsOf(column: ReadColumn, at: string): number {
-	const dimensions = column.dimensions ?? 0
-	if (Number.isInteger(dimensions) && dimensions >= 0) return dimensions
-	throw new Error(`${at}: drizzle could not read its array dimensions; write .array() or .array("[][]")`)
 }
 
 function columnOf([key, column]: [string, ReadColumn], at: string, context: Context): SnapshotColumn {
