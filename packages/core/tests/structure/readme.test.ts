@@ -243,6 +243,20 @@ describe("README getHandle upgrade item", () => {
 	})
 })
 
+/* how item 2 names each provider */
+const PROVIDER_NAMES: Readonly<Record<string, Provider>> = {
+	D1: "d1",
+	libsql: "libsql",
+	Postgres: "postgres",
+	Turso: "turso",
+}
+
+/** Whether `command` on `provider` loads a peer from the project: any it needs but Atlas, an optional one, and drizzle-kit, which comb spawns */
+const loads = (provider: Provider, command: Command): boolean =>
+	needsOf(command, provider, false).some(
+		(need) => need.peer !== "atlas" && need.peer !== "drizzle-kit" && need.optional !== true,
+	)
+
 /* D4-6 of the area D round-four review: item 2 promises what a Bun single-file executable refuses */
 describe("README peer install upgrade item", () => {
 	const item =
@@ -255,6 +269,21 @@ describe("README peer install upgrade item", () => {
 		expect(refused).toContain("(`status`, `check`, `apply` and `baseline`)")
 		expect(refused).toMatch(/cannot read the modules the executable embeds/)
 		expect(refused).toMatch(/run them with bun or node/)
+	})
+
+	/* D5-2 follow-up: the commands item 2 says are refused are those whose peer table row loads a peer, drizzle-kit
+	   alone being one comb only spawns (wrangler's module comb loads, through importBin) */
+	it("names, per provider, exactly the commands its peer table row loads no peer for", () => {
+		const commands = [...new Set(Object.values(PEERS).flatMap((row) => Object.keys(row)))].sort() as Command[]
+		const expected = Object.fromEntries(
+			(Object.keys(PEERS) as Provider[])
+				.filter((provider) => commands.some((command) => loads(provider, command)))
+				.map((provider) => [provider, commands.filter((command) => !loads(provider, command))]),
+		)
+		const said: Record<string, string[]> = {}
+		for (const [, list, but] of (refused ?? "").matchAll(/every ((?:[\w ,]+?)) command but `migrate (\w+)`/g))
+			for (const name of (list as string).split(/, | and /)) said[PROVIDER_NAMES[name] ?? name] = [but as string]
+		expect(said).toEqual(expected)
 	})
 
 	/* D5-2 of the area D round-five review: libsql, Turso and Postgres load their peers in process too */
