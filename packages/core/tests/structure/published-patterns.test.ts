@@ -14,6 +14,24 @@ import { cleanGeneratedDtos, generatedDtos } from "../integration/support/dtos.t
 
 afterAll(() => cleanGeneratedDtos())
 
+/* the create DTO's fields that publish a pattern, a precision's fraction rule among them (A2-10 of r22) */
+const PATTERNED = [
+	"parentId",
+	"letters",
+	"mail",
+	"mac",
+	"mac8",
+	"span",
+	"days",
+	"clock",
+	"money",
+	"big",
+	"wall3",
+	"local3",
+	"at0",
+	"span3",
+]
+
 /* the declared patterns: a code point but a line break, a class, a property escape with and without u
    (a declared . is refused, A2-7 of r22) */
 const DECLARED = `
@@ -48,6 +66,11 @@ export const row = pgTable("row", {
 	day: date("day"),
 	ip: inet("ip"),
 	net: cidr("net"),
+	/* A2-10 of r22: each fraction rule a precision writes, so the lanes read its digit class */
+	wall3: time("wall3", { precision: 3 }),
+	local3: timestamp("local3", { mode: "string", precision: 3 }),
+	at0: timestamp("at0", { mode: "string", withTimezone: true, precision: 0 }),
+	span3: interval("span3", { precision: 3 }),
 })`
 
 const SQLITE = `export const parent = sqliteTable("parent", { id: c.id("par") })
@@ -179,6 +202,16 @@ const POOL = [
 	"a😀@example.com",
 	"10:00:00+02:00",
 	"10:00:00.123456+02:00",
+	/* A2-10: fractions at and past a precision of 3 and of 0, and a non-ASCII digit in one */
+	"10:00:00.123",
+	"10:00:00.1234",
+	"10:00:00.12\u0663",
+	"2024-01-01T10:00:00.123",
+	"2024-01-01T10:00:00.1234",
+	"2024-01-01T10:00:00Z",
+	"2024-01-01T10:00:00.5Z",
+	"PT1.123S",
+	"PT1.1234S",
 	"10:00:00",
 	"2024-01-01T10:00:00+02:00",
 	"2024-01-01T10:00:00",
@@ -307,8 +340,6 @@ describe("the patterns comb publishes (CS1, CS2, CS3; siblings: the id, the MAC,
 		const [create] = await lanes()
 		const fields = Object.entries(published((create as Lane).schema)["properties"] as Record<string, Node>)
 		const patterned = fields.filter(([, field]) => patternsOf(field).length > 0).map(([key]) => key)
-		expect(patterned).toEqual(
-			expect.arrayContaining(["parentId", "letters", "mail", "mac", "mac8", "span", "days", "clock", "money", "big"]),
-		)
+		expect(patterned).toEqual(expect.arrayContaining(PATTERNED))
 	})
 })
