@@ -50,6 +50,11 @@ type ListQueryConfig<
 	search?: readonly string[] | undefined
 	pagination?: PaginationConfig | undefined
 	sort: TSortFields
+	/**
+	 * The column the list breaks ties on, published as `stableTiebreak` (QL10 of r22b). Omitted:
+	 * `id`, as buildListQuery breaks ties; a derived list names its `idColumn`'s.
+	 */
+	tiebreak?: string | undefined
 }
 
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {

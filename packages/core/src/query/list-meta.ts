@@ -10,7 +10,7 @@ import { MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-li
 import type { FieldsConfig, ListQueryConfig, ListQueryLimits } from "./schema-types.ts"
 import type { FieldType } from "./types.ts"
 
-type PublishedConfig = Pick<ListQueryConfig, "fields" | "filter" | "pagination" | "search" | "sort">
+type PublishedConfig = Pick<ListQueryConfig, "fields" | "filter" | "pagination" | "search" | "sort" | "tiebreak">
 
 /**
  * The order applied when a request names none. Mirrors the transform:
@@ -31,6 +31,13 @@ function buildDefaultOrder(sortConfig: readonly string[]): string {
  */
 function selectableFrom(fieldsConfig: FieldsConfig | undefined): string[] {
 	return fieldsConfig ? [...fieldsConfig.scalars] : []
+}
+
+/** The tiebreak the list publishes: the config's, or `id` without one; an empty one names no column */
+function tiebreakOf(tiebreak: string | undefined): string {
+	if (tiebreak === undefined) return CURSOR_TIEBREAK_COLUMN
+	if (tiebreak !== "") return tiebreak
+	throw new TypeError(`createListQuerySchema: tiebreak must name the column the list breaks ties on; got ""`)
 }
 
 /** The `x-comb` stamp of a list query schema built from `config` under `limits` */
@@ -64,7 +71,7 @@ function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits): CombM
 		searchable: config.search ? [...config.search] : [],
 		selectable: selectableFrom(config.fields),
 		sortable: [...config.sort],
-		stableTiebreak: CURSOR_TIEBREAK_COLUMN,
+		stableTiebreak: tiebreakOf(config.tiebreak),
 	})
 }
 

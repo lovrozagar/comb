@@ -473,7 +473,8 @@ silently duplicated and went missing across pages.
 
 `buildListQuery` now throws a `CombError` when it is asked to cursor-page a table with no `id`
 property, so the failure is loud at the one place it can be exact. `stableTiebreak` is published as
-`"id"`, matching what the builder does.
+the list schema's `tiebreak`, `"id"` by default, matching what `buildListQuery` does; a derived
+list breaks ties on its `idColumn`, so its schema names that column (QL10 of r22b).
 
 `validateTables()` **warns** when a table's primary-key property is not named `id`; it does not
 fail. Join, config and lookup tables are never listed, and for those the property name is a free

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { COMB_META_KEY } from "../meta.ts"
 import { buildDefaultOrder, listQueryStamp, selectableFrom } from "./list-meta.ts"
+import { createListQuerySchema } from "./list-schema.ts"
 import { LIST_QUERY_LIMITS } from "./schema-limits.ts"
 
 describe("buildDefaultOrder", () => {
@@ -53,5 +54,26 @@ describe("listQueryStamp: the request byte caps", () => {
 	it("stamps the filter's and the search's encoded byte caps", () => {
 		const stamp = listQueryStamp({ search: ["title"], sort: ["id"] }, LIST_QUERY_LIMITS)
 		expect(stamp[COMB_META_KEY]).toMatchObject({ maxFilterBytes: 4608, maxQueryBytes: 14_336, maxSearchBytes: 600 })
+	})
+})
+
+/* QL10 of r22b: the stamp published "id" whatever column the list breaks ties on, such as a derived list's `_id` */
+/** The stableTiebreak a list schema built with `config` publishes */
+function tiebreakOf(config: { tiebreak?: string | undefined }): unknown {
+	const meta: Record<string, unknown> = createListQuerySchema({ ...config, sort: ["created_at"] }).meta() ?? {}
+	return (meta[COMB_META_KEY] as { stableTiebreak?: unknown } | undefined)?.stableTiebreak
+}
+
+describe("the published stableTiebreak is the list's own (QL10 of r22b; sibling: the default)", () => {
+	it("publishes the tiebreak the config names, and id without one", () => {
+		expect(tiebreakOf({ tiebreak: "_id" })).toBe("_id")
+		expect(tiebreakOf({})).toBe("id")
+		expect(tiebreakOf({ tiebreak: undefined })).toBe("id")
+	})
+
+	it("refuses an empty tiebreak at build, which names no column", () => {
+		expect(() => tiebreakOf({ tiebreak: "" })).toThrow(
+			new TypeError('createListQuerySchema: tiebreak must name the column the list breaks ties on; got ""'),
+		)
 	})
 })
