@@ -162,7 +162,7 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
 	if (dialect === "sqlite")
 		return asRead && inSeconds(column)
-			? sql`case when typeof(${column}) = 'real' then printf('%!.17g', ${column}) else '' end`
+			? sql`case when typeof(${column}) in ('integer', 'real') then printf('%!.17g', ${column}) else '' end`
 			: null
 	if (column instanceof DateKey) return null
 	if (is(column, Column) && !carriesOpaque(column))
@@ -192,11 +192,10 @@ function keyTextsSQL(
 
 /**
  * The extra that carries each sort key's stored time, comma-joined, empty for a key the list reads
- * from its anchor row or that is no time; none where no key is one. A merged list carries none: it
- * compares its rows' keys across shards, a seconds key's Date and its carried seconds in one order
+ * from its anchor row or that is no time; none where no key is one. A merged list carries it too, and
+ * compares a seconds key by the seconds each row stored, which its Date rounds (AB3 of area B)
  */
 function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
-	if (list.merged !== undefined) return {}
 	const asRead = (column: SQLWrapper) => boundAsRead(list, column)
 	if (keys.every(({ column }) => storedTextOf(list.dialect, column, asRead(column)) === null)) return {}
 	return { _combKeyTexts: keyTextsSQL(keys, list.dialect, asRead).as("_combKeyTexts") }

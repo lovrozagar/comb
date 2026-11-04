@@ -48,9 +48,10 @@ function cursorWhere({ cursor: given, dialect, keys, merged, options, sort, tabl
 	}
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
-	/* a key no anchor row supplies binds as read: a list with no table, or a joined table's key (QL1 of r22b) */
+	/* a key no anchor row supplies binds as read: a list with no table, a joined table's key (QL1 of r22b), and
+	   every key of a merged list, whose row is on one shard alone and which carries a seconds key's seconds (AB3) */
 	const asRead = (i: number) =>
-		i < columns.length && (table === undefined || !readsBack(columns[i] as SQLWrapper, table))
+		i < columns.length && (merged === true || table === undefined || !readsBack(columns[i] as SQLWrapper, table))
 	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], { asRead, table })
 	const id = bindableIn(dialect, tiebreak.column, cursor.id) as CursorId
 	const carried = cursor.values.map((value, i) => boundCarried(columns[i], value))

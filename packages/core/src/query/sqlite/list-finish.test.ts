@@ -90,18 +90,17 @@ function extrasOf(
 }
 
 describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)", () => {
-	it("carries a SQLite seconds key's REAL seconds on a list that binds it as read, and none on a merged list or for another key", () => {
+	/* AB3 of area B: a merged list carries them too, an INTEGER's as well, so its merge compares every row in seconds */
+	it("carries a SQLite seconds key's stored seconds on a list that binds it as read, merged or not, and none for another key", () => {
 		const anchorless = extrasOf("sqlite", [
 			{ column: ev.at, direction: "asc" },
 			{ column: ev.n, direction: "asc" },
 		])
-		expect(anchorless["_combKeyTexts"]).toBe(
-			`case when typeof("ev"."at") = 'real' then printf('%!.17g', "ev"."at") else '' end || ',' || ''`,
-		)
+		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') then printf('%!.17g', "ev"."at") else '' end`
+		expect(anchorless["_combKeyTexts"]).toBe(`${SECONDS} || ',' || ''`)
 		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }])["_combKeyTexts"]).toBeUndefined()
-		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
-			"_combKeyTexts",
-		)
+		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })["_combKeyTexts"]).toBe(SECONDS)
+		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }], { merged: {} })).not.toHaveProperty("_combKeyTexts")
 	})
 
 	it("selects classes and times on an anchored list only for a key its anchor row doesn't supply", () => {
