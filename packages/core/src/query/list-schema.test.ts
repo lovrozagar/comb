@@ -268,7 +268,7 @@ describe("createListQuerySchema → JSON Schema descriptions", () => {
 		expect(Object.keys(props)).toContain("filterAst")
 	})
 
-	it("emits description + examples for every list query param under io:input", () => {
+	it("emits a description for every list query param and examples for each but cursor, under io:input", () => {
 		const schema = createListQuerySchema({
 			fields: { scalars: ["id", "name"] },
 			filter: { name: "string" },
@@ -286,11 +286,9 @@ describe("createListQuerySchema → JSON Schema descriptions", () => {
 				(entry?.description as string | undefined)?.length ?? 0,
 				`props.${key}.description must be non-empty`,
 			).toBeGreaterThan(10)
-			expect(Array.isArray(entry?.examples), `props.${key}.examples must be array`).toBe(true)
-			expect(
-				(entry?.examples as unknown[] | undefined)?.length ?? 0,
-				`props.${key}.examples must be non-empty`,
-			).toBeGreaterThan(0)
+			/* a cursor opens only under the app's secret and the list's scope, so it states no example (CS7 of r22b) */
+			const examples = entry?.examples
+			expect(Array.isArray(examples) && examples.length > 0, `props.${key}.examples`).toBe(key !== "cursor")
 		}
 	})
 

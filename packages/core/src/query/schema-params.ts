@@ -4,26 +4,22 @@ import { MAX_CURSOR_LENGTH } from "./cursor.ts"
 
 import {
 	CURSOR_DESCRIPTION,
-	CURSOR_EXAMPLES,
 	LANG_DESCRIPTION,
 	LANG_EXAMPLES,
-	LIMIT_DESCRIPTION,
-	LIMIT_EXAMPLES,
+	limitParamMeta,
 	PAGE_DESCRIPTION,
 	PAGE_EXAMPLES,
-	SELECT_DESCRIPTION,
-	SELECT_EXAMPLES,
+	selectParamMeta,
 } from "./descriptions.ts"
 import { FILTER_OPERATORS } from "./filter-parse.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
-import type { PaginationConfig } from "./schema-types.ts"
+import type { FieldsConfig, PaginationConfig } from "./schema-types.ts"
 import { invalidPage } from "./trusted.ts"
 import type { FieldSelection, FilterAST, FilterGroup, ParsedFields } from "./types.ts"
 
-const selectQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().max(500).optional().meta({
-	description: SELECT_DESCRIPTION,
-	examples: SELECT_EXAMPLES,
-})
+/** The `select` param for an endpoint of these fields, its text and examples theirs */
+const selectQueryFieldFor = (fields: FieldsConfig): z.ZodOptional<z.ZodString> =>
+	z.string().max(500).optional().meta(selectParamMeta(fields))
 
 const langQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().min(2).max(10).optional().meta({
 	description: LANG_DESCRIPTION,
@@ -35,7 +31,6 @@ const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString> } = {
 	   invalid_cursor, so a client restarts on one key (C5); the bound is published all the same */
 	cursor: /* @__PURE__ */ z.string().optional().meta({
 		description: CURSOR_DESCRIPTION,
-		examples: CURSOR_EXAMPLES,
 		maxLength: MAX_CURSOR_LENGTH,
 	}),
 }
@@ -94,11 +89,12 @@ function pageFrom(raw: unknown): unknown {
  * there, and names the default the outer `.default()` applies
  */
 function limitSchema(defaultLimit: number, maxLimit: number): z.ZodDefault<CountParam> {
-	const limit = z.number().int().min(1).max(maxLimit).meta({
-		default: defaultLimit,
-		description: LIMIT_DESCRIPTION,
-		examples: LIMIT_EXAMPLES,
-	})
+	const limit = z
+		.number()
+		.int()
+		.min(1)
+		.max(maxLimit)
+		.meta({ default: defaultLimit, ...limitParamMeta(defaultLimit, maxLimit) })
 	return z.preprocess(fromDigits, limit).default(defaultLimit)
 }
 
@@ -222,6 +218,6 @@ export {
 	pickExtended,
 	RESERVED_LIST_KEYS,
 	RESERVED_RETRIEVE_KEYS,
-	selectQueryField,
+	selectQueryFieldFor,
 	sortDirectionEnum,
 }

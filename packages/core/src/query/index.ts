@@ -69,18 +69,16 @@ export {
 /* OpenAPI description / example constants for reuse by downstream schemas */
 export {
 	CURSOR_DESCRIPTION,
-	CURSOR_EXAMPLES,
 	filterParamMeta,
 	LANG_DESCRIPTION,
 	LANG_EXAMPLES,
-	LIMIT_DESCRIPTION,
-	LIMIT_EXAMPLES,
+	limitParamMeta,
 	orderParamMeta,
 	PAGE_DESCRIPTION,
 	PAGE_EXAMPLES,
 	searchParamMeta,
 	SELECT_DESCRIPTION,
-	SELECT_EXAMPLES,
+	selectParamMeta,
 } from "./descriptions.ts"
 
 /* Translation resolver */

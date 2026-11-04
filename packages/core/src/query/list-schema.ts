@@ -21,7 +21,7 @@ import {
 	parsedFieldsSchema,
 	pickExtended,
 	RESERVED_LIST_KEYS,
-	selectQueryField,
+	selectQueryFieldFor,
 	sortDirectionEnum,
 } from "./schema-params.ts"
 import { pageTooDeep } from "./trusted.ts"
@@ -93,9 +93,12 @@ function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits): Op
 		...(config.lang ? { lang: langQueryField } : {}),
 		...(config.fields
 			? {
-					select: selectQueryField.refine((value) => value === undefined || withinBytes(REQUEST_BYTES.select)(value), {
-						message: encodedMessage(REQUEST_BYTES.select),
-					}),
+					select: selectQueryFieldFor(config.fields).refine(
+						(value) => value === undefined || withinBytes(REQUEST_BYTES.select)(value),
+						{
+							message: encodedMessage(REQUEST_BYTES.select),
+						},
+					),
 				}
 			: {}),
 	}

@@ -9,7 +9,7 @@ import {
 	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
-	selectQueryField,
+	selectQueryFieldFor,
 	sortDirectionEnum,
 } from "./schema-params.ts"
 
@@ -43,7 +43,7 @@ describe("pickExtended", () => {
 
 describe("the shared params and outputs", () => {
 	it("bound select at 500 characters and lang at 2 to 10", () => {
-		expect(selectQueryField.safeParse("x".repeat(501)).success).toBe(false)
+		expect(selectQueryFieldFor({ scalars: ["x"] }).safeParse("x".repeat(501)).success).toBe(false)
 		expect(langQueryField.safeParse("e").success).toBe(false)
 		expect(langQueryField.parse("en")).toBe("en")
 	})

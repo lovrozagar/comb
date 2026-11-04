@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cursorProblem } from "./cursor.ts"
-import { CURSOR_EXAMPLES, filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
+import { filterParamMeta, limitParamMeta, orderParamMeta, searchParamMeta, selectParamMeta } from "./descriptions.ts"
 import type { FieldType, FilterOperator } from "./types.ts"
 import { FILTER_LIMITS } from "./filter.ts"
 
@@ -63,9 +62,53 @@ describe("searchParamMeta", () => {
 	})
 })
 
-describe("CURSOR_EXAMPLES", () => {
-	it("has the shape the list schema takes, a sealed cursor, so a published example is a cursor (Q7, R1)", () => {
-		for (const example of CURSOR_EXAMPLES) expect(cursorProblem(example)).toBeNull()
+/* QL8 of r22b: limit's text and examples are the endpoint's own */
+describe("limitParamMeta", () => {
+	it("names the default and the cap, with each as an example, once when they are one", () => {
+		expect(limitParamMeta(5, 10)).toEqual({
+			description: "Maximum number of items per page, in decimal digits. Defaults to 5, at most 10.",
+			examples: [5, 10],
+		})
+		expect(limitParamMeta(10, 10).examples).toEqual([10])
+	})
+})
+
+/* CS7, QL8 of r22b: select's examples are the endpoint's fields, never a fixed list */
+describe("selectParamMeta", () => {
+	it("gives the first scalars, a relation with one of its fields, and *", () => {
+		const meta = selectParamMeta({
+			relationFields: { author: ["name", "email"] },
+			relations: ["tags", "author"],
+			scalars: ["id", "title", "body", "created_at"],
+		})
+		expect(meta.examples).toEqual(["id,title,body", "id,author(name)", "*"])
+		expect(meta.description).toContain("Fields: id, title, body, created_at.")
+		expect(meta.description).toContain(
+			"Relations, each with the fields it selects: tags (none); author (name, email); none nests another.",
+		)
+	})
+
+	it("gives * alone where nothing is declared, and a relation alone where no scalar is", () => {
+		const bare = selectParamMeta({ scalars: [] })
+		expect(bare.examples).toEqual(["*"])
+		expect(bare.description).toContain("Fields: none. No relations.")
+		expect(
+			selectParamMeta({ relationFields: { author: ["name"] }, relations: ["author"], scalars: [] }).examples,
+		).toEqual(["author(name)", "*"])
+	})
+
+	it("takes no relationFields key the config inherits", () => {
+		const inherited = Object.create({ author: ["name"] }) as Record<string, readonly string[]>
+		expect(selectParamMeta({ relationFields: inherited, relations: ["author"], scalars: ["id"] }).examples).toEqual([
+			"id",
+			"*",
+		])
+	})
+})
+
+describe("orderParamMeta: an example takes no more keys than the endpoint (QL8 of r22b)", () => {
+	it("gives a second key alone where the endpoint takes one", () => {
+		expect(orderParamMeta(["a", "b"], 1).examples).toEqual(["a.desc", "b.asc"])
 	})
 })
 

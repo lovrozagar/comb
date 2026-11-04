@@ -1038,9 +1038,10 @@ export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, O
 // query/schema-params.d.ts
 /** The zod pieces the list and retrieve query schemas share: request params and parsed outputs. */
 import * as z from "zod";
-import type { PaginationConfig } from "./schema-types.ts";
+import type { FieldsConfig, PaginationConfig } from "./schema-types.ts";
 import type { FilterAST, ParsedFields } from "./types.ts";
-declare const selectQueryField: z.ZodOptional<z.ZodString>;
+/** The `select` param for an endpoint of these fields, its text and examples theirs */
+declare const selectQueryFieldFor: (fields: FieldsConfig) => z.ZodOptional<z.ZodString>;
 declare const langQueryField: z.ZodOptional<z.ZodString>;
 declare const baseListQueryShape: {
     cursor: z.ZodOptional<z.ZodString>;
@@ -1071,7 +1072,7 @@ declare function assertNotReserved(builder: string, extendFields: Record<string,
 declare function pickExtended<T extends Record<string, z.ZodType>>(extendFields: T | undefined, data: Record<string, unknown>): {
     [K in keyof T]: z.infer<T[K]>;
 };
-export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS, selectQueryField, sortDirectionEnum, };
+export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS, selectQueryFieldFor, sortDirectionEnum, };
 
 // query/filter.d.ts
 /**

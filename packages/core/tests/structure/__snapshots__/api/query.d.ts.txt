@@ -18,7 +18,7 @@ export { escapeLike, globPattern, likePattern } from "./like.ts";
 export { IsoInstant } from "./iso-date.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
 export { createListQuerySchema, createRetrieveQuerySchema, type FieldsConfig, LIST_QUERY_LIMITS, type ListQueryConfig, type ListQueryLimits, type ListQueryOutput, type ListQuerySchema, PAGINATION_DEFAULTS, paginationResponseSchema, type RetrieveQueryConfig, type RetrieveQueryOutput, type RetrieveQuerySchema, } from "./schema.ts";
-export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, } from "./descriptions.ts";
+export { CURSOR_DESCRIPTION, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, limitParamMeta, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, selectParamMeta, } from "./descriptions.ts";
 export { resolveTranslation, type TranslationResolverInput } from "./translation.ts";
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, } from "./types.ts";
 export type { CursorId } from "./cursor.ts";
@@ -497,32 +497,39 @@ export { paginationResponseSchema };
  *
  * Attached through Zod `.meta({ ... })` so they flow through
  * z.toJSONSchema({ io: "input" }) into OpenAPI parameters[].schema. Parameters
- * whose rules differ per endpoint (filter, order, q) are generated from the
+ * whose rules differ per endpoint (filter, order, q, limit, select) are generated from the
  * same config that validates the request, so the text cannot drift from what
  * the parser accepts — and stays when a publisher strips `x-*` extensions.
  */
 import type { FilterLimits } from "./filter.ts";
+import type { FieldsConfig } from "./schema-types.ts";
 import type { FieldType, FilterOperator } from "./types.ts";
 declare const CURSOR_DESCRIPTION = "Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent.";
-declare const CURSOR_EXAMPLES: string[];
-declare const LIMIT_DESCRIPTION = "Maximum number of items per page, in decimal digits. Defaults to 20, capped by the endpoint's maxLimit.";
-declare const LIMIT_EXAMPLES: number[];
 declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present.";
 declare const PAGE_EXAMPLES: number[];
 declare const LANG_DESCRIPTION = "BCP-47 language tag selecting localized text fields (falls back to default locale when absent).";
 declare const LANG_EXAMPLES: string[];
 declare const SELECT_DESCRIPTION = "PostgREST-style sparse fieldset. Scalars comma-separated; relations embedded as name(fields); wildcard * selects all scalars. Docs: https://docs.postgrest.org/en/stable/references/api/resource_embedding.html";
-declare const SELECT_EXAMPLES: string[];
 export type ParamMeta = {
     description: string;
     examples: string[];
 };
+/** The `limit` param's text, its default and its cap the endpoint's own, and examples it takes (QL8 of r22b) */
+declare function limitParamMeta(defaultLimit: number, maxLimit: number): {
+    description: string;
+    examples: number[];
+};
+/**
+ * The `select` param's text and examples, from the fields the endpoint declares (CS7, QL8 of
+ * r22b): its first scalars, one relation with one of its declared fields when it has one, and `*`
+ */
+declare function selectParamMeta(fields: FieldsConfig): ParamMeta;
 declare function filterParamMeta(fields: Record<string, FieldType>, operatorsFor: (type: FieldType) => readonly FilterOperator[], limits: FilterLimits): ParamMeta;
 declare function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta & {
     pattern: string;
 };
 declare function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta;
-export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, };
+export { CURSOR_DESCRIPTION, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, limitParamMeta, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, selectParamMeta, };
 
 // query/translation.d.ts
 /**
@@ -1088,9 +1095,10 @@ export { encodedBytes, encodedMessage, LIST_QUERY_LIMITS, MAX_QUERY_BYTES, PAGIN
 // query/schema-params.d.ts
 /** The zod pieces the list and retrieve query schemas share: request params and parsed outputs. */
 import * as z from "zod";
-import type { PaginationConfig } from "./schema-types.ts";
+import type { FieldsConfig, PaginationConfig } from "./schema-types.ts";
 import type { FilterAST, ParsedFields } from "./types.ts";
-declare const selectQueryField: z.ZodOptional<z.ZodString>;
+/** The `select` param for an endpoint of these fields, its text and examples theirs */
+declare const selectQueryFieldFor: (fields: FieldsConfig) => z.ZodOptional<z.ZodString>;
 declare const langQueryField: z.ZodOptional<z.ZodString>;
 declare const baseListQueryShape: {
     cursor: z.ZodOptional<z.ZodString>;
@@ -1121,7 +1129,7 @@ declare function assertNotReserved(builder: string, extendFields: Record<string,
 declare function pickExtended<T extends Record<string, z.ZodType>>(extendFields: T | undefined, data: Record<string, unknown>): {
     [K in keyof T]: z.infer<T[K]>;
 };
-export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS, selectQueryField, sortDirectionEnum, };
+export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS, selectQueryFieldFor, sortDirectionEnum, };
 
 // codegen/analyzer-types.d.ts
 import type { CombColumnKind } from "../meta/column.ts";

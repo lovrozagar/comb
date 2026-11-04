@@ -10,7 +10,7 @@ import {
 	langQueryField,
 	pickExtended,
 	RESERVED_RETRIEVE_KEYS,
-	selectQueryField,
+	selectQueryFieldFor,
 } from "./schema-params.ts"
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts"
 import { validateSelectWithConfig } from "./select-validate.ts"
@@ -32,7 +32,10 @@ function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
 	assertNotReserved("createRetrieveQuerySchema", extensions, RESERVED_RETRIEVE_KEYS)
 
-	const shape: RetrieveShape = { select: selectQueryField, ...(config.lang ? { lang: langQueryField } : {}) }
+	const shape: RetrieveShape = {
+		select: selectQueryFieldFor(fieldsConfig),
+		...(config.lang ? { lang: langQueryField } : {}),
+	}
 	const schema = z.strictObject({ ...shape, ...extensions })
 
 	type ExtendedOutput = RetrieveQueryOutput & {
