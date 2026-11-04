@@ -107,11 +107,18 @@ const objectsOf = (graph: Graph, names: Iterable<string>): LiveObject[] =>
 
 /**
  * The scope of the copy pending `files` run on over the live schema `objects`, with the binding's history table
- * `history` (see the module's comment)
+ * `history` when the proof writes one, as D1's does (see the module's comment)
  */
-function observable(objects: readonly LiveObject[], files: ReadonlyArray<{ sql: string }>, history: string): Scope {
+function observable(
+	objects: readonly LiveObject[],
+	files: ReadonlyArray<{ sql: string }>,
+	history?: string | undefined,
+): Scope {
 	const graph = graphOf(objects)
-	const spelled = new Set([asciiFold(history), ...files.flatMap(({ sql }) => [...sqliteNames(sql)])])
+	const spelled = new Set([
+		...(history === undefined ? [] : [asciiFold(history)]),
+		...files.flatMap(({ sql }) => [...sqliteNames(sql)]),
+	])
 	const n = objectsOf(graph, spelled)
 	const s = new Set(n.map((object) => asciiFold(object.table)).filter((table) => graph.tables.has(table)))
 	/* rows: what a file writes, a trigger it fires writes or a view it reads reads, and what a cascade reaches */

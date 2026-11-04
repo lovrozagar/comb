@@ -78,7 +78,10 @@ describe("planApply's proof run, on a database it reads", () => {
 			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20)); CREATE TABLE post (id TEXT);",
 		)
 		const { out, run } = plan(
-			{ "1_bad.sql": "ALTER TABLE missing ADD COLUMN x TEXT;", "2_ok.sql": "CREATE TABLE note (id TEXT);" },
+			{
+				"1_bad.sql": "UPDATE codes SET code = code;\nALTER TABLE missing ADD COLUMN x TEXT;",
+				"2_ok.sql": "CREATE TABLE note (id TEXT);",
+			},
 			{ conn },
 		)
 		await expect(run()).rejects.toThrow(/^1_bad\.sql is unsafe \(proof run: comb could not run this in the proof copy/)

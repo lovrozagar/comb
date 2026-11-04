@@ -1,7 +1,8 @@
 /**
  * The proof run, on the SQLite family (bun:sqlite, libsql, D1): before a check or an apply, each
- * pending file runs on a private scratch copy of the target's live schema, seeded with rows that
- * show any change (proof-seed.ts), and every table that was there before is compared, row for row,
+ * pending file runs on a private scratch copy of what the pending files can observe of the target's
+ * live schema (proof-scope.ts), seeded with rows that show any change (proof-seed.ts), and every
+ * table that was there before is compared, row for row,
  * on the columns it had, as a multiset of whole rows. A lost row, a lost column or a changed value
  * makes the file unsafe, and the reason names the table and column. One allowance: a NULL that
  * lands as the column's new DEFAULT, in a column the file made NOT NULL, is cautious (Atlas's "make
@@ -21,6 +22,7 @@ import { compare, type Shape } from "./proof-compare.ts"
 import { type Copy, copyOf, buildCopy, creatable, jsonColumns, type LiveObject, liveObjects } from "./proof-copy.ts"
 import { applyToCopy, engineFindings } from "./proof-engine.ts"
 import { quote } from "./proof-seed.ts"
+import { observable } from "./proof-scope.ts"
 import { asciiFold } from "./sql-code.ts"
 
 /** What the proof run found for one file */
@@ -70,6 +72,23 @@ function snapshot(db: LocalDb): Map<string, Shape> {
 	return out
 }
 
+/** What a copy of `objects` is made on: the engine, the pending files, and the columns they read as JSON */
+type Making = { engine: ScratchEngine; files: ReadonlyArray<{ sql: string }>; json: ReadonlySet<string> }
+
+/**
+ * A copy of `objects` seeded as `variant`, holding only what the pending files can observe, the D1 proof's
+ * closure (proof-scope.ts, 8.5 of plan 21): what a file names, writes through a trigger or a key, or reads
+ * through a view. Every pending file's names count, so one copy serves them all in order
+ */
+async function scopedCopy(
+	objects: readonly LiveObject[],
+	variant: number,
+	{ engine, files, json }: Making,
+): Promise<Copy> {
+	const scope = observable(objects, files)
+	return await copyOf(scope.objects, { json, rows: scope.seeded, variant }, engine)
+}
+
 /**
  * A fresh copy, reseeded with values the first seed never held, the files that applied before
  * replayed on it; undefined, and closed, when one of them no longer applies
@@ -77,9 +96,9 @@ function snapshot(db: LocalDb): Map<string, Shape> {
 async function reseeded(
 	objects: readonly LiveObject[],
 	applied: readonly string[],
-	{ engine, json }: { engine: ScratchEngine; json: ReadonlySet<string> },
+	making: Making,
 ): Promise<Copy | undefined> {
-	const copy = await copyOf(objects, { json, variant: 1 }, engine)
+	const copy = await scopedCopy(objects, 1, making)
 	if (applied.every((sql) => applyToCopy(copy.db, sql).error === undefined)) return copy
 	copy.db.close()
 	return undefined
@@ -140,10 +159,10 @@ async function provePending(
 	files: ReadonlyArray<{ name: string; sql: string }>,
 	{ engine = "runtime", live }: { engine?: ScratchEngine | undefined; live?: readonly LiveObject[] | undefined } = {},
 ): Promise<Map<string, Proof>> {
-	const json = jsonColumns(files)
 	const engineTables = notEngineTables(conn)
 	let objects = live === undefined ? creatable(await liveObjects(conn, engineTables)) : [...live]
-	let copy = await copyOf(objects, { json, variant: 0 }, engine)
+	const making: Making = { engine, files, json: jsonColumns(files) }
+	let copy = await scopedCopy(objects, 0, making)
 	const proofs = new Map<string, Proof>()
 	let applied: string[] = []
 	let failed: string | undefined
@@ -155,7 +174,7 @@ async function provePending(
 			}
 			let [before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
 			let run = named(name, () => applyToCopy(copy.db, sql))
-			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, { engine, json })
+			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, making)
 			if (retry !== undefined) {
 				copy.db.close()
 				copy = retry
@@ -174,7 +193,7 @@ async function provePending(
 				copy.db.close()
 				objects = after
 				applied = []
-				copy = await copyOf(objects, { json, variant: 0 }, engine)
+				copy = await scopedCopy(objects, 0, making)
 				continue
 			}
 			applied.push(sql)

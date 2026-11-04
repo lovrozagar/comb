@@ -229,6 +229,21 @@ const target = (objects: Array<[type: string, name: string, sql: string, table?:
 	}),
 })
 
+/* 8.5 of plan 21: the bun:sqlite proof's copy is the D1 proof's closure too, so a table no pending file reaches is not
+   made, and nothing it could not make is listed */
+describe("provePending makes only what the pending files can observe (8.5)", () => {
+	it("leaves out a table no file reaches, so one the copy cannot create is not listed unproven", async () => {
+		const proofs = await provePending(
+			target([
+				["table", "t", "CREATE TABLE t (a TEXT)"],
+				["table", "odd", "CREATE VIRTUAL TABLE odd USING no_such_module(a)"],
+			]),
+			[{ name: "1.sql", sql: "INSERT INTO t (a) VALUES ('x');" }],
+		)
+		expect(proofs.get("1.sql")).toEqual({ cautious: [], unproven: [], unsafe: [] })
+	})
+})
+
 describe("provePending on what the copy cannot make, and on a lost column", () => {
 	it("lists a table the copy cannot create, and a virtual table it does not seed, as unproven", async () => {
 		const proofs = await provePending(
@@ -236,7 +251,7 @@ describe("provePending on what the copy cannot make, and on a lost column", () =
 				["table", "odd", "CREATE VIRTUAL TABLE odd USING no_such_module(a)"],
 				["table", "box", "CREATE VIRTUAL TABLE box USING rtree(id, x0, x1)"],
 			]),
-			[{ name: "1.sql", sql: "SELECT 1;" }],
+			[{ name: "1.sql", sql: "DELETE FROM box;\nDROP TABLE IF EXISTS odd;" }],
 		)
 		const unproven = proofs.get("1.sql")?.unproven ?? []
 		expect(unproven.map(({ table }) => table)).toEqual(expect.arrayContaining(["odd", "box"]))
@@ -249,7 +264,7 @@ describe("provePending on what the copy cannot make, and on a lost column", () =
 				["trigger", "tr", "CREATE TRIGGER tr INSTEAD OF INSERT ON t BEGIN SELECT 1; END", "t"],
 				["view", "v", "CREATE VIEW v AS SELECT a FROM t GROUP", "v"],
 			]),
-			[{ name: "1.sql", sql: "SELECT 1;" }],
+			[{ name: "1.sql", sql: "INSERT INTO t (a) VALUES ('x');" }],
 		)
 		expect(proofs.get("1.sql")?.unproven).toEqual([
 			{ table: "t", why: "its trigger tr could not be created: cannot create INSTEAD OF trigger on table: t" },
