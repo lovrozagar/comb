@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ATLAS_RANGE, type Run } from "../migrate/core/process.ts"
+import { ATLAS_RANGE, type Run, type RunResult } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects, runCliWithFakes, writeTables } from "./__fixtures__/io.ts"
 import { diffProject, fakeAtlas } from "./__fixtures__/diff.ts"
@@ -378,16 +378,27 @@ describe("comb migrate diff on a D1 database", () => {
 
 /* D2-14 of the area D round-two review: drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
 describe("comb migrate diff: a drizzle.config.json", () => {
-	it("is refused on Node before anything runs, naming the .ts to write instead, and diffs on Bun", async () => {
+	/* D3-5 of the area D round-three review: the refusal sits in exportWith, after the peers are checked (Atlas's version read once) */
+	it("is refused on Node after the peers are checked and before drizzle-kit runs, naming the .ts to write instead, and diffs on Bun", async () => {
 		const dir = project()
 		const file = join(dir, "drizzle.config.json")
 		writeFileSync(file, '{ "dialect": "sqlite" }\n')
 		await onBun(undefined, async () => {
 			const run = fakeAtlas(() => undefined)
-			const io = makeIo(dir, run)
+			const base = makeIo(dir, run)
+			let versionReads = 0
+			const readAtlasVersion = base.readAtlasVersion as () => RunResult
+			const io = {
+				...base,
+				readAtlasVersion: () => {
+					versionReads++
+					return readAtlasVersion()
+				},
+			}
 			expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(1)
-			expect({ calls: run.calls, errors: io.errors }).toEqual({
+			expect({ calls: run.calls, errors: io.errors, versionReads }).toEqual({
 				calls: [],
+				versionReads: 1,
 				errors: [
 					`${file} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
 				],
