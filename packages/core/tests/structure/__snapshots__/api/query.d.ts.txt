@@ -324,12 +324,18 @@ declare const queryHelpers: {
 export { type CursorOptions, drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers };
 
 // query/filter-values.d.ts
-/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
-import type { FilterAST } from "./types.ts";
-/** Extract a single filter value from FilterAST */
-declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
-/** Extract multiple filter values from FilterAST */
-declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+/**
+ * The values a filter names for one field or several: queryHelpers.filterValue and filterValues.
+ * A value is read only where the filter holds every row to it (QL9 of r22b): a condition under
+ * the operator asked for (`eq` by default), at the top level of an AND, and the only one there on
+ * its field. `project_id.ne.p1`, an `or()` group and a field named twice read as nothing, since
+ * the SQL serves rows other than that value's.
+ */
+import type { FilterAST, FilterOperator } from "./types.ts";
+/** The value the filter holds every row's `field` to under `operator` (`eq` by default), or undefined */
+declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string, operator?: FilterOperator): T | undefined;
+/** Each of `fields` the filter holds every row to under `operator` (`eq` by default), as extractFilterValue reads it */
+declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[], operator?: FilterOperator): Partial<T>;
 export { extractFilterValue, extractFilterValues };
 
 // query/fields.d.ts

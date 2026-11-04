@@ -761,6 +761,8 @@ select=id,title,author(display_name)
 
 `filterBySelect()` cuts a row down to the parsed selection, for call sites outside `queryHelpers.paginate`; `queryHelpers.project` is the one-row wrapper.
 
+`queryHelpers.filterValue(filterAst, field, operator?)` reads the value a filter holds every row's `field` to, and `filterValues(filterAst, fields, operator?)` reads several, so an app can resolve or authorize "the project this list is for" from `project_id.eq.p1`. A value is read only from a condition under the operator asked for (`eq` by default; `ne` and `neq` are one), at the top level of the filter's AND, and the only one there on its field: `project_id.ne.p1`, `project_id.in.(p1,p2)` under `eq`, `or(project_id.eq.p1,project_id.eq.p2)` and `project_id.eq.p1,project_id.eq.p2` read as `undefined`, since the SQL serves rows that value does not name.
+
 ### Pagination and cursors
 
 Two modes share one input shape. Offset pagination takes `page` and `limit`; cursor pagination takes `cursor` and `limit`. Responses carry `PaginationMeta`.
@@ -1159,6 +1161,8 @@ What changes for a project on 0.20. Before deploying it:
 32. **Set pagination limits the schema can serve.** `createListQuerySchema` took any `pagination.maxLimit` and `defaultLimit`, and zod's `.default()` skips the limit's own check, so `{ maxLimit: 10 }` alone answered every request without a `limit` with `invalid_page`, a 400, as the default 20 passed the maximum; a `maxLimit` of 0 or 1.5 also made `readCombQueryMeta` drop the route's query facts. Building the schema now throws a `TypeError` naming the key unless `maxLimit` is a whole number from 1 and `defaultLimit` one from 1 to `maxLimit`. **Fix:** with a `maxLimit` below 20, set `defaultLimit` at or under it.
 
 33. **Send a well-formed `order`.** The list query schema dropped an `order` entry that was empty or named no field, so `order=asc` was a 200 sorted by the default, descending, while the published pattern refused it. Each such entry (`asc`, `desc`, `.desc`, `,`, `title.asc,`) is now an issue on `order` naming it, and `parseOrder()` returns `null` for it, as `parseFilter()` does for a malformed filter. `limits.maxSortKeys` of 0, which no order could meet while the pattern admitted one key, is a `TypeError` at build. **Fix:** a client sending a bare direction or a trailing comma drops it; a caller of `parseOrder()` handles `null`; set `maxSortKeys` to 1 or more.
+
+34. **Read a filter value only where the filter holds rows to it.** `queryHelpers.filterValue` and `filterValues` returned a condition's value whatever its operator, so `project_id.ne.p1` read as `p1`, and took the first of two conditions on a field. They now take an operator, `eq` by default, read only top-level AND conditions, and return `undefined` for a field named more than once. **Fix:** pass the operator for a value read under another one, such as `in`.
 
 ## Upgrading to 0.20.1
 
