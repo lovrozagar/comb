@@ -339,3 +339,14 @@ describe("comb/optional-undefined on a generic alias a barrel or a default expor
 		expect(reported({ ...starred, [PROBE]: made("import type Sink from './index.ts'", "Sink") })).toEqual([])
 	})
 })
+
+/* D4-3 of the area D round-four review: a class's optional method refuses undefined as an interface's does (N9, N10) */
+describe("comb/optional-undefined on a class's optional method", () => {
+	it("rejects an optional method a caller sets, declared or defined, and leaves comb's own", () => {
+		const reports = [{ file: at, message: MESSAGE }]
+		expect(lint("export class C { m?(): void }\n")).toEqual(reports)
+		expect(lint("export class C { m?() { return 1 } }\n")).toEqual(reports)
+		expect(oxlintReports("optional-undefined", { [at]: "export class C { m?(): void }\n" })).toEqual(reports)
+		expect(lint("export class C { private m?(): void; #n?(): void; o(): void {} }\n")).toEqual([])
+	})
+})

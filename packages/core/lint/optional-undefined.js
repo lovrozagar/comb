@@ -38,15 +38,17 @@ const admitsUndefined = (type) =>
 	(type.type === "TSParenthesizedType" && admitsUndefined(type.typeAnnotation)) ||
 	(type.type === "TSUnionType" && type.types.some((member) => admitsUndefined(member)))
 
-/* a private or #-named class field is comb's own state, which no caller sets (D2-6 of the area D round-two review) */
+/* a private or #-named class field or method is comb's own, which no caller sets (D2-6 of the area D round-two review, D4-3 of round four) */
 const ownField = (node) => node.accessibility === "private" || node.key.type === "PrivateIdentifier"
 
 /* a class field a caller or a subclass sets, an abstract one included (D3-3 of the area D round-three review) */
 const FIELDS = new Set(["PropertyDefinition", "TSAbstractPropertyDefinition"])
 const callerField = (node) => FIELDS.has(node.type) && !ownField(node)
 
-/* an optional method's type is a function, which never admits undefined */
-const METHODS = new Set(["TSAbstractMethodDefinition", "TSMethodSignature"])
+/* an optional method's type is a function, which never admits undefined: a class's too (D4-3 of the area D round-four review) */
+const METHODS = new Set(["MethodDefinition", "TSAbstractMethodDefinition", "TSMethodSignature"])
+/* the class members a private or # name makes comb's own */
+const MEMBERS = new Set(["MethodDefinition", "PropertyDefinition"])
 
 /* what a reference names: a type reference's type, or the type an interface extends or a class
  * implements, a namespace's member as `A.Name` */
@@ -188,7 +190,7 @@ export const rule = {
 		const root = filename.slice(0, filename.length - file.length)
 		/** Reports an optional member whose declared type refuses undefined; one with no type is any */
 		const check = (node) => {
-			if (node.optional !== true || (node.type === "PropertyDefinition" && ownField(node))) return
+			if (node.optional !== true || (MEMBERS.has(node.type) && ownField(node))) return
 			if (METHODS.has(node.type) || (node.typeAnnotation && !admitsUndefined(node.typeAnnotation.typeAnnotation)))
 				context.report({ message: MESSAGE, node })
 		}
@@ -228,6 +230,7 @@ export const rule = {
 		}
 		return {
 			Program: partials,
+			MethodDefinition: check,
 			PropertyDefinition: check,
 			TSAbstractMethodDefinition: check,
 			TSAbstractPropertyDefinition: check,
