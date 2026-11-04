@@ -189,6 +189,15 @@ describe("LruCache — a per-key TTL (E-S3)", () => {
 		expect(() => cache.set("nan", 1, Number.NaN)).toThrow(RangeError)
 	})
 
+	it("leaves the cache as it was when it refuses a TTL (QE6 of r22b)", () => {
+		const cache = new LruCache<string, string>({ maxSize: 2, ttlMs: 1000 })
+		cache.set("a", "1")
+		cache.set("b", "2")
+		expect(() => cache.set("b", "new", 0)).toThrow(RangeError)
+		expect(() => cache.set("c", "3", Number.NaN)).toThrow(RangeError)
+		expect([cache.get("a"), cache.get("b"), cache.size]).toEqual(["1", "2", 2])
+	})
+
 	it("clamps a TTL past the hard TTL to it, so get and getWithMeta agree", () => {
 		const cache = new LruCache<string, number>({ hardTtlMs: 5000, maxSize: 10, ttlMs: 1000 })
 		cache.set("long", 3, 60_000)
