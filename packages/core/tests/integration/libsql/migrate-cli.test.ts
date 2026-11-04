@@ -233,7 +233,7 @@ describe("migrate apply refuses a rebuild outside the file's transaction", () =>
 		const guarded = guardRebuilds(CYCLE_REBUILD, extractSchema(CYCLE_BASE))
 		fs.writeFileSync(
 			path.join(dir, "atlas-migrations", "20260102000000_rebuild.sql"),
-			`-- atlas:txmode none\n${guarded}`,
+			`-- atlas:txmode none\n\n${guarded}`,
 		)
 		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
 		const run = io(dir)
