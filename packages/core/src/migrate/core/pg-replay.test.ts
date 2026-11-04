@@ -14,7 +14,7 @@ const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "publi
 const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 
 /* the backend a replay runs on, which names its database and tags its roles */
-const OWNER = [{ pid: 7, start: "9" }]
+const OWNER = [{ pid: 7, start: "9", version: 170000 }]
 
 /* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
 const COUNTS = "SELECT current_setting('track_counts') AS on, coalesce("
@@ -55,6 +55,7 @@ const SWEEP = [
 	expect.stringMatching(/^SELECT datname FROM pg_database/),
 	expect.stringMatching(/^SELECT r\.rolname/),
 	expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
+	"SELECT set_config($1, $2, false), set_config($3, $4, false)",
 ]
 const MADE = [
 	"CREATE DATABASE <db> TEMPLATE template0",
@@ -115,10 +116,15 @@ describe("replayCatalog", () => {
 		/* one connection each, to devUrl's database and then to the replay's, dev's notices kept off the terminal */
 		const [admin, replay] = dev.given as [
 			{ database: string; max: number; onnotice: () => unknown },
-			{ database: string },
+			{ connection: Record<string, string>; database: string },
 		]
 		expect([admin.max, admin.onnotice(), admin.database]).toEqual([1, undefined, "dev"])
 		expect(replay.database).toMatch(/^comb_replay_7_9_[0-9a-f]{8}$/)
+		/* the replay's connection names its owner, by which a sweep finds the statement a killed run left (P4 of r22) */
+		expect(replay.connection).toMatchObject({
+			application_name: "comb_replay 7_9",
+			client_connection_check_interval: "1s",
+		})
 	})
 })
 

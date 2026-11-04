@@ -57,7 +57,7 @@ import {
 	dropSlot,
 	extensionsOf,
 	makeDatabase,
-	ownerOf,
+	claim,
 	settle,
 	type Sql,
 	sweep,
@@ -189,6 +189,20 @@ async function cleanUp(run: Run): Promise<void> {
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
 /**
+ * devUrl's options for one replay connection, whose notices nobody reads; with `settings`, those of
+ * the replay's own connection to `database`, its session settings beside the ones the URL sets
+ */
+function replayOptions(
+	devUrl: string,
+	at?: { database: string; settings: Record<string, string> },
+): Record<string, unknown> {
+	const options: Record<string, unknown> = { ...postgresOptionsOf(devUrl, "devUrl"), max: 1, onnotice: () => undefined }
+	if (at === undefined) return options
+	const connection = { ...(options["connection"] as object | undefined), ...at.settings }
+	return { ...options, connection, database: at.database }
+}
+
+/**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
  * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
  * was `doing`, and then what that `stops`
@@ -211,14 +225,13 @@ async function onDev<T>(
 	const failed = { field: "devUrl", url: target.devUrl, urls: [target.devUrl, target.url] } as const
 	const refused: Refuse = (what, error) =>
 		new ReplayFailed(`${what}: ${failureOf(error, failed)}; ${replay.stops}`, { cause: error })
-	const options = { ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined }
 	let admin: Sql | undefined
 	try {
 		const cleanup = onceCleanup()
 		return await onSignals(cleanup.run, async () => {
-			admin = connect(options)
+			admin = connect(replayOptions(target.devUrl))
 			await sweep(admin, Date.now())
-			const owner = await ownerOf(admin)
+			const { owner, settings } = await claim(admin)
 			const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
 			const run: Run = {
 				admin,
@@ -227,7 +240,7 @@ async function onDev<T>(
 				ours: { rows: new Map(), writes: new Map() },
 				owner,
 				seen: new Map(),
-				sql: connect({ ...options, database }),
+				sql: connect(replayOptions(target.devUrl, { database, settings })),
 				strays: { databases: [], roles: [], slots: [] },
 				superuser: await superuserOf(admin),
 			}

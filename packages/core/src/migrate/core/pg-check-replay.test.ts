@@ -15,7 +15,7 @@ const file = (sql: string) => ({ files: [{ name: "1_a.sql", sql }], pending: ["1
 const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 
 /* the backend a replay runs on, which names its database and tags its roles */
-const OWNER = [{ pid: 7, start: "9" }]
+const OWNER = [{ pid: 7, start: "9", version: 170000 }]
 
 /* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
 const COUNTS = "SELECT current_setting('track_counts') AS on, coalesce("
@@ -39,6 +39,7 @@ const AROUND = {
 		expect.stringMatching(/^SELECT datname FROM pg_database/),
 		expect.stringMatching(/^SELECT r\.rolname/),
 		expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
+		"SELECT set_config($1, $2, false), set_config($3, $4, false)",
 		"CREATE DATABASE <db> TEMPLATE template0",
 		"SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
 		COUNTED,

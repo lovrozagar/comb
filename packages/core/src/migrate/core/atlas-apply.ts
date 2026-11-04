@@ -179,7 +179,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
 		/* a check killed past its cleanup left a role on devUrl's server, which a CREATE ROLE here would stop at (P2 of r21) */
-		await (options.sweepDev ?? sweepDev)(options.target)
+		await (options.sweepDev ?? sweepDev)(options.target, options.print)
 		const files = reported(
 			atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT]),
 			"apply",

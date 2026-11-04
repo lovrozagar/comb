@@ -353,26 +353,42 @@ declare const codeOf: (error: unknown) => unknown;
 declare const literal: (text: string) => string;
 /** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
 declare function settle(step: () => Promise<unknown>): Promise<void>;
+/** Drops the replication slot `slot`, if it is still there */
+declare function dropSlot(admin: Sql, slot: string): Promise<void>;
 /**
  * Drop `role`, unless something still depends on it or it is not this role's to drop: a later sweep
  * takes it. Two sessions dropping one role race in Postgres's catalog, and the loser fails without
  * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
  * is dropped
  */
-/** Drops the replication slot `slot`, if it is still there */
-declare function dropSlot(admin: Sql, slot: string): Promise<void>;
 declare function dropRole(admin: Sql, role: string): Promise<void>;
-/** The backend `admin` runs on, as a replay's database name and role tag carry it: `<pid>_<start>` */
-declare function ownerOf(admin: Sql): Promise<string>;
-/** Drop the replay databases this role made and the tagged roles whose replay is over at `now`, each drop settled */
+/**
+ * The backend `admin` runs on, as a replay's database name and role tag carry it, `<pid>_<start>`,
+ * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
+ * which the sweep finds a killed replay's backends, and on Postgres 14 and later a check every
+ * second that its client is there, by which Postgres ends their statement itself; `admin` takes them
+ * too
+ */
+declare function claim(admin: Sql): Promise<{
+    owner: string;
+    settings: Record<string, string>;
+}>;
+/**
+ * Drop what replays over at `now` left, each drop settled: every replay database this role may
+ * drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are ended (P4
+ * of r22), and the tagged roles
+ */
 declare function sweep(admin: Sql, now: number): Promise<void>;
 /**
  * The sweep, run on `target`'s dev server before an apply (P2 of r21): a check killed past its
  * cleanup leaves a role there, which apply's CREATE ROLE of it stops at where dev and target share
- * a server. Housekeeping never stops an apply, so without the postgres package, on Atlas's docker://
- * container or on a devUrl it cannot reach, it sweeps nothing
+ * a server. Only that server matters, so apply asks the target's own server first, which it reaches
+ * anyway, and connects to devUrl only when the target's holds what a sweep would take, waiting
+ * SWEEP_TIMEOUT for it (PR7 of r22b). Housekeeping never stops an apply, so without the postgres
+ * package, on Atlas's docker:// container or with nothing left it sweeps nothing, and a sweep that
+ * fails is `print`ed and passed
  */
-declare function sweepDev(target: PgTarget, load?: () => Promise<Connect>): Promise<void>;
+declare function sweepDev(target: PgTarget, print: (line: string) => void, load?: () => Promise<Connect>): Promise<void>;
 /** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
 declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
 /** The extensions the history `texts` create, which the replay leaves them to make */
@@ -385,7 +401,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, ownerOf, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
+export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, claim, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**
