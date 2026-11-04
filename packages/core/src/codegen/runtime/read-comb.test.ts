@@ -119,9 +119,11 @@ describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT 
 	/* AA4 of area A's review: the sibling through .optional(), unless a default fills the column */
 	it("refuses a schema that takes undefined on a NOT NULL column nothing fills, and keeps it where a default does", () => {
 		const optional = z.object({ a: z.string() }).optional()
-		expect(() => refuseJsonDocument(optional, "t.c", NOT_NULL)).toThrow(
-			"t.c: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default",
-		)
+		const message =
+			"t.c: its schema takes undefined (an .optional(), a .default() or a union with undefined) and the column is NOT NULL with no default: make the schema refuse undefined, or give the column a default"
+		expect(() => refuseJsonDocument(optional, "t.c", NOT_NULL)).toThrow(message)
+		/* A2-11 of r22: a schema default holds no .optional() to drop, and gets the same message */
+		expect(() => refuseJsonDocument(z.object({ a: z.string() }).default({ a: "x" }), "t.c", NOT_NULL)).toThrow(message)
 		expect(() => refuseJsonDocument(optional, "t.c", { filled: true, notNull: true })).not.toThrow()
 		expect(() => refuseJsonDocument(optional, "t.c", { filled: false, notNull: false })).not.toThrow()
 	})

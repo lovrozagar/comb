@@ -135,7 +135,7 @@ describe.each(DIALECTS)("a NOT NULL c.json whose schema takes undefined (AA4) on
 		await expect(
 			generatedDtos(`aa4-${dialect}`, table(dialect, "z.object({ a: z.string() }).optional()"), { dialect }),
 		).rejects.toThrow(
-			"row.doc: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default",
+			"row.doc: its schema takes undefined (an .optional(), a .default() or a union with undefined) and the column is NOT NULL with no default: make the schema refuse undefined, or give the column a default",
 		)
 	})
 

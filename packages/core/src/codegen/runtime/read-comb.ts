@@ -137,7 +137,7 @@ function refuseJsonDocument(
 		)
 	if (notNull && !filled && takes(undefined))
 		throw new Error(
-			`${at}: its schema takes undefined and the column is NOT NULL with no default: drop .optional(), or give the column a default`,
+			`${at}: its schema takes undefined (an .optional(), a .default() or a union with undefined) and the column is NOT NULL with no default: make the schema refuse undefined, or give the column a default`,
 		)
 }
 
