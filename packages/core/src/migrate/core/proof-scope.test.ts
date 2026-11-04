@@ -48,7 +48,27 @@ describe("the D1 proof's scoped copy answers every corpus file as the whole sche
 	}, 60_000)
 })
 
-describe("observable: what the scoped copy creates and seeds", () => {
+describe("observable: the key ancestors of what the scoped copy creates", () => {
+	/* without either engine: a write to a created table compiles checks against each key's parent, so the copy must
+	   hold them all, which the D1 leg's differential sees and the bun:sqlite leg's does not */
+	it("creates the key ancestors of a table only a trigger brings in, transitively, and seeds none of them", () => {
+		const objects = [
+			table("org", "CREATE TABLE org (id INTEGER PRIMARY KEY)"),
+			table("team", "CREATE TABLE team (id INTEGER PRIMARY KEY, org INTEGER NOT NULL REFERENCES org (id))"),
+			table("member", "CREATE TABLE member (id INTEGER PRIMARY KEY, team INTEGER NOT NULL REFERENCES team (id))"),
+			table("audit", "CREATE TABLE audit (id INTEGER PRIMARY KEY, what TEXT)"),
+			{
+				name: "log",
+				sql: "CREATE TRIGGER log AFTER INSERT ON member BEGIN INSERT INTO audit (what) VALUES ('joined'); END",
+				table: "member",
+				type: "trigger",
+			},
+		]
+		const scope = observable(objects, [{ sql: "ALTER TABLE audit RENAME COLUMN what TO what_2;" }])
+		expect(scope.objects.map(({ name }) => name)).toEqual(["org", "team", "member", "audit", "log"])
+		expect([...scope.seeded]).toEqual(["audit"])
+	})
+
 	it("creates and seeds the table an FTS table reads its rows from, however its content option names it", () => {
 		const objects = [
 			table("post", "CREATE TABLE post (id INTEGER PRIMARY KEY, body TEXT)"),
@@ -62,7 +82,9 @@ describe("observable: what the scoped copy creates and seeds", () => {
 		expect([...scope.seeded].toSorted()).toEqual(["a", "b", "cl", "it's", "post"])
 		expect(observable(objects, [{ sql: "SELECT * FROM cl;" }], "h").objects.map(({ name }) => name)).toEqual(["cl"])
 	})
+})
 
+describe("observable: what the scoped copy creates and seeds", () => {
 	it("reads a shadow table's name as its virtual table's, and a key to a table the schema lacks as none", () => {
 		const objects = [
 			table("docs", "CREATE VIRTUAL TABLE docs USING fts5 (body)"),
