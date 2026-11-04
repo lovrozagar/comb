@@ -75,8 +75,27 @@ describe("a cursor's values only through an opening call (Q7, R1)", () => {
 		}
 	})
 
-	it("reads a cursor's bytes in cursor-seal.ts alone", () => {
+	/* the cursor itself, its wire bytes, is read in cursor-seal.ts alone. cursor-codec.ts decodes a
+	   `$bytes` key's base64 too, but that is a value inside a payload openSealed has already
+	   verified: the codec is taken by cursor.ts alone, where decodePayload is the one function that
+	   decodes with it. The mint's `carried` check decodes only encodeValue's own output, the value
+	   being minted, never bytes a client sent */
+	it("reads a cursor's bytes in cursor-seal.ts alone, and a key's bytes only through decodePayload", () => {
 		const readers = ALL.filter(([, source]) => /\bdecodeBase64Url\(|\batob\(/.test(source)).map(([path]) => path)
-		expect(readers.sort()).toEqual(["base64url.ts", "cursor-seal.ts"])
+		expect(readers.sort()).toEqual(["base64url.ts", "cursor-codec.ts", "cursor-seal.ts"])
+		const codec = functions("cursor-codec.ts", readFileSync(join(QUERY, "cursor-codec.ts"), "utf8"))
+		const decoding = [...codec].filter(([, { body }]) => body.includes("decodeBase64Url(")).map(([name]) => name)
+		expect(decoding).toEqual(["decodeTagged"])
+		const roundTrip = codec.get("carried")?.body ?? ""
+		expect(roundTrip).toContain("const json = JSON.stringify(encodeValue(value))")
+		expect(roundTrip).toContain("decode(JSON.parse(json))")
+		const takers = ALL.filter(([, source]) => /from "\.{1,2}\/(?:query\/)?cursor-codec\.ts"/.test(source))
+		expect(takers.map(([path]) => path)).toEqual(["cursor.ts"])
+		const decoders = [...CURSOR]
+			.filter(([, { body }]) =>
+				/\bdecode(?:Value|Id)\b/.test(body.replaceAll(/carried\([^()]*, decode(?:Value|Id)\)/g, "")),
+			)
+			.map(([name]) => name)
+		expect(decoders).toEqual(["decodePayload"])
 	})
 })
