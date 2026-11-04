@@ -15,16 +15,19 @@ export const DATE_KEYS =
 
 /** The unit suites that page, read or write Date keys */
 export const OFF_UTC_UNIT = [
+	"src/codegen/annotations.test.ts",
 	"src/codegen/generators/diagrams.test.ts",
 	"src/codegen/generators/dtos/example-meta.test.ts",
 	"src/codegen/generators/dtos/field-schema.test.ts",
 	"src/codegen/generators/dtos/generate.fields.test.ts",
 	"src/codegen/generators/dtos/number-range.test.ts",
 	"src/codegen/generators/dtos/pg-types.test.ts",
+	"src/codegen/generators/manifest.enforced.test.ts",
 	"src/migrate/core/atlas-dir.test.ts",
 	"src/migrate/drivers/d1.test.ts",
 	"src/pg/columns.meta.test.ts",
 	"src/pg/columns.test.ts",
+	"src/query/cursor-codec.test.ts",
 	"src/query/cursor-mint.test.ts",
 	"src/query/cursor-precision.test.ts",
 	"src/query/cursor-ref.test.ts",
