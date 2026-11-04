@@ -199,14 +199,16 @@ export const CIDR = "cidrSchema"
 const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
 
 /*
- * The spellings Postgres takes for a MAC address: octets of one or two hex digits each, all split
- * by `:` or all by `-`; two halves of six digits; groups of four split by `.` or `-`; or the digits
- * bare. A macaddr8 takes eight octets, or six, which it widens with ff:fe. Its case is written into
- * the classes and each separator is its own branch, as JSON Schema publishes no flag and RE2 takes no
- * backreference (CS2 of r22b)
+ * The spellings Postgres takes for a MAC address. A macaddr: octets of one or two hex digits each,
+ * all split by `:` or all by `-`; two halves of six digits; groups of four split by `.` or `-`; or
+ * the digits bare. A macaddr8 reads two digits an octet, and one separator, `:`, `-` or `.`, at
+ * any of the gaps between them or at none; it takes eight octets, or six, which it widens with ff:fe
+ * (AA5 of r22). Its case is written into the classes and each separator is its own branch, as JSON
+ * Schema publishes no flag and RE2 takes no backreference (CS2 of r22b)
  */
 const HEX = "[\\dA-Fa-f]"
 const OCTET = `${HEX}{1,2}`
+const PAIR = `${HEX}{2}`
 const QUAD = `${HEX}{4}`
 
 /** `group`, then a separator and `group` again `rest` times: one branch per separator of `separators` */
@@ -224,13 +226,10 @@ const macaddr = (): string =>
 		`${HEX}{12}`,
 	])
 const macaddr8 = (): string =>
-	macRegex("Must be a MAC address of six or eight octets", [
-		...[":", "-"].map((separator) => `${OCTET}(?:${separator}${OCTET}){5}(?:(?:${separator}${OCTET}){2})?`),
-		`${HEX}{6}[:-](?:${HEX}{6}|${HEX}{10})`,
-		`${HEX}{8}[:-]${HEX}{8}`,
-		...splitBy(["\\.", "-"], QUAD, "{2,3}"),
-		`${HEX}{12}|${HEX}{16}`,
-	])
+	macRegex(
+		"Must be a MAC address of six or eight octets",
+		[":", "-", "\\."].map((separator) => `${PAIR}(?:${separator}?${PAIR}){5}(?:(?:${separator}?${PAIR}){2})?`),
+	)
 
 /** A bit(n) string, drizzle's bit always declaring n: exactly n bits, as an insert takes it (a cast pads or cuts) */
 function bitString(sqlType: string): string {
