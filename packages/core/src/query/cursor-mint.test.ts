@@ -150,3 +150,19 @@ describe("createCursor on a row without a sort field or its id (QL5 of r22b; sib
 		)
 	})
 })
+
+/* gate fix for b43f36a8 (QL5 of r22b): an id the cursor reads back as no id is refused where it is minted */
+describe("the public createCursor: a tiebreak id no cursor carries", () => {
+	it.each([
+		[true, "a boolean"],
+		[Number.NaN, "a number"],
+	])("refuses a row whose id reads %s with sort_not_wired, naming it", (id, kind) => {
+		expect(() => publicCreateCursor({ id, title: "a" }, BY_TITLE, SEALED)).toThrow(
+			expect.objectContaining({
+				cause: `the tiebreak id id reads ${kind}, which no cursor carries: key the table by text or an integer`,
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
+	})
+})
