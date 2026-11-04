@@ -75,14 +75,17 @@ type Case = [column: string, value: string, dto: boolean, kept: boolean]
 
 const CASES: Case[] = [
 	/* CD5: time(p) with time zone takes an offset, as timetz does */
-	["tt3", "10:00:00+02", true, true],
+	["tt3", "10:00:00+02:00", true, true],
 	["tt3", "10:00:00Z", true, true],
 	["tt3", "10:00:00.123+02:00", true, true],
 	["tt3", "10:00:00.1234+02:00", false, false],
 	/* stricter than Postgres, as for timetz since 0.14: a local time's offset is the session's */
 	["tt3", "10:00:00", false, true],
-	["tt0", "10:00:00.5+02", false, false],
-	["tt0", "10:00:59+02", true, true],
+	/* CD11 of r22b: an offset as RFC 3339 writes it, as a timestamptz's, though Postgres takes more */
+	["tt3", "10:00:00+02", false, true],
+	["tt3", "10:00:00+0200", false, true],
+	["tt0", "10:00:00.5+02:00", false, false],
+	["tt0", "10:00:59+02:00", true, true],
 	/* CD6: a precision refuses a longer fraction, which Postgres rounds */
 	["t0", "23:59:59", true, true],
 	["t0", "10:00", true, true],

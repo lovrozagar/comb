@@ -142,10 +142,9 @@ describe("a time's rules read the parsed modifier (CD5, CD6; sibling: a timestam
 			true,
 			false,
 		])
-		expect(takes('time("v", { precision: 2, withTimezone: true })', ["10:00:01.25+02", "10:00:01.255+02"])).toEqual([
-			true,
-			false,
-		])
+		expect(
+			takes('time("v", { precision: 2, withTimezone: true })', ["10:00:01.25+02:00", "10:00:01.255+02:00"]),
+		).toEqual([true, false])
 		expect(takes('time("v", { withTimezone: true })', ["10:00:01.123456+02:00", "10:00:01"])).toEqual([true, false])
 	})
 
@@ -199,5 +198,28 @@ describe("an interval's and a numeric's rules read the parsed modifier (CD5, CD6
 		expect(() => pgWriteRule({ ...field, sqlType: "time zone" })).toThrow(
 			new TypeError("comb reads no time modifier in time zone"),
 		)
+	})
+})
+
+/*
+ * CD11 of r22b: a timetz and a timestamptz take one offset spelling, RFC 3339's `Z` or `±hh:mm`,
+ * which JSON Schema's `time` and `date-time` formats name, its hours at most 15 as Postgres holds
+ * one. 0.20's timetz took `+02` and `+0200` too, which the timestamptz's z.iso.datetime refused
+ */
+describe("a timetz and a timestamptz take one offset spelling (CD11 of r22b; siblings: Z, an hour past 15)", () => {
+	const OFFSETS = ["Z", "+02:00", "-15:59", "+05:30", "+0200", "+02", "-0530", "+16:00", "z", "+02:60"]
+	const TAKEN = [true, true, true, true, false, false, false, false, false, false]
+
+	it("on each, RFC 3339's alone", () => {
+		const timetz = takes(
+			'time("v", { withTimezone: true })',
+			OFFSETS.map((offset) => `10:00:00${offset}`),
+		)
+		const timestamptz = takes(
+			'timestamp("v", { mode: "string", withTimezone: true })',
+			OFFSETS.map((offset) => `2024-01-01T00:00:00${offset}`),
+		)
+		expect(timetz).toEqual(TAKEN)
+		expect(timestamptz).toEqual(TAKEN)
 	})
 })

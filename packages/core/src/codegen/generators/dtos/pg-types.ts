@@ -60,8 +60,12 @@ function modifierAs<B extends PgModifier["base"]>(sqlType: string, base: B): Ext
 	return modifier as Extract<PgModifier, { base: B }>
 }
 
-/* an offset as Postgres holds one: Z, ±hh or ±hh[:]mm, its hours at most 15 (F4 of the 0.14.1 review) */
-const OFFSET = "(?:Z|[+-](?:0\\d|1[0-5])(?::?[0-5]\\d)?)"
+/*
+ * an offset as RFC 3339 writes one, Z or ±hh:mm, as JSON Schema's time and date-time formats and
+ * z.iso.datetime take it, its hours at most 15 as Postgres holds one (F4 of the 0.14.1 review): the
+ * one source a timetz and a timestamptz read, so they take one spelling (CD11 of r22b)
+ */
+const OFFSET = "(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)"
 
 /** A second's fraction of at most `precision` digits, any length for none, as a regex piece */
 const fractionOf = (precision: number | null): string =>
@@ -98,7 +102,7 @@ function timestampRule({ precision, withTimeZone }: { precision: number | null; 
 	const type = withTimeZone ? "timestamp with time zone" : "timestamp"
 	if (!withTimeZone)
 		return `z.iso.datetime({ local: true }).regex(/[^Zz]$/u, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })${fractionRule(type, precision, "")}`
-	return `z.iso.datetime({ offset: true }).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, "(?:Z|[+-][\\d:]+)")}`
+	return `z.iso.datetime({ offset: true }).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
 }
 
 /** A time, local or with its offset, its fraction held to its precision (CD5, CD6 of r22b) */
