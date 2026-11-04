@@ -240,3 +240,14 @@ describe("loadSnapshot on a tables module of a CommonJS package", () => {
 		expect(loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
 	})
 })
+
+/* D4-4 of the area D round-four review: README item 2's refusal of analyze rests on loadSnapshot's own check */
+describe("loadSnapshot inside a Bun single-file executable", () => {
+	it("refuses before it starts a child", () => {
+		const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
+		expect(() => loadSnapshot(tables(), { moduleUrl: "file:///$bunfs/root/app-exe", run })).toThrow(
+			"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
+		)
+		expect(run.calls).toEqual([])
+	})
+})

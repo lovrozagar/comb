@@ -78,6 +78,8 @@ type LoadOptions = {
 	 * root-relative read finds what it finds for them (F58); the process's by default
 	 */
 	cwd?: string | undefined
+	/** The URL of the module comb runs from, which a Bun single-file executable embeds; this module's own unless a test gives one */
+	moduleUrl?: string | undefined
 	run?: Run | undefined
 	runtime?: "bun" | "node" | undefined
 	/** How long the child may take; LOAD_TIMEOUT_MS unless a test needs less */
@@ -86,9 +88,10 @@ type LoadOptions = {
 
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
 function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
+	const { moduleUrl = import.meta.url } = options
 	/* the child would rerun the app itself, as process.execPath is the app (D3-4 of the area D round-three review) */
 	refuseCompiled(
-		import.meta.url,
+		moduleUrl,
 		"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
 	)
 	/* the child reads the module's imports with ts-morph, an optional peer (under node its hooks load it
