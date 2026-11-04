@@ -85,3 +85,30 @@ describe("a test run leaves no scratch database behind (sibling: P4's stale-repl
 		})
 	})
 })
+
+describe("the sweep on a role that may not read a directory's mtime (sibling: the sweep's own pins above)", () => {
+	/* CI's role may lack pg_stat_file (superuser or pg_read_server_files): an unstamped name is then of unknown age */
+	it("keeps an unstamped scratch database, saying why, when the role may not read its directory's mtime", async () => {
+		const legacy = "comb_scratch_0123456789abcdef0123456789abcdef"
+		const stale = scratchName(Date.now() - SCRATCH_STALE_MS - 60_000)
+		const sent: string[] = []
+		const denied = {
+			escapeIdentifier: (name: string) => `"${name}"`,
+			query: async (text: string) => {
+				sent.push(text)
+				if (text.includes("pg_stat_file")) throw new Error("permission denied for function pg_stat_file")
+				if (text.startsWith("DROP")) return { rows: [] }
+				return {
+					rows: [legacy, stale].map((name, i) => ({ busy: false, name, oid: String(16_384 + i), ours: true })),
+				}
+			},
+		}
+		const lines: string[] = []
+		const swept = await sweepScratchDbs(denied as unknown as pg.Client, { log: (line) => lines.push(line) })
+		expect(swept.dropped).toEqual([stale])
+		expect(sent.filter((text) => text.startsWith("DROP"))).toEqual([`DROP DATABASE "${stale}"`])
+		expect(lines).toContain(
+			`[comb] scratch sweep keeps ${legacy}: its age is unknown: no stamp in its name, and its directory's mtime is unreadable`,
+		)
+	})
+})
