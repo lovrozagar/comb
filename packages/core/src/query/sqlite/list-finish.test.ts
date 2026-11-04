@@ -130,10 +130,10 @@ describe("finish's key families and stored times on Postgres (QL1, QL2 of r22b; 
 			{ column: new DateKey(sql`1`), direction: "asc" },
 		])
 		expect(times["_combKeyTypes"]).toContain("then 'time'")
-		/* a type of the database's own is carried unless its family, the one `_combKeyTypes` selects, is a float */
-		const FAMILY = times["_combKeyTypes"]?.split(" || ',' || ")[0]
+		/* beside a time, only a numeric or a domain over one is carried (AB1 of area B) */
+		const OVER_NUMERIC = `(pg_typeof("pg_ev"."at")::oid >= 16384 and pg_typeof("pg_ev"."at")::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('numeric'::regtype))))`
 		expect(times["_combKeyTexts"]).toBe(
-			`coalesce(("pg_ev"."at")::text, '') || ',' || coalesce(case when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) or (pg_typeof("pg_ev"."at") = 'numeric'::regtype or (pg_typeof("pg_ev"."at")::oid >= 16384 and ${FAMILY} <> 'float')) then ("pg_ev"."at")::text end, '') || ',' || '' || ',' || ''`,
+			`coalesce(("pg_ev"."at")::text, '') || ',' || coalesce(case when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) or (pg_typeof("pg_ev"."at") = 'numeric'::regtype or ${OVER_NUMERIC}) then ("pg_ev"."at")::text end, '') || ',' || '' || ',' || ''`,
 		)
 		expect(extrasOf("postgres", [{ column: pgEv.label, direction: "asc" }])).not.toHaveProperty("_combKeyTexts")
 		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv as never })).toEqual({
@@ -166,5 +166,60 @@ describe("finish's carried numeric texts (QL3 of r22b; sibling: the stored times
 	it("carries an anchored Postgres expression's text only where its type may read rounded, not as a time", () => {
 		const own = extrasOf("postgres", [{ column: sql`${pgEv.at}`, direction: "asc" }], { table: pgEv as never })
 		expect(own["_combKeyTexts"]).toMatch(/^coalesce\(case when \(pg_typeof\("pg_ev"\."at"\) = 'numeric'::regtype or /)
+	})
+})
+
+/** keyTextsSQL of `column` alone on SQLite, bound as read, rendered */
+const render = (column: Parameters<typeof keyTextsSQL>[0][number]["column"]) =>
+	new SQLiteDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "sqlite", () => true)).sql
+
+/*
+ * AB1 of area B: keyTextsSQL joins the carried texts on a comma, so a carried text must never hold
+ * one. Only a numeric's text (digits, a sign, a point, NaN, Infinity), a time's (ISO under every
+ * DateStyle) and SQLite's REAL seconds are carried; any other key is read exactly and carries ''.
+ */
+describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area B; sibling: QL3's carriage)", () => {
+	const kinds = pgTable("kinds", {
+		at: timestamp("at", { mode: "string", precision: 6 }),
+		id: pgText("id").primaryKey(),
+		label: pgText("label"),
+		n: pgNumeric("n", { mode: "number" }),
+		when: timestamp("when", { precision: 6 }),
+	})
+	const sqliteKinds = sqliteTable("sqlite_kinds", {
+		at: integer("at", { mode: "timestamp" }),
+		label: integer("label"),
+	})
+	const pgKeys: Array<[string, Parameters<typeof keyTextsSQL>[0][number]["column"], boolean]> = [
+		["a numeric in number mode", kinds.n, true],
+		["a date-mode timestamp", kinds.when, true],
+		["a string-mode timestamp", kinds.at, false],
+		["a text column", kinds.label, false],
+		["an expression", sql`${kinds.label}`, true],
+	]
+	const TYPES_ALLOWED = ["numeric", "timestamp without time zone", "timestamp with time zone", "date"]
+
+	it.each([false, true])("names no type but a numeric or a time in a Postgres key's guard (as read: %s)", (asRead) => {
+		const rendered = new PgDialect().sqlToQuery(
+			keyTextsSQL(
+				pgKeys.map(([, column]) => ({ column, direction: "asc" as const })),
+				"postgres",
+				() => asRead,
+			),
+		).sql
+		const named = [...rendered.matchAll(/'([^']+)'::regtype/g)].map((match) => match[1])
+		expect(named.length).toBeGreaterThan(0)
+		expect(named.filter((type) => !TYPES_ALLOWED.includes(type as string))).toEqual([])
+	})
+
+	it.each(pgKeys)("carries %s's text or nothing, by its type", (_, column, carries) => {
+		const rendered = new PgDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "postgres", () => true)).sql
+		expect(rendered === "''").toBe(!carries)
+	})
+
+	it("carries SQLite's REAL seconds of a seconds-mode timestamp alone, as a number's digits", () => {
+		expect(render(sqliteKinds.at)).toContain("printf('%!.17g', ")
+		expect(render(sqliteKinds.label)).toBe("''")
+		expect(render(sql`${sqliteKinds.label}`)).toBe("''")
 	})
 })

@@ -328,3 +328,69 @@ describe("an anchorless list carries a time key's stored value (QL2; sibling: a 
 			expect(await served(sessions.pg(), { direction, key, shape: "anchorless" })).toEqual(SERVED[direction])
 	})
 })
+
+const tag = pgTable("tag", { id: text("id").primaryKey(), label: text("label"), mood: text("mood") })
+
+/*
+ * AB1 of area B: 07bf416c carried the text of every key of a database-created type but a float, so
+ * an enum or a domain over text whose value held a comma split into more keys than the sort has, and
+ * every page was a 500 page_not_wired. Only a numeric, or a domain over one, is a number no driver
+ * reads exactly; every other key binds as read. Ids are out of key order. 0.20.1 paged these lists.
+ */
+describe("a key read exactly carries no text (AB1; sibling: QL3's carriage)", () => {
+	const sessions = usePg()
+
+	/** Every id of `tag` by `key`, one a page, by cursor, and each page's carried texts */
+	async function tagIds(
+		key: SQL,
+		{ anchored, direction }: { anchored: boolean; direction: "asc" | "desc" },
+	): Promise<{ ids: string[]; texts: unknown[] }> {
+		const client = sessions.pg()
+		const [made] = (await client.query("SELECT to_regclass('pg_temp.tag') AS t")).rows
+		if (made?.t === null)
+			await client.query(`CREATE TYPE pg_temp.mood AS ENUM ('a,1', 'b,2', 'c,3', 'd,4');
+		CREATE DOMAIN pg_temp.label AS text;
+		CREATE TEMP TABLE tag (id text PRIMARY KEY, mood pg_temp.mood NOT NULL, label pg_temp.label NOT NULL);
+		INSERT INTO tag VALUES ('d', 'a,1', 'a, x'), ('a', 'b,2', 'b, x'), ('c', 'c,3', 'c, x'), ('b', 'd,4', 'd, x')`)
+		const db = drizzle({ client })
+		const ids: string[] = []
+		const texts: unknown[] = []
+		let cursor: string | undefined
+		for (let n = 1; n <= 8; n++) {
+			const parsed = { cursor, limit: 1, parsedSort: [{ direction, field: "k" }] }
+			const built = anchored
+				? buildDerivedListQuery({
+						...SEALED,
+						anchor: { idColumn: tag.id, table: tag },
+						parsed,
+						sortColumns: { k: key },
+					})
+				: buildDerivedListQuery({ ...SEALED, idColumn: tag.id, parsed, sortColumns: { k: key } })
+			const query = db
+				.select({ id: tag.id, k: key, ...built.extras })
+				.from(tag)
+				.$dynamic()
+			const rows = await (built.where === undefined ? query : query.where(built.where))
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+			texts.push(...rows.map((row) => (row as Record<string, unknown>)["_combKeyTexts"]))
+			const [items, meta] = queryHelpers.paginate(rows, built)
+			ids.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		return { ids, texts }
+	}
+
+	it.each([
+		["an enum whose labels hold a comma", sql`${tag.mood}`],
+		["a domain over text holding a comma", sql`${tag.label}`],
+	])("pages %s inside an expression every row once, anchorless and anchored, asc and desc", async (_, key) => {
+		for (const anchored of [false, true])
+			for (const direction of ["asc", "desc"] as const) {
+				const { ids, texts } = await tagIds(key, { anchored, direction })
+				expect(ids, `${anchored ? "anchored" : "anchorless"} ${direction}`).toEqual(SERVED[direction])
+				expect(texts.every((carried) => carried === undefined || carried === "")).toBe(true)
+			}
+	})
+})

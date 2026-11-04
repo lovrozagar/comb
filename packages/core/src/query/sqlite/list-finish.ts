@@ -130,17 +130,26 @@ const storageOf = (column: SQLWrapper): SQL =>
 const isTime = (column: SQLWrapper): SQL =>
 	sql`pg_typeof(${column}) in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype)`
 
+const floatTypes = () => sql`'double precision'::regtype, 'real'::regtype`
+const fixedTypes = () => sql`'smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype`
+
+/**
+ * Whether a key's type is a domain whose base, through domains of domains, is one of `types`: none is
+ * built in (below 16384, FirstNormalObjectId), so the domains are read only for a key of another type
+ */
+const isDomainOver = (column: SQLWrapper, types: SQL): SQL =>
+	sql`(pg_typeof(${column})::oid >= 16384 and pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in (${types}))))`
+
 /**
  * Postgres's family of a key: `float` for a double precision or real, a double the driver reads
  * exactly; `fixed` for an integer or numeric, which a driver reading it as a number past 2^53
- * rounds; `other` for any other type (Q2 of r21). A domain is no type pg_typeof names, so one whose
- * base, followed through domains of domains, is a double is `float` too: the domains are read once
- * per query, and only for a key whose type is no built-in one (below 16384, FirstNormalObjectId),
- * as no built-in domain's base is a double (Q1 of r22). `time` for a timestamp, timestamptz or date,
- * whose stored value a list bound as read carries as text (QL2 of r22b)
+ * rounds; `other` for any other type (Q2 of r21). A domain is its base's family, followed through
+ * domains of domains (Q1 of r22; a domain over an integer or numeric is `fixed`, AB1 of area B).
+ * `time` for a timestamp, timestamptz or date, whose stored value a list bound as read carries as
+ * text (QL2 of r22b)
  */
 const familyOf = (column: SQLWrapper): SQL =>
-	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' when ${isTime(column)} then 'time' when pg_typeof(${column})::oid < 16384 then 'other' when pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('double precision'::regtype, 'real'::regtype))) then 'float' else 'other' end`
+	sql`case when pg_typeof(${column}) in (${floatTypes()}) then 'float' when pg_typeof(${column}) in (${fixedTypes()}) then 'fixed' when ${isTime(column)} then 'time' when ${isDomainOver(column, floatTypes())} then 'float' when ${isDomainOver(column, fixedTypes())} then 'fixed' else 'other' end`
 
 /**
  * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
@@ -163,11 +172,12 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 }
 
 /**
- * Whether a Postgres expression's type is one no driver may read exactly as a number: a numeric, or
- * a type of the database's own (a domain or one it created) that is no float (QL3 of r22b)
+ * Whether a Postgres expression's type is a number no driver reads exactly: a numeric or a domain over
+ * one (QL3 of r22b). No other type carries its text, so none holds the comma keyTextsSQL joins on (AB1
+ * of area B): a numeric's is digits, a sign, a point, NaN or Infinity; a time's is ISO in every DateStyle
  */
 const roundsOnRead = (column: SQLWrapper): SQL =>
-	sql`(pg_typeof(${column}) = 'numeric'::regtype or (pg_typeof(${column})::oid >= 16384 and ${familyOf(column)} <> 'float'))`
+	sql`(pg_typeof(${column}) = 'numeric'::regtype or ${isDomainOver(column, sql`'numeric'::regtype`)})`
 
 /** Each of `keys`' stored text, comma-joined, empty for one no list carries; asRead keys carry their time too */
 function keyTextsSQL(
