@@ -1194,7 +1194,7 @@ What changes for a project on 0.20. Before deploying it:
 
 47. **Keep the cache when `LruCache.set` refuses a TTL.** A `set` given a TTL it refuses, such as `0` or `NaN`, threw its `RangeError` only after it had dropped the key's current entry and, on a full cache, evicted the oldest. It now throws first and leaves the cache as it was. **Fix:** none.
 
-43. **Give `createUlidFactory` any clock that reads milliseconds.** A clock with a fraction, such as `performance.timeOrigin + performance.now()`, wrote the text `undefined` into every id, 34 characters outside the ULID alphabet, and a clock past 2^48 − 1 wrapped, so its ids stopped sorting. The reading is now floored to its millisecond, and one that is not finite, is negative or is past 2^48 − 1 is a `RangeError` naming it. **Fix:** none; a clock that read outside that range now throws.
+48. **Give `createUlidFactory` any clock that reads milliseconds.** A clock with a fraction, such as `performance.timeOrigin + performance.now()`, wrote the text `undefined` into every id, 34 characters outside the ULID alphabet, and a clock past 2^48 − 1 wrapped, so its ids stopped sorting. The reading is now floored to its millisecond, and one that is not finite, is negative or is past 2^48 − 1 is a `RangeError` naming it. **Fix:** none; a clock that read outside that range now throws.
 
 ## Upgrading to 0.20.1
 
