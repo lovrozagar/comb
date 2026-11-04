@@ -5,6 +5,7 @@
  * 0.14 changelog lists. A read DTO keeps the plain type, as a read never refuses a stored row (F65).
  */
 import type { FieldMeta } from "../../analyzer-types.ts"
+import { inetRule } from "./ip-patterns.ts"
 
 /**
  * A Postgres type's modifier, parsed once from drizzle's `getSQLType()` so every rule reads the
@@ -215,10 +216,6 @@ const REAL =
 /** The shared schema a cidr's rule is, which the entity file imports */
 export const CIDR = "cidrSchema"
 
-/* an inet holds a host address, its netmask optional; a cidr is the shared cidrSchema, which also
-   refuses a bit set past its prefix length, through comb's own isCidr */
-const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
-
 /*
  * The spellings Postgres takes for a MAC address. A macaddr: octets of one or two hex digits each,
  * all split by `:` or all by `-`; two halves of six digits; groups of four split by `.` or `-`; or
@@ -266,7 +263,8 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"string binary": ({ sqlType }) => bitString(sqlType),
 	"string cidr": () => CIDR,
 	"string date": () => `z.stringFormat("date", /^${ISO_DATE}$/u)`,
-	"string inet": () => INET,
+	/* an inet a host address, its netmask optional; a cidr the shared cidrSchema, which also refuses a bit set past its prefix length */
+	"string inet": inetRule,
 	"string interval": ({ sqlType }) => intervalRule(modifierAs(sqlType, "interval")),
 	"string macaddr": macaddr,
 	"string macaddr8": macaddr8,

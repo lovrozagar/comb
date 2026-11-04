@@ -11,6 +11,17 @@ function ipv4Bits(address: string): string | null {
 	return octets.map((octet) => Number(octet).toString(2).padStart(8, "0")).join("")
 }
 
+/**
+ * An IPv6 address's IPv4 tail's 32 bits: two to four decimal octets with no leading zero, the ones
+ * left out zero, as Postgres reads `::ffff:1.2.3` as `::ffff:1.2.3.0` (AA12 of r22); null when it is none
+ */
+function tailBits(tail: string): string | null {
+	const octets = tail.split(".")
+	if (octets.length < 2 || octets.length > 4 || !octets.every((octet) => /^(?:0|[1-9][0-9]{0,2})$/.test(octet)))
+		return null
+	return ipv4Bits([...octets, "0", "0"].slice(0, 4).join("."))
+}
+
 /** An IPv6 group's 16 bits, or null when it is no group of one to four hex digits */
 const groupBits = (group: string): string | null =>
 	/^[\da-f]{1,4}$/i.test(group) ? Number.parseInt(group, 16).toString(2).padStart(16, "0") : null
@@ -20,7 +31,7 @@ function groupsBits(part: string): string | null {
 	if (part === "") return ""
 	const groups = part.split(":")
 	const last = groups.at(-1) as string
-	const tail = last.includes(".") ? ipv4Bits(last) : ""
+	const tail = last.includes(".") ? tailBits(last) : ""
 	const bits = (tail === "" ? groups : groups.slice(0, -1)).map(groupBits)
 	return tail === null || bits.includes(null) ? null : bits.join("") + tail
 }

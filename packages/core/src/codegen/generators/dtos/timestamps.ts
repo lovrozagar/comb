@@ -1,5 +1,6 @@
 /** The `_shared` file: base aliases, example objects, timestamp schemas and their refinements. */
 import { COMB_NAMESPACE, combImport } from "./comb-namespace.ts"
+import { inetRule } from "./ip-patterns.ts"
 import type { SharedSchema, TableInfo } from "./dto-types.ts"
 import { SHARED_META_KEYS, SHARED_META_VALUES, SHARED_SCHEMAS } from "./example-meta.ts"
 import { BASE_TYPE_ALIASES, rewriteBaseTypes } from "./shared-schemas.ts"
@@ -145,7 +146,7 @@ function header(): string[] {
 		"export const jsonValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(_json), z.record(z.string(), _json)])",
 		"",
 		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50), published as x-comb-cidr, which a field that names it states (CS8 of r22b, AA3) */",
-		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })',
+		`export const cidrSchema = ${inetRule()}.refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })`,
 		"",
 	]
 }

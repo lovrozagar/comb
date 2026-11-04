@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { SharedSchema, TableInfo } from "./dto-types.ts"
+import { inetRule } from "./ip-patterns.ts"
 import {
 	collectUsedTimestampCombos,
 	comboFields,
@@ -74,9 +75,7 @@ describe("generateSharedFile", () => {
 	it("imports comb's namespace, from where generated code imports comb, only when it keeps cidrSchema (C2 of r17)", () => {
 		const cidr = generateSharedFile(none, new Map(), { combFrom: "~/comb", imported: new Set(["cidrSchema"]) })
 		expect(cidr).toContain('import * as comb from "~/comb"')
-		expect(cidr).toContain(
-			"export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, ",
-		)
+		expect(cidr).toContain(`export const cidrSchema = ${inetRule()}.refine(comb.isCidr, `)
 		expect(generateSharedFile(none, new Map(), { imported: new Set(["cidrSchema"]) })).toContain(
 			'import * as comb from "@lovrozagar/comb"',
 		)

@@ -17,6 +17,12 @@ describe("isCidr", () => {
 		"1:2:3:4:5:6:7:8/128",
 		"::ffff:192.168.0.0/120",
 		"1:2:3:4:5:6:1.2.3.4",
+		/* AA12 of r22: an IPv4 tail of two or three parts, which Postgres pads with zero octets */
+		"::1.2.3",
+		"::1.2",
+		"::ffff:1.2.3/120",
+		"::ffff:1.2/112",
+		"1:2:3:4:5:6:1.2.3",
 	])("takes %s", (value) => {
 		expect(isCidr(value)).toBe(true)
 	})
@@ -43,7 +49,12 @@ describe("isCidr", () => {
 		"g::1",
 		/* stricter than Postgres, listed in the 0.14 changelog: an abbreviated address */
 		"10.1",
-		"::1.2.3",
+		/* AA12 of r22: Postgres refuses each: a bit past the prefix once padded, a leading zero, a fifth part, a lone one */
+		"::ffff:1.2.3/104",
+		"::ffff:01.2.3",
+		"::ffff:1.2.3.4.5",
+		"::ffff:1.2.256",
+		"::1.",
 	])("refuses %s", (value) => {
 		expect(isCidr(value)).toBe(false)
 	})
