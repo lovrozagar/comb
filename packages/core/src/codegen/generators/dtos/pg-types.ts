@@ -65,11 +65,25 @@ function modifierAs<B extends PgModifier["base"]>(sqlType: string, base: B): Ext
  * z.iso.datetime take it, its hours at most 15 as Postgres holds one (F4 of the 0.14.1 review): the
  * one source a timetz and a timestamptz read, so they take one spelling (CD11 of r22b)
  */
-const OFFSET = "(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)"
+const OFFSET = "(?:Z|[+-](?:0[0-9]|1[0-5]):[0-5][0-9])"
+
+/*
+ * zod's ISO date, date-time and time regexes (4.6.0), each \d written as [0-9], and passed as their
+ * `pattern`: zod's publish \d, which Rust's regex reads as any Unicode digit, so comb publishes its
+ * own, which ECMAScript, Go's RE2 and Rust's regex read alike (AA7 of r22)
+ */
+const ISO_DATE =
+	"(?:(?:[0-9][0-9][2468][048]|[0-9][0-9][13579][26]|[0-9][0-9]0[48]|[02468][048]00|[13579][26]00)-02-29|[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|(?:02)-(?:0[1-9]|1[0-9]|2[0-8])))"
+const ISO_CLOCK = "(?:[01][0-9]|2[0-3]):[0-5][0-9]"
+const ISO_SECOND = "(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?"
+const ISO_WALL = `${ISO_CLOCK}(?::[0-5][0-9](?:\\.[0-9]+)?)?`
+const ISO_TIME = `^${ISO_WALL}$`
+const ISO_LOCAL = `^${ISO_DATE}T(?:${ISO_SECOND}(?:Z)|${ISO_WALL})$`
+const ISO_OFFSET = `^${ISO_DATE}T(?:${ISO_SECOND}(?:Z|(?:[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])))$`
 
 /** A second's fraction of at most `precision` digits, any length for none, as a regex piece */
 const fractionOf = (precision: number | null): string =>
-	precision === null ? "(?:\\.\\d+)?" : precision === 0 ? "" : `(?:\\.\\d{1,${precision}})?`
+	precision === null ? "(?:\\.[0-9]+)?" : precision === 0 ? "" : `(?:\\.[0-9]{1,${precision}})?`
 
 /** Why a fraction past `precision` digits is refused: Postgres would round it, maybe into the next day */
 const roundedBy = (type: string, precision: number): string =>
@@ -84,13 +98,13 @@ const roundedBy = (type: string, precision: number): string =>
  */
 function fractionRule(type: string, precision: number | null, tail: string): string {
 	if (precision === null) return ""
-	const fraction = precision === 0 ? "" : `|\\.\\d{1,${precision}}`
-	return `.regex(/(?:[^.\\d]\\d\\d${fraction})${tail}$/u, { message: "${roundedBy(type, precision)}" })`
+	const fraction = precision === 0 ? "" : `|\\.[0-9]{1,${precision}}`
+	return `.regex(/(?:[^.0-9][0-9][0-9]${fraction})${tail}$/u, { message: "${roundedBy(type, precision)}" })`
 }
 
 /* a time with an offset, which z.iso.time does not take: hh:mm[:ss[.f]], then the offset (F4 of the 0.14.1 review) */
 const timetz = (precision: number | null): string =>
-	`z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d${fractionOf(precision)})?${OFFSET}$/u${precision === null ? "" : `, { message: "Must be a time with an offset${precision === 0 ? " and no fraction of a second" : ` and at most ${precision} digits after the second's point`}, which time(${precision}) with time zone would round" }`})`
+	`z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9]${fractionOf(precision)})?${OFFSET}$/u${precision === null ? "" : `, { message: "Must be a time with an offset${precision === 0 ? " and no fraction of a second" : ` and at most ${precision} digits after the second's point`}, which time(${precision}) with time zone would round" }`})`
 
 /*
  * A timestamp keeps no zone: given an offset or Z it discards it, so the instant is lost. A
@@ -101,29 +115,31 @@ const timetz = (precision: number | null): string =>
 function timestampRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
 	const type = withTimeZone ? "timestamp with time zone" : "timestamp"
 	if (!withTimeZone)
-		return `z.iso.datetime({ local: true }).regex(/[^Zz]$/u, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })${fractionRule(type, precision, "")}`
-	return `z.iso.datetime({ offset: true }).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
+		return `z.iso.datetime({ local: true, pattern: /${ISO_LOCAL}/u }).regex(/[^Zz]$/u, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })${fractionRule(type, precision, "")}`
+	return `z.iso.datetime({ offset: true, pattern: /${ISO_OFFSET}/u }).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
 }
 
 /** A time, local or with its offset, its fraction held to its precision (CD5, CD6 of r22b) */
 function timeRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
-	return withTimeZone ? timetz(precision) : `z.iso.time()${fractionRule("time", precision, "")}`
+	return withTimeZone
+		? timetz(precision)
+		: `z.iso.time({ pattern: /${ISO_TIME}/u })${fractionRule("time", precision, "")}`
 }
 
 /* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it (CS3 of
  * r22b): weeks alone, or at least one date or time part, the seconds alone taking a fraction. Its
  * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007 (AA6 of r22) */
-const SECONDS = "\\d+(?:\\.\\d+)?S"
-const TIME_PART = `T(?:\\d+H(?:\\d+M)?(?:${SECONDS})?|\\d+M(?:${SECONDS})?|${SECONDS})`
-const DURATION = `^P(?:\\d+W|(?:\\d+Y(?:\\d+M)?(?:\\d+D)?|\\d+M(?:\\d+D)?|\\d+D)(?:${TIME_PART})?|${TIME_PART})$`
+const SECONDS = "[0-9]+(?:\\.[0-9]+)?S"
+const TIME_PART = `T(?:[0-9]+H(?:[0-9]+M)?(?:${SECONDS})?|[0-9]+M(?:${SECONDS})?|${SECONDS})`
+const DURATION = `^P(?:[0-9]+W|(?:[0-9]+Y(?:[0-9]+M)?(?:[0-9]+D)?|[0-9]+M(?:[0-9]+D)?|[0-9]+D)(?:${TIME_PART})?|${TIME_PART})$`
 
 // lookup-table: the ISO 8601 duration an interval's last field keeps, as a regex of no lookaround
 const KEPT_BY: Readonly<Record<Exclude<IntervalField, "second">, string>> = {
 	day: "^P[^T]*$",
-	hour: "^P[^T]*(?:T\\d+H)?$",
-	minute: "^P[^T]*(?:T(?:\\d+H)?(?:\\d+M)?)?$",
-	month: "^P(?:\\d+Y)?(?:\\d+M)?$",
-	year: "^P\\d+Y$",
+	hour: "^P[^T]*(?:T[0-9]+H)?$",
+	minute: "^P[^T]*(?:T(?:[0-9]+H)?(?:[0-9]+M)?)?$",
+	month: "^P(?:[0-9]+Y)?(?:[0-9]+M)?$",
+	year: "^P[0-9]+Y$",
 }
 
 /**
@@ -139,7 +155,7 @@ function intervalRule({ field, precision }: { field: IntervalField | null; preci
 	const fraction =
 		precision === null
 			? ""
-			: `.regex(/^[^.]*${precision === 0 ? "" : `(?:\\.\\d{1,${precision}}S)?`}$/u, { message: "${roundedBy("interval", precision)}" })`
+			: `.regex(/^[^.]*${precision === 0 ? "" : `(?:\\.[0-9]{1,${precision}}S)?`}$/u, { message: "${roundedBy("interval", precision)}" })`
 	return `z.iso.duration({ pattern: /${DURATION}/u })${fields}${fraction}`
 }
 
@@ -151,13 +167,13 @@ function intervalRule({ field, precision }: { field: IntervalField | null; preci
  */
 function numericText(sqlType: string): string {
 	const { precision, scale } = modifierAs(sqlType, "numeric")
-	if (precision === null) return "z.string().regex(/^-?\\d+(?:\\.\\d+)?$/u)"
+	if (precision === null) return "z.string().regex(/^-?[0-9]+(?:\\.[0-9]+)?$/u)"
 	if (scale < 0)
-		return `z.string().regex(/^-?0*(?:\\d{1,${precision}}0{${-scale}}|0)$/u, { message: "Must be a whole number of at most ${precision} digits then ${-scale} zeros, which numeric(${precision}, ${scale}) holds unrounded" })`
+		return `z.string().regex(/^-?0*(?:[0-9]{1,${precision}}0{${-scale}}|0)$/u, { message: "Must be a whole number of at most ${precision} digits then ${-scale} zeros, which numeric(${precision}, ${scale}) holds unrounded" })`
 	if (scale > precision)
-		return `z.string().regex(/^-?0+(?:\\.(?:0{1,${scale}}|0{${scale - precision}}\\d{1,${precision}}))?$/u, { message: "Must be a number below 10^${precision - scale} of at most ${scale} digits after the point" })`
-	const whole = precision - scale === 0 ? "0" : `\\d{1,${precision - scale}}`
-	const fraction = scale === 0 ? "" : `(?:\\.\\d{1,${scale}})?`
+		return `z.string().regex(/^-?0+(?:\\.(?:0{1,${scale}}|0{${scale - precision}}[0-9]{1,${precision}}))?$/u, { message: "Must be a number below 10^${precision - scale} of at most ${scale} digits after the point" })`
+	const whole = precision - scale === 0 ? "0" : `[0-9]{1,${precision - scale}}`
+	const fraction = scale === 0 ? "" : `(?:\\.[0-9]{1,${scale}})?`
 	return `z.string().regex(/^-?0*${whole}${fraction}$/u, { message: "Must be a number of at most ${precision - scale} digits before the point and ${scale} after it" })`
 }
 
@@ -175,7 +191,7 @@ function numericNumber(sqlType: string): string | undefined {
 /** A digit string as long as `limit` and not above it: `limit` itself, or a smaller digit where the two first part */
 function notAbove(limit: string): string {
 	const below = [...limit].flatMap((digit, at) =>
-		digit === "0" ? [] : [`${limit.slice(0, at)}[0-${Number(digit) - 1}]\\d{${limit.length - at - 1}}`],
+		digit === "0" ? [] : [`${limit.slice(0, at)}[0-${Number(digit) - 1}][0-9]{${limit.length - at - 1}}`],
 	)
 	return [...below, limit].join("|")
 }
@@ -183,7 +199,7 @@ function notAbove(limit: string): string {
 /* a bigint in drizzle's string mode: decimal digits within int8's range, as one pattern a JSON
    Schema reader applies too (CS8 of r22b): at most 18 significant digits, or 19 not past the bound */
 const int64Text = (): string =>
-	`z.string().regex(/^(?:0*(?:\\d{1,18}|${notAbove("9223372036854775807")})|-0*(?:\\d{1,18}|${notAbove("9223372036854775808")}))$/u, { message: "Must be a whole number within bigint's range, -2^63 to 2^63 - 1" })`
+	`z.string().regex(/^(?:0*(?:[0-9]{1,18}|${notAbove("9223372036854775807")})|-0*(?:[0-9]{1,18}|${notAbove("9223372036854775808")}))$/u, { message: "Must be a whole number within bigint's range, -2^63 to 2^63 - 1" })`
 
 /*
  * float4 holds magnitudes up to 3.4028235e38, and refuses a value that rounds to zero: at or below
@@ -207,7 +223,7 @@ const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
  * (AA5 of r22). Its case is written into the classes and each separator is its own branch, as JSON
  * Schema publishes no flag and RE2 takes no backreference (CS2 of r22b)
  */
-const HEX = "[\\dA-Fa-f]"
+const HEX = "[0-9A-Fa-f]"
 const OCTET = `${HEX}{1,2}`
 const PAIR = `${HEX}{2}`
 const QUAD = `${HEX}{4}`
@@ -245,7 +261,7 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"number float": () => REAL,
 	"string binary": ({ sqlType }) => bitString(sqlType),
 	"string cidr": () => CIDR,
-	"string date": () => "z.iso.date()",
+	"string date": () => `z.iso.date({ pattern: /^${ISO_DATE}$/u })`,
 	"string inet": () => INET,
 	"string interval": ({ sqlType }) => intervalRule(modifierAs(sqlType, "interval")),
 	"string macaddr": macaddr,

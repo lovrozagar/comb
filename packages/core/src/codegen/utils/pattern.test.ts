@@ -55,3 +55,27 @@ describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 		)
 	})
 })
+
+describe("patternLiteral: a pattern with no shorthand class (AA7 of r22)", () => {
+	/* AA7 of r22: Go's RE2 reads \s and \S as ASCII and Rust's regex reads \d and \w as Unicode, so
+	   one of these publishes three rules; a class written out means the same in each engine */
+	it.each([
+		[String.raw`/^\d{5}$/`, String.raw`\d`, "[0-9]"],
+		[String.raw`/^\D$/`, String.raw`\D`, "[^0-9]"],
+		[String.raw`/^\w+$/u`, String.raw`\w`, "[A-Za-z0-9_]"],
+		[String.raw`/^[\W]$/`, String.raw`\W`, "[^A-Za-z0-9_]"],
+		[String.raw`/^a\sb$/`, String.raw`\s`, "the blanks it means, as [ \\t]"],
+		[String.raw`/^\S+$/`, String.raw`\S`, "the blanks it refuses, as [^ \\t]"],
+		[String.raw`/\bcat\b/`, String.raw`\b`, "the characters on either side as classes, such as (?:^|[^A-Za-z0-9_])"],
+		[String.raw`/a\B/`, String.raw`\B`, "the characters on either side as classes, such as (?:^|[^A-Za-z0-9_])"],
+	])("refuses %s, naming the class to write for %s", (pattern, escape, instead) => {
+		expect(() => patternLiteral(pattern, "t.code")).toThrow(
+			`t.code: pattern ${pattern} holds ${escape}, which ECMAScript, Go's RE2 and Rust's regex read as other sets: write ${instead}`,
+		)
+	})
+
+	it("takes an escaped backslash before a letter, and a letter escape outside the shorthand set", () => {
+		expect(patternLiteral(String.raw`/^\\d$/`, "x")).toBe(String.raw`/^\\d$/u`)
+		expect(patternLiteral(String.raw`/^[0-9]\.\p{L}\n$/`, "x")).toBe(String.raw`/^[0-9]\.\p{L}\n$/u`)
+	})
+})

@@ -28,7 +28,7 @@ const COLUMNS: Record<string, string> = {
 	owner: 'c.ref("owner_id").references(() => owner.id)',
 	plain: 'c.json("plain", Profile)',
 	pw: 'c.text("pw", { password: true, max: 255 })',
-	pw_pattern: 'c.text("pw_pattern", { password: true, pattern: "/\\\\d/" })',
+	pw_pattern: 'c.text("pw_pattern", { password: true, pattern: "/[0-9]/" })',
 	required: 'c.text("required").notNull()',
 	url: 'c.text("url", { url: true, pattern: "/\\\\.com/" })',
 }
@@ -100,7 +100,7 @@ describe("the manifest states what the DTO enforces (C2 of r20)", () => {
 					{ max: column.max, maxBytes: column.maxBytes, min: column.min, patterns: column.patterns.map(sourceOf) },
 				]),
 			)
-			/* an id's length is its pattern's, \S{1,48}, which the DTO publishes without a minLength or maxLength */
+			/* an id's length is its pattern's, {1,48}, which the DTO publishes without a minLength or maxLength */
 			const { owner: id, ...rest } = stated
 			const published = Object.fromEntries(
 				table.fields
@@ -112,11 +112,16 @@ describe("the manifest states what the DTO enforces (C2 of r20)", () => {
 			expect(of(false)).toEqual(published)
 			const none = { max: null, maxBytes: null, min: null, patterns: [] }
 			expect(of(true)).toEqual(dialect === "postgres" ? { real: none, uid: none } : {})
-			expect(id).toEqual({ max: 48, maxBytes: null, min: 1, patterns: ["^\\S{1,48}$"] })
+			expect(id).toEqual({
+				max: 48,
+				maxBytes: null,
+				min: 1,
+				patterns: [String.raw`^[^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]{1,48}$`],
+			})
 			/* the cases the review named, stated outright */
 			/* a password column holds the hash: its declared bounds and pattern, none of comb's own (C1 of r21) */
 			expect(stated["pw"]).toEqual({ max: 255, maxBytes: null, min: null, patterns: [] })
-			expect(stated["pw_pattern"]).toEqual({ max: null, maxBytes: null, min: null, patterns: ["\\d"] })
+			expect(stated["pw_pattern"]).toEqual({ max: null, maxBytes: null, min: null, patterns: ["[0-9]"] })
 			expect([stated["email"]?.min, stated["required"]?.min, stated["doc"]?.maxBytes]).toEqual([6, 1, 16])
 		},
 	)

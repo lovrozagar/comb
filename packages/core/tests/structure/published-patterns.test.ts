@@ -36,6 +36,7 @@ export const row = pgTable("row", {
 	minutes: interval("minutes", { fields: "hour to minute" }),
 	whole: interval("whole", { precision: 0 }),
 	clock: time("clock", { withTimezone: true }),
+	wall: time("wall"),
 	at: timestamp("at", { mode: "string", withTimezone: true }),
 	local: timestamp("local", { mode: "string" }),
 	money: numeric("money", { precision: 5, scale: 2 }),
@@ -184,6 +185,21 @@ const POOL = [
 	"-3",
 	"data:image/png;base64,AA",
 	"https://example.com/a.png",
+	/* AA7 of r22: where ECMAScript's \s, RE2's and Rust's part, and where \d and \w do */
+	"a\u00a0b",
+	"row_\u00a0x",
+	" ab ",
+	"a\vb",
+	"\v",
+	"ab\ufeff",
+	"a\u2028b",
+	"\u3000",
+	"\u1680x",
+	"a\u202fb",
+	"\u0663\u0662\u0661",
+	"\uff11\uff12\uff13",
+	"PT\u0661S",
+	"\u0661\u0662.5",
 ]
 
 const TRANSFORMS: Record<string, (text: string) => string> = {
@@ -192,9 +208,26 @@ const TRANSFORMS: Record<string, (text: string) => string> = {
 	uppercase: (text) => text.toUpperCase(),
 }
 
+/**
+ * Ajv's regex engine as RE2, which Go's validators run: re2js, searching as `pattern` does. Ajv
+ * caches a compiled pattern by its string, so each says its own source (AA7 of r22)
+ */
+const re2Engine = Object.assign(
+	(source: string) => {
+		const compiled = RE2JS.compile(source)
+		return { test: (text: string) => compiled.matcher(text).find(), toString: () => `/${source}/` }
+	},
+	{ code: "re2" },
+)
+
 /** What a reader built from the published field takes: its transforms applied, then the schema */
-function readerOf(field: Node, defs: unknown): (value: string) => boolean {
-	const ajv = new Ajv2020({ logger: false, strict: false, validateFormats: false })
+function readerOf(field: Node, defs: unknown, re2 = false): (value: string) => boolean {
+	const ajv = new Ajv2020({
+		logger: false,
+		strict: false,
+		validateFormats: false,
+		...(re2 ? { code: { regExp: re2Engine } } : {}),
+	})
 	const validate = ajv.compile({ ...field, $defs: defs ?? {} })
 	const transforms = (field["x-comb-transform"] as string[] | undefined) ?? []
 	return (value) =>
@@ -213,20 +246,38 @@ describe("the patterns comb publishes (CS1, CS2, CS3; siblings: the id, the MAC,
 		expect(refused).toEqual([])
 	})
 
-	it("hold zod's verdict equal to a JSON Schema reader's, field by field, over astral, combining and escape cases", async () => {
-		const disagree: string[] = []
-		for (const { dialect, name, schema } of await lanes()) {
-			const document = published(schema)
-			for (const [key, field] of Object.entries(document["properties"] as Record<string, Node>)) {
-				if (patternsOf(field).length === 0) continue
-				const reader = readerOf(field, document["$defs"])
-				const parse = schema.shape[key] as z.ZodType
-				for (const value of POOL)
-					if (parse.safeParse(value).success !== reader(value))
-						disagree.push(`${dialect} ${name}.${key} ${JSON.stringify(value)}: zod ${parse.safeParse(value).success}`)
+	it.each([
+		["an ECMA-262 reader's", false],
+		["an RE2 reader's, as Go's is (AA7 of r22)", true],
+	])(
+		"hold zod's verdict equal to %s, field by field, over astral, combining, escape and blank cases",
+		async (_, re2) => {
+			const disagree: string[] = []
+			for (const { dialect, name, schema } of await lanes()) {
+				const document = published(schema)
+				for (const [key, field] of Object.entries(document["properties"] as Record<string, Node>)) {
+					if (patternsOf(field).length === 0) continue
+					const reader = readerOf(field, document["$defs"], re2)
+					const parse = schema.shape[key] as z.ZodType
+					for (const value of POOL)
+						if (parse.safeParse(value).success !== reader(value))
+							disagree.push(`${dialect} ${name}.${key} ${JSON.stringify(value)}: zod ${parse.safeParse(value).success}`)
+				}
 			}
-		}
-		expect(disagree).toEqual([])
+			expect(disagree).toEqual([])
+		},
+	)
+
+	/* Rust's regex reads \d and \w as Unicode, and RE2 reads \s as ASCII: a pattern that holds none
+	   of the shorthand classes means one set in every engine, which holds the Rust lane without a
+	   Rust toolchain (AA7 of r22) */
+	it("hold no \\d, \\w, \\s or \\b, nor their capitals, each class written out", async () => {
+		const shorthand = /(?<!\\)(?:\\\\)*\\[bBdDsSwW]/u
+		const held: string[] = []
+		for (const { dialect, name, schema } of await lanes())
+			for (const pattern of new Set(patternsOf(published(schema))))
+				if (shorthand.test(pattern)) held.push(`${dialect} ${name}: ${pattern}`)
+		expect(held).toEqual([])
 	})
 
 	it("covers every built-in pattern's field on postgres", async () => {

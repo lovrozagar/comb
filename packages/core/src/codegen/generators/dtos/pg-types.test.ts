@@ -20,13 +20,18 @@ const rule = (source: string) => pgWriteRule(parseField("v", source, { dialect: 
 
 describe("pgWriteRule: a plain Postgres column's write rule by its data type (F50)", () => {
 	it("gives the date and time types their ISO rule, a time with a zone its offset", () => {
-		expect(rule('date("v")')).toBe("z.iso.date()")
+		/* each format with comb's own pattern, its digits [0-9], as Rust's regex reads zod's \\d as any digit (AA7 of r22) */
+		expect(rule('date("v")')).toMatch(/^z\.iso\.date\(\{ pattern: \/\^\(\?:\(\?:\[0-9\]\[0-9\]\[2468\].*\$\/u \}\)$/)
 		/* each keeps the instant: a timestamp only a local time, a timestamptz only one with its offset */
-		expect(rule('timestamp("v", { mode: "string" })')).toMatch(/^z\.iso\.datetime\(\{ local: true \}\)\.regex\(/)
-		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toMatch(
-			/^z\.iso\.datetime\(\{ offset: true \}\)\.regex\(/,
+		expect(rule('timestamp("v", { mode: "string" })')).toMatch(
+			/^z\.iso\.datetime\(\{ local: true, pattern: \/\^.*\$\/u \}\)\.regex\(/,
 		)
-		expect(rule('time("v")')).toBe("z.iso.time()")
+		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toMatch(
+			/^z\.iso\.datetime\(\{ offset: true, pattern: \/\^.*\$\/u \}\)\.regex\(/,
+		)
+		expect(rule('time("v")')).toBe(
+			String.raw`z.iso.time({ pattern: /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\.[0-9]+)?)?$/u })`,
+		)
 		expect(rule('time("v", { withTimezone: true })')).toMatch(/^z\.string\(\)\.regex\(.*\(\?:Z\|\[\+-\]/)
 		expect(rule('text("v")')).toBeUndefined()
 	})
@@ -59,8 +64,8 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 	})
 
 	it("is the create and update DTOs' rule, and a read keeps the plain type", () => {
-		expect(pgSchema('date("v").notNull()', "create")).toBe("z.iso.date()")
-		expect(pgSchema('date("v")', "update")).toBe("z.iso.date().nullable().optional()")
+		expect(pgSchema('date("v").notNull()', "create")).toBe(rule('date("v")'))
+		expect(pgSchema('date("v")', "update")).toBe(`${rule('date("v")')}.nullable().optional()`)
 		for (const type of ["read", "readPartial"] as const)
 			expect(pgSchema('date("v").notNull()', type)).not.toContain("z.iso")
 	})

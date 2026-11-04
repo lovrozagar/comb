@@ -10,6 +10,10 @@ import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateFieldSchema as generated } from "./field-schema.ts"
 
+/* an id's rule: ECMAScript's \\S written out, given to RegExp as a string and published with its characters (AA7 of r22) */
+const ID_SOURCE = String.raw`^[^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]{1,48}$`
+const ID_RULE = `.regex(new RegExp("${ID_SOURCE}", "u")).meta({ pattern: "${ID_SOURCE}" })`
+
 /* every written text and JSON field ends with the F11 rule; the tests below read the other rules, and
  * "the rule no engine stores" reads this one */
 const TEXT_RULE = '.refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" })'
@@ -72,7 +76,7 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', {
 			foreignKey: { ...fk, toId: true },
 		})
-		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe("z.string().regex(/^\\S{1,48}$/u)")
+		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe(`z.string()${ID_RULE}`)
 		const named = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.email)', { foreignKey: fk })
 		expect(generateFieldSchema(named, "create", { imports: imports() })).toBe("z.string().min(1)")
 		const slug = fieldOf("pageSlug", 'c.text("page_slug", { max: 200 }).notNull().references(() => page.slug)', {
@@ -85,11 +89,9 @@ describe("generateFieldSchema: what each schema type includes", () => {
 	it("renders a reference's rules for every schema type: a c.ref that names no target, the id rules", () => {
 		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBeNull()
 		expect(schema("owner_id", 'c.ref("owner_id", { mutable: true })', "update")).toBe(
-			"z.string().regex(/^\\S{1,48}$/u).nullable().optional()",
+			`z.string()${ID_RULE}.nullable().optional()`,
 		)
-		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(
-			"z.string().regex(/^\\S{1,48}$/u).nullable().optional()",
-		)
+		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(`z.string()${ID_RULE}.nullable().optional()`)
 		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe(
 			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1}).nullable().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
 		)
@@ -369,14 +371,14 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		expect(of("countryCode", country, "create")).toBe("z.string().min(1).max(64).regex(/^[A-Z-]+$/u)")
 		expect(of("countryCode", country, "read")).toBe('z.string().meta({"x-comb-maxLength":64})')
 		expect(of("ownerId", 'c.ref("owner_id").notNull().references(() => user.id)', "create")).toBe(
-			"z.string().regex(/^\\S{1,48}$/u)",
+			`z.string()${ID_RULE}`,
 		)
 	})
 
 	/* a ref to a table in another database, as a shard's user_id to core's user, names no target */
 	it("gives a c.ref that names no target the id rules, unless it declares its own", () => {
 		const write = of("userId", 'c.ref("user_id").notNull()', "create")
-		expect(write).toBe("z.string().regex(/^\\S{1,48}$/u)")
+		expect(write).toBe(`z.string()${ID_RULE}`)
 		expect(of("userId", 'c.ref("user_id").notNull()', "read")).toBe(
 			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
 		)
@@ -400,8 +402,8 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 	})
 
 	it("applies a password hash's declared bounds and pattern, with no rule of comb's, and an email's pattern after the format", () => {
-		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/\\\\d/" }).notNull()', "create")).toBe(
-			"z.string().min(12).regex(/\\d/u)",
+		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/[0-9]/" }).notNull()', "create")).toBe(
+			"z.string().min(12).regex(/[0-9]/u)",
 		)
 		expect(of("pw", 'c.text("pw", { password: true, max: 255 }).notNull()', "create")).toBe(
 			"z.string().min(1).max(255)",

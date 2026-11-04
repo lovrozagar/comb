@@ -15,8 +15,18 @@ const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
 /** A written text's length bounds as comb holds them, declared and its own together; null where none */
 type TextRange = { max: number | null; min: number | null }
 
+/*
+ * An id: 1 to 48 characters, none of ECMAScript's blanks (its WhiteSpace and LineTerminator, what
+ * \S refuses), each written out, as Go's RE2 reads \S as ASCII alone (AA7 of r22). The manifest
+ * states it with escapes. The chain hands it to RegExp as a string, as Bun parses no regex literal
+ * holding U+2028 or U+2029, and publishes it as the characters themselves: a RegExp's source
+ * writes those two as \u escapes, which RE2 does not read
+ */
+const ID_SOURCE = "^[^\\t\\n\\v\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]{1,48}$"
+const ID_PATTERN = `/${ID_SOURCE}/u`
+/* the published pattern before the guard, so a field's own trailing meta stays the dedup's to strip */
+const ID_CHECK = `.regex(new RegExp("${ID_SOURCE}", "u")).meta({ pattern: "${ID_SOURCE}" })${TEXT_GUARD}`
 /* the regexes a kind holds a written text to, as the chain writes each: under u, as JSON Schema reads them (CS1 of r22b) */
-const ID_PATTERN = "/^\\S{1,48}$/u"
 const HTTPS = "/^https:\\/\\//u"
 const NAME = "/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u"
 const IMAGE = "/^(?:https:\\/\\/|data:image\\/)/u"
@@ -150,8 +160,8 @@ function kindChecks(annotations: FieldConstraints): string {
 function textBounds(build: Build, range: TextRange): string {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
-	/* \S matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
-	if (isIdText(annotations, field)) return mutative ? `.regex(${ID_PATTERN})${TEXT_GUARD}` : ""
+	/* the id class matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
+	if (isIdText(annotations, field)) return mutative ? ID_CHECK : ""
 	if (!mutative) {
 		const held = heldLength(build)
 		return held === null ? "" : `.max(${held})`

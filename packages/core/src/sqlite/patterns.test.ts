@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { patterns } from "./patterns.ts"
+import { patternLiteral } from "../codegen/utils/pattern.ts"
 
 describe("patterns.COUNTRY_ALPHA2", () => {
 	const re = new RegExp(patterns.COUNTRY_ALPHA2.slice(1, -1))
@@ -62,5 +63,13 @@ describe("patterns.LOCALE", () => {
 		expect(re.test("english")).toBe(false)
 		expect(re.test("")).toBe(false)
 		expect(re.test("pt-br")).toBe(false)
+	})
+})
+
+/* AA7 of r22: each is a pattern codegen takes, its classes written out, so it means one rule in
+   ECMAScript, Go's RE2 and Rust's regex */
+describe("patterns: each a declared pattern codegen takes", () => {
+	it.each(Object.entries(patterns))("takes %s", (name, pattern) => {
+		expect(() => patternLiteral(pattern, `t.${name}`)).not.toThrow()
 	})
 })
