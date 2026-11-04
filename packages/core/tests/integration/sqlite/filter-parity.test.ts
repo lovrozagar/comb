@@ -115,3 +115,26 @@ describe("buildFilterSQL and filterToSQL, one lowering (Q5)", () => {
 		expect(await ids(buildFilterSQL(checked.ast.root, RAW))).toEqual(drizzleRows)
 	})
 })
+
+/* QL13 of r22b: an empty nin.() on a seconds column lowered to IS NOT NULL, dropping the row with none */
+/* a date's own operators leave nin out; a spec lists it, as a runtime field map may */
+const WITH_NIN: Record<string, FilterField> = {
+	...FIELDS,
+	at_ms: { format: "iso", operators: ["nin"], type: "date" },
+	at_s: { format: "iso", operators: ["nin"], type: "date" },
+}
+
+describe("an empty nin.() matches every row on every column (QL13 of r22b; sibling: the millisecond column)", () => {
+	it.each(["at_s", "at_ms", "n", "name"])("keeps every row, the one holding NULL too, for %s.nin.()", async (field) => {
+		const checked = validateFilter(`${field}.nin.()`, WITH_NIN)
+		if (!checked?.valid) throw new Error(`${field}: ${JSON.stringify(checked?.errors)}`)
+		expect(await ids(filterToSQL(checked.ast, { mainTable: p }) as ReturnType<typeof sql>)).toEqual([1, 2, 3, 4])
+		expect(await ids(buildFilterSQL(checked.ast.root, RAW))).toEqual([1, 2, 3, 4])
+	})
+
+	it("keeps a non-empty list of no whole second to the rows holding a value, as NOT IN does", async () => {
+		const checked = validateFilter(`at_s.nin.(${new Date(JUNE).toISOString()})`, WITH_NIN)
+		if (!checked?.valid) throw new Error(JSON.stringify(checked?.errors))
+		expect(await ids(filterToSQL(checked.ast, { mainTable: p }) as ReturnType<typeof sql>)).toEqual([1, 2, 3])
+	})
+})

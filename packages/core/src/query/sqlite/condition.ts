@@ -125,6 +125,9 @@ function secondsSQL(column: SQLWrapper, operator: string, value: unknown): SQL |
 	if ((operator === "in" || operator === "nin") && Array.isArray(value)) {
 		const seconds = wholeSeconds(value)
 		if (operator === "in") return seconds.length === 0 ? sql`0` : inArray(column, seconds)
+		/* an empty list matches every row, as everywhere else; a list of no whole second matches every
+		   value, but not NULL, as NOT IN reads it (QL13 of r22b) */
+		if (value.length === 0) return sql`1`
 		return seconds.length === 0 ? isNotNull(column) : notInArray(column, seconds)
 	}
 	if (!isSecondsOperator(operator) || typeof value !== "number") return undefined
