@@ -64,6 +64,13 @@ declare const bindings: Record<string, D1Database>
 expectTypeOf(router.getHandle(mapping, bindings).handle).toEqualTypeOf<D1Database>()
 declare const some: Partial<Record<string, D1Database>>
 expectTypeOf(router.getHandle(mapping, some).handle).toEqualTypeOf<D1Database>()
+/* D2-5 of the area D round-two review: one whose index provably holds no D1 binding is refused */
+declare const strings: Record<string, string>
+// @ts-expect-error an index of strings holds no D1 binding
+router.getHandle(mapping, strings)
+declare const kvs: Record<string, KVNamespace>
+// @ts-expect-error an index of KV namespaces holds no D1 binding
+router.getHandle(mapping, kvs)
 
 /* an env whose known keys hold no shard binding, or a shard key holding what is no D1 binding, is refused */
 interface NoShards {

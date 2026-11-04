@@ -288,9 +288,13 @@ type ShardBindingOf<E> = string extends keyof E ? Extract<NonNullable<E[string &
  * What getHandle asks of an env of type `E` beyond `E` itself: each `SHARD_DB_*` key holds a D1
  * binding, and an env whose known keys hold no such key is refused, naming the key it lacks. A key
  * may be optional, as `wrangler types` writes one bound in only some environments (AD1): getHandle
- * throws on an absent one at run time
+ * throws on an absent one at run time. An env with a string index signature is taken when its
+ * index may hold a D1 binding, and refused when it provably holds none (D2-5 of the area D
+ * round-two review)
  */
-type ShardEnv<E> = string extends keyof E ? unknown : [Extract<keyof E, `SHARD_DB_${string}`>] extends [never] ? {
+type ShardEnv<E> = string extends keyof E ? unknown extends E[string & keyof E] ? unknown : [Extract<NonNullable<E[string & keyof E]>, D1DatabaseLike>] extends [never] ? {
+    "SHARD_DB_<target>": D1DatabaseLike;
+} : unknown : [Extract<keyof E, `SHARD_DB_${string}`>] extends [never] ? {
     "SHARD_DB_<target>": D1DatabaseLike;
 } : {
     [K in Extract<keyof E, `SHARD_DB_${string}`>]?: D1DatabaseLike | undefined;
