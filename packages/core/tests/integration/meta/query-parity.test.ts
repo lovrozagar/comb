@@ -18,7 +18,7 @@ const schema = createListQuerySchema({
 	},
 	filter: { created_at: "date", status: "enum", title: "string" },
 	pagination: { defaultLimit: 10, maxLimit: 50 },
-	sort: ["created_at", "title"],
+	sort: ["created_at", "title", "status", "id"],
 })
 
 /** A value a client reading the published type would send for it */
@@ -150,10 +150,18 @@ describe("caps match the parser", () => {
 
 	it("accepts exactly maxSortKeys keys", () => {
 		const max = meta().maxSortKeys ?? 0
-		const keys = ["created_at.asc", "title.asc", "created_at.desc", "title.desc"]
+		/* each key a distinct field: a field named twice is refused on its own (AB9 of area B) */
+		const keys = meta().sortable.map((field, i) => `${field}.${i % 2 === 0 ? "asc" : "desc"}`)
 		expect(max).toBeLessThan(keys.length)
 		expect(schema.safeParse({ order: keys.slice(0, max).join(",") }).success).toBe(true)
 		expect(schema.safeParse({ order: keys.slice(0, max + 1).join(",") }).success).toBe(false)
+	})
+
+	it("refuses a field named twice, within maxSortKeys", () => {
+		const max = meta().maxSortKeys ?? 0
+		const [field] = meta().sortable
+		expect(max).toBeGreaterThan(1)
+		expect(schema.safeParse({ order: `${field}.asc,${field}.desc` }).success).toBe(false)
 	})
 
 	it("every filterFields operator is accepted for its field", () => {
