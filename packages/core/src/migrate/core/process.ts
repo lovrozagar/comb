@@ -132,17 +132,17 @@ function collect(stream: NodeJS.ReadableStream, limit: number, over: () => void)
 type Ending = { code: number | null; signal: NodeJS.Signals | null; stopped?: RunResult | undefined }
 
 /**
- * The stops of `child`: each signals its group, and the first holds its end to killAfterMs, past
- * which SIGKILL ends it; `ended` clears that and says what comb did when it came
+ * The stops of `child`, which runs `name`: each signals its group, and the first holds its end to
+ * killAfterMs, past which SIGKILL ends it; `ended` clears that and says what comb did when it came
  */
-function stopsOf(child: ChildProcess, cmd: string, killAfterMs: number) {
+function stopsOf(child: ChildProcess, name: string, killAfterMs: number) {
 	let first: { signal: NodeJS.Signals; timer: NodeJS.Timeout } | undefined
 	let killed = false
 	return {
 		ended(): string | undefined {
 			clearTimeout(first?.timer)
 			return killed && first !== undefined
-				? `${cmd} did not end ${killAfterMs} ms after ${first.signal}: comb killed it with SIGKILL`
+				? `${name} did not end ${killAfterMs} ms after ${first.signal}: comb killed it with SIGKILL`
 				: undefined
 		},
 		stop(signal: NodeJS.Signals): void {
@@ -158,24 +158,29 @@ function stopsOf(child: ChildProcess, cmd: string, killAfterMs: number) {
 	}
 }
 
-/** `cmd` started, and the result of its end; the child is held so a signal to comb stops it first */
+/**
+ * `cmd` started, and the result of its end; the child is held so a signal to comb stops it first.
+ * A stop names the peer `cmd` runs, the process the user knows, or else `cmd` (D5-4 of the area D
+ * round-five review).
+ */
 function started(cmd: string, args: readonly string[], options: RunOptions): Promise<RunResult> {
+	const name = options.peer ?? cmd
 	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
 	const env = options.exactEnv === undefined ? childEnv(options.env) : { ...options.exactEnv }
 	const child = spawn(cmd, args, { cwd: options.cwd, detached: GROUPS, env, stdio: ["pipe", "pipe", "pipe"] })
-	const stops = stopsOf(child, cmd, options.killAfterMs ?? DEFAULT_KILL_AFTER_MS)
+	const stops = stopsOf(child, name, options.killAfterMs ?? DEFAULT_KILL_AFTER_MS)
 	let stopped: RunResult | undefined
 	const stopFor = (result: RunResult) => {
 		stopped ??= result
 		stops.stop("SIGTERM")
 	}
-	const over = () => stopFor({ code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" })
+	const over = () => stopFor({ code: 1, stderr: `${name}: output exceeded ${maxBuffer} bytes`, stdout: "" })
 	const [stdout, stderr] = [collect(child.stdout, maxBuffer, over), collect(child.stderr, maxBuffer, over)]
 	const timer =
 		options.timeoutMs === undefined
 			? undefined
 			: setTimeout(
-					() => stopFor({ code: 124, stderr: `${cmd}: stopped after ${options.timeoutMs} ms`, stdout: "" }),
+					() => stopFor({ code: 124, stderr: `${name}: stopped after ${options.timeoutMs} ms`, stdout: "" }),
 					options.timeoutMs,
 				)
 	/* a child that ends without reading its input closes the pipe: what it did is the result, not the EPIPE */
@@ -202,18 +207,18 @@ function started(cmd: string, args: readonly string[], options: RunOptions): Pro
 			await pastStop()
 		}
 		if (end instanceof Error) return startFailure(cmd, end, options.peer)
-		const result = resultOf(cmd, end, { stderr: stderr(), stdout: stdout() })
+		const result = resultOf(name, end, { stderr: stderr(), stdout: stdout() })
 		/* a killed child's stderr is never empty: it is the stop comb made, or it names the signal that ended it */
 		return killed === undefined ? result : { ...result, stderr: `${result.stderr}; ${killed}` }
 	})
 }
 
-/** The result of a child that ran and ended as `end` says */
-function resultOf(cmd: string, end: Ending, said: { stderr: string; stdout: string }): RunResult {
+/** The result of a child that ran `name` and ended as `end` says */
+function resultOf(name: string, end: Ending, said: { stderr: string; stdout: string }): RunResult {
 	if (end.stopped !== undefined) return end.stopped
 	const signal = end.signal === null ? 0 : 128 + constants.signals[end.signal]
 	/* a process a signal stopped before it said anything would fail with an empty reason: name the signal */
-	const stderr = end.signal !== null && said.stderr === "" ? `${cmd} was stopped by ${end.signal}` : said.stderr
+	const stderr = end.signal !== null && said.stderr === "" ? `${name} was stopped by ${end.signal}` : said.stderr
 	return { code: end.code ?? signal, stderr, stdout: said.stdout }
 }
 

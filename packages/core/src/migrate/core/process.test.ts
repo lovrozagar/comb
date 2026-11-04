@@ -297,3 +297,24 @@ describe("run under a signal (PA4 of r22)", () => {
 		expect(existsSync(late)).toBe(false)
 	})
 })
+
+/* D5-4 of the area D round-five review: a stop named the runtime's path, not the peer the user ran */
+describe("run, stopping a peer, names the peer", () => {
+	it("names it when comb kills it past killAfterMs, after its output passed maxBuffer", async () => {
+		const traps = "process.on('SIGTERM', () => {}); process.stdout.write('x'.repeat(2048)); setInterval(() => {}, 1000)"
+		const result = await run("node", ["-e", traps], { killAfterMs: 50, maxBuffer: 1024, peer: "drizzle-kit" })
+		expect(result).toEqual({
+			code: 1,
+			stderr:
+				"drizzle-kit: output exceeded 1024 bytes; drizzle-kit did not end 50 ms after SIGTERM: comb killed it with SIGKILL",
+			stdout: "",
+		})
+	})
+
+	it("names it past timeoutMs, and when a signal stopped it before it said anything", async () => {
+		const waits = await run("node", ["-e", "setInterval(() => {}, 1000)"], { peer: "wrangler", timeoutMs: 50 })
+		expect(waits.stderr).toBe("wrangler: stopped after 50 ms")
+		const killed = await run("sh", ["-c", "kill -9 $$"], { peer: "wrangler" })
+		expect(killed.stderr).toBe("wrangler was stopped by SIGKILL")
+	})
+})
