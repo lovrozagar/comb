@@ -14,9 +14,10 @@ import { cleanGeneratedDtos, generatedDtos } from "../integration/support/dtos.t
 
 afterAll(() => cleanGeneratedDtos())
 
-/* the declared patterns: a code point's dot, a class, a property escape with and without u */
+/* the declared patterns: a code point but a line break, a class, a property escape with and without u
+   (a declared . is refused, A2-7 of r22) */
 const DECLARED = `
-	dot: c.text("dot", { pattern: "/^.{2}$/" }),
+	line: c.text("line", { pattern: "/^[^\\\\n\\\\r]{2}$/" }),
 	other: c.text("other", { pattern: "/^[^x]$/" }),
 	letters: c.text("letters", { pattern: "/^\\\\p{L}+$/" }),
 	lettersU: c.text("letters_u", { pattern: "/^\\\\p{L}+$/u" }),
@@ -106,6 +107,10 @@ const POOL = [
 	"",
 	"a",
 	"ab",
+	/* A2-7 of r22: the line terminators ECMAScript's . refuses and RE2's takes, beside one character */
+	"a\r",
+	"a\u2028",
+	"a\u2029",
 	"abc",
 	"ABC",
 	"x",

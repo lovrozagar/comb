@@ -42,8 +42,8 @@ describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 
 	/* CS1 of r22b: a source read without u is another rule than the one JSON Schema publishes */
 	it("reads a pattern written without u under u, so zod runs the rule a reader runs", () => {
-		const literal = patternLiteral(String.raw`/^\p{L}.$/`, "t.name")
-		expect(literal).toBe(String.raw`/^\p{L}.$/u`)
+		const literal = patternLiteral(String.raw`/^\p{L}[^\n\r]$/`, "t.name")
+		expect(literal).toBe(String.raw`/^\p{L}[^\n\r]$/u`)
 		const regex = new Function(`return ${literal}`)() as RegExp
 		expect(["é😀", "ж𝒜"].map((text) => regex.test(text))).toEqual([true, true])
 		expect(regex.test("p{L}x")).toBe(false)
@@ -77,5 +77,50 @@ describe("patternLiteral: a pattern with no shorthand class (AA7 of r22)", () =>
 	it("takes an escaped backslash before a letter, and a letter escape outside the shorthand set", () => {
 		expect(patternLiteral(String.raw`/^\\d$/`, "x")).toBe(String.raw`/^\\d$/u`)
 		expect(patternLiteral(String.raw`/^[0-9]\.\p{L}\n$/`, "x")).toBe(String.raw`/^[0-9]\.\p{L}\n$/u`)
+	})
+})
+
+describe("patternLiteral: a pattern each engine reads as one rule (A2-7 of r22)", () => {
+	const UNREAD =
+		"which Go's RE2 and Rust's regex do not compile, so a validator in either refuses the whole document: write the rule without it"
+
+	it.each([String.raw`/^.{2}$/`, String.raw`/^a\\.$/u`, String.raw`/^[a-]+.$/`])(
+		"refuses %s, as ECMAScript's . refuses \\r, U+2028 and U+2029 and RE2's and Rust's take them",
+		(pattern) => {
+			expect(() => patternLiteral(pattern, "t.code")).toThrow(
+				String.raw`t.code: pattern ${pattern} holds ., which ECMAScript reads as any character but a line terminator and Go's RE2 and Rust's regex as any but \n: write [^\n\r], or the class meant`,
+			)
+		},
+	)
+
+	it.each([
+		[String.raw`/^(?=a)a$/`, "(?=", "a lookaround"],
+		[String.raw`/^(?!b)a$/`, "(?!", "a lookaround"],
+		[String.raw`/^a(?<=a)$/`, "(?<=", "a lookaround"],
+		[String.raw`/^a(?<!b)$/`, "(?<!", "a lookaround"],
+		[String.raw`/^(a)\1$/`, String.raw`\1`, "a backreference"],
+		[String.raw`/^(?<n>a)\k<n>$/u`, String.raw`\k`, "a backreference"],
+	])("refuses %s, naming %s, %s", (pattern, construct, kind) => {
+		expect(() => patternLiteral(pattern, "t.code")).toThrow(
+			`t.code: pattern ${pattern} holds ${construct}, ${kind}, ${UNREAD}`,
+		)
+	})
+
+	it.each([String.raw`/^a\0$/`, String.raw`/^[\0-\x1f]$/u`])(
+		"refuses %s, as Rust's regex refuses an octal escape",
+		(pattern) => {
+			expect(() => patternLiteral(pattern, "t.code")).toThrow(
+				String.raw`t.code: pattern ${pattern} holds \0, which Rust's regex refuses as an octal escape, so a validator there refuses the whole document: write \x00, which ECMAScript, Go's RE2 and Rust's regex read as NUL`,
+			)
+		},
+	)
+
+	it("takes an escaped dot, a dot in a class, a named group and a group that only starts with (?", () => {
+		expect(patternLiteral(String.raw`/^a\.b$/`, "x")).toBe(String.raw`/^a\.b$/u`)
+		expect(patternLiteral(String.raw`/^[.\]]+$/u`, "x")).toBe(String.raw`/^[.\]]+$/u`)
+		expect(patternLiteral(String.raw`/^(?<year>[0-9]{4})(?:-[0-9]{2})?$/`, "x")).toBe(
+			String.raw`/^(?<year>[0-9]{4})(?:-[0-9]{2})?$/u`,
+		)
+		expect(patternLiteral(String.raw`/^[^\n\r]{2}\x00$/`, "x")).toBe(String.raw`/^[^\n\r]{2}\x00$/u`)
 	})
 })
