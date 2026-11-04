@@ -104,10 +104,34 @@ function limitSchema(defaultLimit: number, maxLimit: number): z.ZodDefault<Count
 
 const defaultLimitSchema = /* @__PURE__ */ limitSchema(PAGINATION_DEFAULTS.defaultLimit, PAGINATION_DEFAULTS.maxLimit)
 
-/** The `limit` param for this pagination; the shared default instance when it is the default */
+/** A pagination config createListQuerySchema refuses, naming its key */
+const paginationError = (message: string) => new TypeError(`createListQuerySchema: pagination.${message}`)
+
+/**
+ * Throw a TypeError naming the key unless maxLimit is a whole number from 1 and defaultLimit one
+ * from 1 to maxLimit (QL6 of r22b): zod's `.default()` skips the inner check, so a default past the
+ * maximum would answer every request without a `limit` with a 400. A maxLimit given alone below
+ * the default limit is told to set defaultLimit too, rather than clamped silently
+ */
+function assertLimits(pagination: PaginationConfig | undefined, defaultLimit: number, maxLimit: number): void {
+	if (!Number.isSafeInteger(maxLimit) || maxLimit < 1)
+		throw paginationError(`maxLimit must be a whole number from 1; got ${maxLimit}`)
+	if (pagination?.defaultLimit === undefined && defaultLimit > maxLimit)
+		throw paginationError(
+			`maxLimit ${maxLimit} is below the default limit ${defaultLimit}: set pagination.defaultLimit too`,
+		)
+	if (!Number.isSafeInteger(defaultLimit) || defaultLimit < 1 || defaultLimit > maxLimit)
+		throw paginationError(`defaultLimit must be a whole number from 1 to maxLimit (${maxLimit}); got ${defaultLimit}`)
+}
+
+/**
+ * The `limit` param for this pagination; the shared default instance when it is the default. Built
+ * before the page param, so its bounds are checked before maxPage's offset multiplies by maxLimit
+ */
 function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<CountParam> {
 	const defaultLimit = pagination?.defaultLimit ?? PAGINATION_DEFAULTS.defaultLimit
 	const maxLimit = pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
+	assertLimits(pagination, defaultLimit, maxLimit)
 	const isDefault = defaultLimit === PAGINATION_DEFAULTS.defaultLimit && maxLimit === PAGINATION_DEFAULTS.maxLimit
 	return isDefault ? defaultLimitSchema : limitSchema(defaultLimit, maxLimit)
 }

@@ -180,7 +180,7 @@ describe("a config change moves the published facts with it", () => {
 		const other = createListQuerySchema({
 			fields: { scalars: ["id"] },
 			filter: { archived: "boolean" },
-			pagination: { maxLimit: 5 },
+			pagination: { defaultLimit: 5, maxLimit: 5 },
 			sort: ["archived"],
 		})
 		const published = readCombQueryMeta(z.toJSONSchema(other, { io: "input", unrepresentable: "any" }))

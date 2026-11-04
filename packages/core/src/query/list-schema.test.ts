@@ -87,7 +87,7 @@ describe("createListQuerySchema — pagination, extend and search", () => {
 
 	it("clamps limit to max", () => {
 		const customSchema = createListQuerySchema({
-			pagination: { maxLimit: 10 },
+			pagination: { defaultLimit: 10, maxLimit: 10 },
 			sort: ["createdAt"] as const,
 		})
 		const result = customSchema.safeParse({ limit: 999 })

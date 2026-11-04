@@ -207,3 +207,54 @@ describe("an explicit undefined list limit means the default (KT1; sibling: `NaN
 		expect(metaOf({ [key]: undefined })).toEqual(metaOf({}))
 	})
 })
+
+/** Build a list schema under `pagination`, deferred for toThrow */
+const builtWith = (pagination: object) => () => createListQuerySchema({ pagination, sort: ["id"] })
+
+/* QL6 of r22b: zod's .default() skips the inner check, so a default past the maximum was every request's 400 */
+describe("the pagination config is checked when the schema is built (QL6 of r22b; sibling: maxPage's offset check)", () => {
+	it.each([
+		["maxLimit 0", { maxLimit: 0 }, "pagination.maxLimit must be a whole number from 1; got 0"],
+		["maxLimit 1.5", { maxLimit: 1.5 }, "pagination.maxLimit must be a whole number from 1; got 1.5"],
+		["maxLimit past 2^53", { maxLimit: 2 ** 53 }, `pagination.maxLimit must be a whole number from 1; got ${2 ** 53}`],
+		[
+			"defaultLimit 0",
+			{ defaultLimit: 0 },
+			"pagination.defaultLimit must be a whole number from 1 to maxLimit (100); got 0",
+		],
+		[
+			"defaultLimit NaN",
+			{ defaultLimit: Number.NaN },
+			"pagination.defaultLimit must be a whole number from 1 to maxLimit (100); got NaN",
+		],
+		[
+			"defaultLimit past maxLimit",
+			{ defaultLimit: 11, maxLimit: 10 },
+			"pagination.defaultLimit must be a whole number from 1 to maxLimit (10); got 11",
+		],
+		[
+			"maxLimit alone below the default limit",
+			{ maxLimit: 10 },
+			"pagination.maxLimit 10 is below the default limit 20: set pagination.defaultLimit too",
+		],
+	])("refuses %s as a TypeError naming the key", (_label, pagination, message) => {
+		expect(builtWith(pagination)).toThrow(new TypeError(`createListQuerySchema: ${message}`))
+	})
+
+	it("checks maxLimit before maxPage's offset multiplies by it", () => {
+		expect(builtWith({ maxLimit: Number.NaN, maxPage: 2 })).toThrow("pagination.maxLimit must be a whole number from 1")
+	})
+
+	it("takes a limit config within its bounds, the default from 1 up to maxLimit", () => {
+		for (const pagination of [
+			{ maxLimit: 1, defaultLimit: 1 },
+			{ maxLimit: 20 },
+			{ defaultLimit: 100 },
+			{ defaultLimit: 7, maxLimit: 7 },
+		])
+			expect(builtWith(pagination), JSON.stringify(pagination)).not.toThrow()
+		expect(createListQuerySchema({ pagination: { defaultLimit: 3, maxLimit: 10 }, sort: ["id"] }).parse({}).limit).toBe(
+			3,
+		)
+	})
+})
