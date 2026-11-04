@@ -998,6 +998,11 @@ declare function bodyText(text: string): string;
  */
 declare function codeOf(stmt: string, dialect: Dialect): string;
 /**
+ * Every name SQLite code spells, as SQLite resolves one: each bare word and each quoted name unquoted, folded by
+ * asciiFold; never a word of a string or a comment (8.5 of plan 21)
+ */
+declare function sqliteNames(sql: string): Set<string>;
+/**
  * Every name Postgres text can spell (P2 of r22): an unquoted word folded, a quoted one exact, and a
  * string, single or dollar-quoted, as its exact contents and as the SQL it may be, which a DO body,
  * dblink_exec or format() runs; never a comment's words
@@ -1007,7 +1012,7 @@ declare function namesIn(text: string, into?: Set<string>): Set<string>;
 declare function splitTopLevel(code: string): string[];
 /** `code` with every parenthesized group blanked, so a word left in it is top-level */
 declare function topLevel(code: string): string;
-export { asciiFold, bodyText, codeOf, dialectOf, IDENT, lastPart, nameKey, namesIn, type Naming, namingOf, type Pragma, pragmaOf, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote, };
+export { asciiFold, bodyText, codeOf, dialectOf, IDENT, lastPart, nameKey, namesIn, type Naming, namingOf, type Pragma, pragmaOf, QNAME, qualifiedKey, splitTopLevel, sqliteNames, topLevel, unquote, };
 
 // migrate/drivers/local-db.d.ts
 /** What comb does with a private database */

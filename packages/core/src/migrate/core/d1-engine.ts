@@ -152,7 +152,7 @@ async function proveOnD1(
 ): Promise<void> {
 	for (const file of files) refuseRewritten(file)
 	const wrangler = await importBin<Wrangler>(bin)
-	const script = await copyScript(live, files)
+	const script = await copyScript(live, files, table)
 	const dir = mkdtempSync(join(tmpdir(), "comb-d1-proof-"))
 	try {
 		const configPath = join(dir, "wrangler.json")

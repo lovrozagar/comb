@@ -130,6 +130,14 @@ function codeOf(stmt: string, dialect: Dialect): string {
 	return dialect === "sqlite" && /^PRAGMA\b/i.test(code) ? joined(stmt, dialect, true) : code
 }
 
+/**
+ * Every name SQLite code spells, as SQLite resolves one: each bare word and each quoted name unquoted, folded by
+ * asciiFold; never a word of a string or a comment (8.5 of plan 21)
+ */
+function sqliteNames(sql: string): Set<string> {
+	return new Set([...joined(sql, "sqlite", false).matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")))
+}
+
 /* a bare word in Postgres code, which may be a name */
 const WORD = /[A-Za-z_\u0080-￿][\w$\u0080-￿]*/g
 /* the bytes of a name Postgres keeps (NAMEDATALEN − 1) */
@@ -204,6 +212,7 @@ export {
 	QNAME,
 	qualifiedKey,
 	splitTopLevel,
+	sqliteNames,
 	topLevel,
 	unquote,
 }

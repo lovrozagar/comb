@@ -83,31 +83,6 @@ function keyGroups(db: LocalDb, tables: readonly string[]): string[][] {
 	return groups
 }
 
-/** The tables `from` and every table `next` leads to from them, transitively */
-function reach(from: Iterable<string>, next: ReadonlyMap<string, readonly string[]>): Set<string> {
-	const out = new Set(from)
-	for (const table of out) for (const each of next.get(table) ?? []) out.add(each)
-	return out
-}
-
-/**
- * The tables a seed scoped to `touched` holds (8.5 of plan 21), by folded name: the touched tables, every table whose
- * key reaches one of them, transitively (a DROP or rebuild of a parent cascades into its children's rows, whose own
- * children then refuse), and every table those tables' keys reach, so their keys are met; an ancestor's other
- * children are left out
- */
-function keyScope(db: LocalDb, tables: readonly string[], touched: ReadonlySet<string>): Set<string> {
-	const parentsOf = new Map(tables.map((table) => [asciiFold(table), keysOf(db, table).map((key) => key.table)]))
-	const childrenOf = new Map<string, string[]>()
-	for (const [child, parents] of parentsOf)
-		for (const parent of parents) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), child])
-	const below = reach(
-		[...touched].filter((table) => parentsOf.has(table)),
-		childrenOf,
-	)
-	return new Set([...reach(below, parentsOf)].filter((table) => parentsOf.has(table)))
-}
-
 /** The columns that name one row of `table`: its primary key, or its rowid where it declares none */
 function rowIdOf(db: LocalDb, table: string): string[] {
 	const key = primaryKeyOf(db, table)
@@ -134,4 +109,4 @@ function closeKeys(db: LocalDb, seeding: Closing): void {
 	}
 }
 
-export { closeKeys, type Key, keyGroups, keyScope, keysOf, mayBeNull, NO_PARENT, primaryKeyOf, quote }
+export { closeKeys, type Key, keyGroups, keysOf, mayBeNull, NO_PARENT, primaryKeyOf, quote }

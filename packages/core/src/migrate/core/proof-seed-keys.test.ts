@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { type LocalDb, openMemory } from "../drivers/local-db.ts"
-import { keyGroups, keyScope, keysOf } from "./proof-seed-keys.ts"
+import { keyGroups, keysOf } from "./proof-seed-keys.ts"
 
 const open: LocalDb[] = []
 afterEach(() => {
@@ -28,21 +28,5 @@ describe("keyGroups (SD1 of r22, 8.4)", () => {
 		db.exec("CREATE TABLE p (x TEXT, y INTEGER, PRIMARY KEY (x, y))")
 		db.exec("CREATE TABLE c (a TEXT, b INTEGER, FOREIGN KEY (a, b) REFERENCES P)")
 		expect(keysOf(db, "c")).toEqual([{ from: ["a", "b"], table: "p", to: [] }])
-	})
-})
-
-describe("keyScope (8.5 of plan 21)", () => {
-	it("holds the touched tables, their descendants and every ancestor of both, and no name that is not a table", async () => {
-		const db = await openMemory()
-		open.push(db)
-		const schema = {
-			Org: "CREATE TABLE Org (id INTEGER PRIMARY KEY, gone INTEGER REFERENCES elsewhere (id))",
-			team: "CREATE TABLE team (id INTEGER PRIMARY KEY, org INTEGER REFERENCES Org (id))",
-			member: "CREATE TABLE member (id INTEGER PRIMARY KEY, team INTEGER REFERENCES team (id))",
-			sibling: "CREATE TABLE sibling (id INTEGER PRIMARY KEY, org INTEGER REFERENCES org (id))",
-		}
-		for (const sql of Object.values(schema)) db.exec(sql)
-		const scope = keyScope(db, Object.keys(schema), new Set(["team", "not_a_table"]))
-		expect([...scope].toSorted()).toEqual(["member", "org", "team"])
 	})
 })

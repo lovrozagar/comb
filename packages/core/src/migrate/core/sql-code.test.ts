@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { codeOf, lastPart, namesIn, splitTopLevel, topLevel, unquote } from "./sql-code.ts"
+import { codeOf, lastPart, namesIn, splitTopLevel, sqliteNames, topLevel, unquote } from "./sql-code.ts"
 
 describe("unquote and lastPart", () => {
 	it.each([
@@ -63,5 +63,14 @@ describe("namesIn", () => {
 		expect(namesIn(`CREATE ROLE "${"é".repeat(40)}"`)).toContain("é".repeat(31))
 		expect(namesIn("SELECT 1 -- ghost\n/* spook */")).not.toContain("ghost")
 		expect(namesIn("SELECT 1 /* spook */")).not.toContain("spook")
+	})
+})
+
+describe("sqliteNames: the names SQLite code spells (8.5 of plan 21)", () => {
+	it("reads each bare and quoted name folded as SQLite resolves it, and no word of a string or a comment", () => {
+		const sql = `UPDATE "My""T" SET [Col] = \`B\` -- Gone\nWHERE x = 'Inside' /* Away */ AND Über = 1;`
+		expect([...sqliteNames(sql)].toSorted()).toEqual(
+			["and", "b", "col", 'my"t', "set", "update", "where", "x", "Über"].toSorted(),
+		)
 	})
 })
