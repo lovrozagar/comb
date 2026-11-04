@@ -83,7 +83,11 @@ export async function openSqliteTarget(
 			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
 		)
 	/* a libsql url or a turso apiToken left blank loads, and cannot connect (P9 of r18, S5 of r19) */
-	if (target.provider.type === "libsql") refuseBlank(target, { url: target.provider.url })
+	/* an authToken given blank would go out as a bare Bearer, refused as a 401 (D2-10 of the area D round-two review) */
+	if (target.provider.type === "libsql") {
+		const { authToken, url } = target.provider
+		refuseBlank(target, authToken === undefined ? { url } : { url, authToken })
+	}
 	if (target.provider.type === "turso") refuseBlank(target, { apiToken: target.provider.apiToken })
 	if (args.options["file"] === undefined) refuseNoDir(target.migrationsDir)
 	const { createProvider } = await import("../migrate/config.ts")

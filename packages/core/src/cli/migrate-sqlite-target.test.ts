@@ -166,6 +166,15 @@ describe("openSqliteTarget on a connection string that is empty", () => {
 		/* S5 of r19: blank is empty, as Postgres's URL check reads it */
 		[{ type: "libsql" as const, url: "  " }, "url is empty: set the libsql provider's url for core (core_prod)"],
 		[{ ...TURSO, apiToken: " \t" }, "apiToken is empty: set the turso provider's apiToken for core (core_prod)"],
+		/* D2-10 of the area D round-two review: a blank authToken went out as a bare Bearer and came back a 401 */
+		[
+			{ type: "libsql" as const, url: "libsql://x.turso.io", authToken: " " },
+			"authToken is empty: set the libsql provider's authToken for core (core_prod)",
+		],
+		[
+			{ type: "libsql" as const, url: "libsql://x.turso.io", authToken: "" },
+			"authToken is empty: set the libsql provider's authToken for core (core_prod)",
+		],
 	])("refuses %j, naming the field and its database", async (provider, message) => {
 		await expect(openSqliteTarget(request("status"), resolved(provider))).rejects.toThrow(message)
 	})
