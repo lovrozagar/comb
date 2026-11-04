@@ -189,6 +189,9 @@ const CASES: Case[] = [
 	["iv", "P1W", true, true],
 	["iv", "P", false, false],
 	["iv", "-P1D", false, false],
+	/* AA6 of r22: a comma for the seconds' decimal mark, which Postgres refuses with a 22007 */
+	["iv", "PT1,5S", false, false],
+	["iv", "PT1M1,25S", false, false],
 	/* stricter than Postgres, listed in the 0.14 changelog: a negative or fractional part, the alternative format, and Postgres's own spelling */
 	["iv", "P-1D", false, true],
 	["iv", "P1.5Y", false, true],

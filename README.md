@@ -1206,6 +1206,8 @@ What changes for a project on 0.20. Before deploying it:
 
 51. **Write a `macaddr8` with two digits an octet.** A plain `macaddr8` column's create and update DTOs refuse an octet of one digit (`8:0:2b:1:2:3`) and two separators in one address, which 0.20 took and Postgres refused with a 22P02, and take the spellings Postgres takes that 0.20 refused: `.` between octets (`08.00.2b.01.02.03`) and `:` or `-` at any gap (`0800:2b01:0203:0405`, `08:002b:01:0203`). A `macaddr` or `macaddr8` with a blank in it, or a `macaddr8` with a separator or a digit after its last octet, is refused, though Postgres takes it.
 
+52. **Write an interval's fraction of a second with `.`.** A plain `interval` column's create and update DTOs refuse ISO 8601's comma for the decimal mark (`PT1,5S`), which 0.20 took and Postgres refused with a 22007; write `PT1.5S`.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

@@ -176,6 +176,21 @@ describe("an interval's and a numeric's rules read the parsed modifier (CD5, CD6
 		expect(takes('interval("v")', ["P1Y2M3DT4H5M6.789S"])).toEqual([true])
 	})
 
+	/* AA6 of r22: zod's duration takes a comma for the decimal mark, which Postgres refuses with a 22007 */
+	it.each([
+		'interval("v")',
+		'interval("v", { precision: 3 })',
+		'interval("v", { fields: "day to second", precision: 3 })',
+	])("refuses a comma for the seconds' decimal mark in %s", (column) => {
+		expect(takes(column, ["PT1,5S", "P1DT1,5S", "PT1M1,25S", "PT0,1S", "PT1.5S"])).toEqual([
+			false,
+			false,
+			false,
+			false,
+			true,
+		])
+	})
+
 	it("bounds a numeric by a scale past its precision, or below 0", () => {
 		expect(
 			takes('numeric("v", { precision: 1, scale: 3 })', ["0.009", "0.001", "0.01", "0.0091", "0.000", "-0.003"]),

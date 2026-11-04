@@ -111,8 +111,9 @@ function timeRule({ precision, withTimeZone }: { precision: number | null; withT
 }
 
 /* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it (CS3 of
- * r22b): weeks alone, or at least one date or time part, the seconds alone taking a fraction */
-const SECONDS = "\\d+(?:[.,]\\d+)?S"
+ * r22b): weeks alone, or at least one date or time part, the seconds alone taking a fraction. Its
+ * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007 (AA6 of r22) */
+const SECONDS = "\\d+(?:\\.\\d+)?S"
 const TIME_PART = `T(?:\\d+H(?:\\d+M)?(?:${SECONDS})?|\\d+M(?:${SECONDS})?|${SECONDS})`
 const DURATION = `^P(?:\\d+W|(?:\\d+Y(?:\\d+M)?(?:\\d+D)?|\\d+M(?:\\d+D)?|\\d+D)(?:${TIME_PART})?|${TIME_PART})$`
 
