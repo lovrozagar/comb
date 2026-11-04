@@ -7,7 +7,8 @@
  */
 
 /** What makes a suite outside tests/integration/postgres one of them */
-export const PG_REACH = /support\/(?:pg|pg-check|pg-pause|pg-roles|pg-run-lock|stale-replay)\.ts"|COMB_TEST_PG_URL/
+export const PG_REACH =
+	/support\/(?:pg|pg-check|pg-lock|pg-pause|pg-roles|pg-run-lock|pg-url|stale-replay)\.ts"|COMB_TEST_PG_URL/
 
 /** The suites, by directory and by name */
 export const PG_INTEGRATION = [

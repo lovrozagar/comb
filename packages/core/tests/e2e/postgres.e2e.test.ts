@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { hashDir } from "../../src/migrate/core/atlas-dir.ts"
 import { run } from "../../src/migrate/core/process.ts"
 import { pgUrl } from "../integration/support/pg.ts"
+import { acquirePgRunLock, PG_LOCK_WAIT_MS } from "../support/pg-lock.ts"
 import { app, ok, type App } from "./support/project.ts"
 
 const server = pgUrl()
@@ -57,6 +58,12 @@ describe("comb on Postgres", () => {
 	const [target, dev] = [`comb_e2e_${id}`, `comb_e2e_${id}_dev`]
 	let project: App
 	let migrations = ""
+	/* the run's lock, held from the first database made to the last dropped (tests/support/pg-lock.ts) */
+	let release: (() => Promise<void>) | undefined
+
+	beforeAll(async () => {
+		release = await acquirePgRunLock(server)
+	}, PG_LOCK_WAIT_MS)
 
 	beforeAll(async () => {
 		for (const name of [target, dev]) await admin(`CREATE DATABASE ${name}`)
@@ -74,7 +81,11 @@ describe("comb on Postgres", () => {
 	}, 180_000)
 
 	afterAll(async () => {
-		for (const name of [target, dev]) await admin(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+		try {
+			for (const name of [target, dev]) await admin(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+		} finally {
+			await release?.()
+		}
 	})
 
 	it("diffs the first migration, applies it, and reports it applied", () => {

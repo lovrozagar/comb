@@ -3,7 +3,10 @@
  * projects, whose global setup holds the run's lock on the server (tests/integration/support/
  * pg-run-lock.ts), so two runs of them on one server serialize: every such suite, found by its own
  * text (tests/support/pg-suites.ts), and no other, so a run of codegen or SQLite alone never waits on
- * a Postgres run. Each suite runs once in each zone it runs in.
+ * a Postgres run. Each suite runs once in each zone it runs in. Past the integration suites, no test
+ * file anywhere in the package reaches the server outside the lock, however it is run: one that does,
+ * read from its code (support/pg-reach.ts), runs only in the locked projects or takes the lock itself
+ * through tests/support/pg-lock.ts, as the bun:test, consumer and e2e suites run apart from vitest's.
  */
 import { globSync, readdirSync, readFileSync } from "node:fs"
 import { join, matchesGlob } from "node:path"
@@ -11,6 +14,7 @@ import { describe, expect, it } from "vitest"
 import config from "../../vitest.config.ts"
 import { DATE_KEYS } from "../support/off-utc.ts"
 import { PG_INTEGRATION, PG_REACH } from "../support/pg-suites.ts"
+import { reachesPg, readsPgVar, takesPgLock } from "./support/pg-reach.ts"
 
 const CORE = join(import.meta.dirname, "../..")
 const LOCK = "tests/integration/support/pg-run-lock.ts"
@@ -22,6 +26,12 @@ const projects = (config.test?.projects ?? []).map((project) => (project as { te
 const suites = (readdirSync(join(CORE, "tests/integration"), { recursive: true }) as string[])
 	.filter((name) => name.endsWith(".test.ts"))
 	.map((name) => `tests/integration/${name}`)
+	.toSorted()
+
+/** Every test file in the package, whichever runner runs it, relative to packages/core */
+const testFiles = ["src", "lint", "tests"]
+	.flatMap((dir) => (readdirSync(join(CORE, dir), { recursive: true }) as string[]).map((name) => `${dir}/${name}`))
+	.filter((name) => name.endsWith(".test.ts"))
 	.toSorted()
 
 /** The projects that run `file`, by name */
@@ -70,5 +80,52 @@ describe("the Postgres projects", () => {
 		expect(PG_REACH.test("env: { COMB_TEST_PG_URL: url }")).toBe(true)
 		expect(PG_REACH.test('import { parse } from "../support/pg-parser.ts"')).toBe(false)
 		expect(PG_REACH.test('import { libsql } from "../support/libsql.ts"')).toBe(false)
+	})
+})
+
+describe("every test file that reaches the Postgres test server", () => {
+	it("let no test file reach the server outside the run's lock, however it is run, naming each that does", () => {
+		const unlocked = testFiles.filter((file) => {
+			const text = readFileSync(join(CORE, file), "utf8")
+			if (!reachesPg(text) || takesPgLock(text)) return false
+			const run = runners(file)
+			return run.length === 0 || !run.every((project) => (project.globalSetup ?? []).includes(LOCK))
+		})
+		expect(unlocked).toEqual([])
+	})
+
+	it("take the server's URL through pgUrl, which refuses it unset or empty, never by reading the variable", () => {
+		expect(testFiles.filter((file) => readsPgVar(readFileSync(join(CORE, file), "utf8")))).toEqual([])
+		expect(readsPgVar('const url = process.env["COMB_TEST_PG_URL"] ?? ""')).toBe(true)
+		expect(readsPgVar("JSON.stringify(process.env.COMB_TEST_PG_URL)")).toBe(true)
+		expect(readsPgVar("spawn(cmd, { env: { COMB_TEST_PG_URL: pgUrl() } })")).toBe(false)
+		expect(readsPgVar("const url = env[PG_URL_VAR]")).toBe(false)
+	})
+
+	it("reads a file as reaching the server by what its code does, and as taking the lock by the helper's call", () => {
+		for (const code of [
+			'import pg from "pg"',
+			'import postgres, { type Sql } from "postgres"',
+			'import { pgUrl } from "../integration/support/pg.ts"',
+			'import { pgUrl } from "../support/pg-url.ts"',
+			'const pg = await import("pg")',
+			"const url = process.env.COMB_TEST_PG_URL",
+			'const url = process.env["COMB_TEST_PG_URL"]',
+			"spawn(cmd, { env: { COMB_TEST_PG_URL: url } })",
+		])
+			expect(reachesPg(code), code).toBe(true)
+		for (const code of [
+			'import type pg from "pg"',
+			'import { type Sql } from "postgres"',
+			`const fixture = 'import pg from "pg"'`,
+			'expect(text).toContain("COMB_TEST_PG_URL: postgres://comb@localhost/comb")',
+			"// reads COMB_TEST_PG_URL",
+			'import { parse } from "../support/pg-parser.ts"',
+		])
+			expect(reachesPg(code), code).toBe(false)
+		const helper = 'import { acquirePgRunLock } from "../support/pg-lock.ts"'
+		expect(takesPgLock(`${helper}\nbeforeAll(async () => { release = await acquirePgRunLock(url) })`)).toBe(true)
+		expect(takesPgLock(helper)).toBe(false)
+		expect(takesPgLock("const acquirePgRunLock = () => 0; acquirePgRunLock()")).toBe(false)
 	})
 })

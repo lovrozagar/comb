@@ -10,6 +10,8 @@ import { Miniflare } from "miniflare"
 import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { PEERS } from "../../src/migrate/core/peer-needs.ts"
+import { acquirePgRunLock, PG_LOCK_WAIT_MS } from "../support/pg-lock.ts"
+import { pgUrl } from "../support/pg-url.ts"
 import { APP, REEXPORT_ALL } from "./fixture.ts"
 import {
 	admittedOf,
@@ -263,7 +265,8 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }), ti
 `
 	const configOf = (provider: string) =>
 		`export default { databases: { core: { migrationsDir: "m", name: "core", provider: ${provider} } } }\n`
-	const PG = JSON.stringify(process.env["COMB_TEST_PG_URL"])
+	/* unset, the block fails here on its cause, not later on a case config with no url */
+	const PG = JSON.stringify(pgUrl())
 	/* the preconditions each command meets before it needs the peer: tables, a drizzle and a wrangler config, a database file */
 	const PROJECT = {
 		"drizzle.config.ts": `export default { dialect: "sqlite", out: "./m", schema: "./post.tables.ts" }\n`,
@@ -296,12 +299,20 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }), ti
 		},
 	]
 	let app: Stage
+	/* the postgres provider's commands reach the server: the run's lock, held for the block (tests/support/pg-lock.ts) */
+	let release: (() => Promise<void>) | undefined
+	beforeAll(async () => {
+		release = await acquirePgRunLock(pgUrl())
+	}, PG_LOCK_WAIT_MS)
 	beforeAll(() => {
 		app = stage(tarball, "required")
 		/* wrangler is one of the stage's tools; this consumer has none */
 		removePackage(app.dir, "wrangler")
 	})
-	afterAll(() => app?.dispose())
+	afterAll(async () => {
+		app?.dispose()
+		await release?.()
+	})
 
 	/** `files` written under `dir` */
 	const write = (dir: string, files: Record<string, string>) => {

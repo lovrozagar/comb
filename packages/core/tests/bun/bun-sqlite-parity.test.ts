@@ -7,7 +7,7 @@
  */
 import { SQL } from "bun"
 import { Database } from "bun:sqlite"
-import { describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { getTableColumns, sql } from "drizzle-orm"
 import { drizzle as bunSqlDrizzle } from "drizzle-orm/bun-sql"
 import { drizzle } from "drizzle-orm/bun-sqlite"
@@ -21,6 +21,8 @@ import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../src/types.ts"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
 import { built } from "../../src/query/__fixtures__/built.ts"
+import { acquirePgRunLock, PG_LOCK_WAIT_MS } from "../support/pg-lock.ts"
+import { pgUrl } from "../support/pg-url.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -190,66 +192,73 @@ describe("bun:sqlite answers an UPDATE of a foreign key column the map does not 
 })
 
 /* required, as in the vitest suites: a run without the server would pass with these skipped */
-const PG_URL = process.env.COMB_TEST_PG_URL ?? ""
-if (PG_URL === "") throw new Error("COMB_TEST_PG_URL is unset: the Bun.SQL cases are required (docs/testing.md)")
+const PG_URL = pgUrl()
 
-describe("Bun.SQL error shape", () => {
-	it("reports SQLSTATE in errno and the constraint name", async () => {
-		const client = new SQL({ max: 1, url: PG_URL })
-		try {
-			await client.unsafe("CREATE TEMP TABLE u (email text CONSTRAINT u_email_key UNIQUE)")
-			await client`INSERT INTO u VALUES (${"x"})`
-			const failure = await client`INSERT INTO u VALUES (${"x"})`.then(
-				() => null,
-				(error: unknown) => error,
-			)
-			expect(failure).toMatchObject({ constraint: "u_email_key", errno: "23505", table: "u" })
-		} finally {
-			await client.close()
-		}
+describe("on the Postgres test server, under the run's lock (tests/support/pg-lock.ts)", () => {
+	let release: (() => Promise<void>) | undefined
+	beforeAll(async () => {
+		release = await acquirePgRunLock(PG_URL)
+	}, PG_LOCK_WAIT_MS)
+	afterAll(() => release?.())
+
+	describe("Bun.SQL error shape", () => {
+		it("reports SQLSTATE in errno and the constraint name", async () => {
+			const client = new SQL({ max: 1, url: PG_URL })
+			try {
+				await client.unsafe("CREATE TEMP TABLE u (email text CONSTRAINT u_email_key UNIQUE)")
+				await client`INSERT INTO u VALUES (${"x"})`
+				const failure = await client`INSERT INTO u VALUES (${"x"})`.then(
+					() => null,
+					(error: unknown) => error,
+				)
+				expect(failure).toMatchObject({ constraint: "u_email_key", errno: "23505", table: "u" })
+			} finally {
+				await client.close()
+			}
+		})
 	})
-})
 
-describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
-	const MAPS: ConstraintMap[] = [
-		{
-			member: {
-				primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
-				unique: { email: { cause: "Email in use", errorKey: "member_email_taken" } },
+	describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
+		const MAPS: ConstraintMap[] = [
+			{
+				member: {
+					primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
+					unique: { email: { cause: "Email in use", errorKey: "member_email_taken" } },
+				},
 			},
-		},
-	]
+		]
 
-	async function errorOf(statement: string, viaDrizzle: boolean): Promise<CombError | undefined> {
-		const client = new SQL({ max: 1, url: PG_URL })
-		try {
-			await client.unsafe(
-				"CREATE TEMP TABLE member (id text PRIMARY KEY, email text CONSTRAINT member_email_key UNIQUE, role text NOT NULL DEFAULT 'u'); INSERT INTO member (id, email) VALUES ('m1', 'a@x')",
-			)
-			const run = viaDrizzle ? bunSqlDrizzle({ client }).execute(sql.raw(statement)) : client.unsafe(statement)
-			const failure = await run.then(
-				() => null,
-				(error: unknown) => error,
-			)
-			pgErrorHandler(failure, MAPS)
-		} catch (thrown) {
-			return thrown as CombError
-		} finally {
-			await client.close()
+		async function errorOf(statement: string, viaDrizzle: boolean): Promise<CombError | undefined> {
+			const client = new SQL({ max: 1, url: PG_URL })
+			try {
+				await client.unsafe(
+					"CREATE TEMP TABLE member (id text PRIMARY KEY, email text CONSTRAINT member_email_key UNIQUE, role text NOT NULL DEFAULT 'u'); INSERT INTO member (id, email) VALUES ('m1', 'a@x')",
+				)
+				const run = viaDrizzle ? bunSqlDrizzle({ client }).execute(sql.raw(statement)) : client.unsafe(statement)
+				const failure = await run.then(
+					() => null,
+					(error: unknown) => error,
+				)
+				pgErrorHandler(failure, MAPS)
+			} catch (thrown) {
+				return thrown as CombError
+			} finally {
+				await client.close()
+			}
+			return undefined
 		}
-		return undefined
-	}
 
-	it.each([
-		["INSERT INTO member (id, email) VALUES ('m2', 'a@x')", "member_email_taken", "email"],
-		["INSERT INTO member (id) VALUES ('m1')", "member_id_taken", undefined],
-		["INSERT INTO member (id, role) VALUES ('m3', NULL)", "required_field_missing", "role"],
-	])("%s → %s", async (statement, errorKey, column) => {
-		for (const viaDrizzle of [false, true]) {
-			const error = await errorOf(statement, viaDrizzle)
-			expect(error).toMatchObject({ errorKey, table: "member" })
-			expect(error?.column).toBe(column)
-		}
+		it.each([
+			["INSERT INTO member (id, email) VALUES ('m2', 'a@x')", "member_email_taken", "email"],
+			["INSERT INTO member (id) VALUES ('m1')", "member_id_taken", undefined],
+			["INSERT INTO member (id, role) VALUES ('m3', NULL)", "required_field_missing", "role"],
+		])("%s → %s", async (statement, errorKey, column) => {
+			for (const viaDrizzle of [false, true]) {
+				const error = await errorOf(statement, viaDrizzle)
+				expect(error).toMatchObject({ errorKey, table: "member" })
+				expect(error?.column).toBe(column)
+			}
+		})
 	})
 })
 
