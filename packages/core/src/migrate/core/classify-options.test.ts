@@ -23,7 +23,7 @@ describe.each(ENTRIES)("%s's options (S1n)", (entry, run) => {
 		(options) => {
 			expect(() => run(legacy(options))).toThrow(TypeError)
 			expect(() => run(legacy(options))).toThrow(
-				`${entry} takes no option d1; it takes before, kind, dialect and schema (0.21 reads d1: true as kind: "d1")`,
+				`${entry} takes no option d1; it takes before, kind, dialect and schema (pass kind: "d1" in place of d1: true)`,
 			)
 		},
 	)

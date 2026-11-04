@@ -16,7 +16,7 @@ function takenOptions(entry: string, options: ClassifyOptions): ClassifyOptions 
 	if (unknown.length === 0) return options
 	const named = unknown.length === 1 ? `option ${unknown[0] as string}` : `options ${unknown.join(", ")}`
 	const taken = Object.keys(TAKEN)
-	const d1 = unknown.includes("d1") ? ' (0.21 reads d1: true as kind: "d1")' : ""
+	const d1 = unknown.includes("d1") ? ' (pass kind: "d1" in place of d1: true)' : ""
 	throw new TypeError(
 		`${entry} takes no ${named}; it takes ${taken.slice(0, -1).join(", ")} and ${taken.at(-1) as string}${d1}`,
 	)
