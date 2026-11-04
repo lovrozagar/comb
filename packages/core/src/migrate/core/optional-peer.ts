@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { refuseCompiled } from "./compiled.ts"
 import { ATLAS, type BinNeed, type Command, type Need, needsOf, type Provider } from "./peer-needs.ts"
 import { admits, installedVersion, manifestOf } from "./peer-version.ts"
 import { ATLAS_INSTALL, ATLAS_RANGE, type BinPeer, type ProjectBin, type RunResult } from "./process.ts"
@@ -236,8 +237,12 @@ function binOf(peers: Peers, peer: BinPeer): ProjectBin {
 /** The entry module of the package `bin` is from: the one package comb checked and spawns */
 const binEntry = (bin: ProjectBin): string => createRequire(bin.manifest).resolve(dirname(bin.manifest))
 
-/** The module of the package `bin` is from, by its entry */
-async function importBin<T>(bin: ProjectBin): Promise<T> {
+/** The module of the package `bin` is from, by its entry; refused in a compiled executable, which `moduleUrl` (comb's own) tells */
+async function importBin<T>(bin: ProjectBin, moduleUrl: string = import.meta.url): Promise<T> {
+	refuseCompiled(
+		moduleUrl,
+		`comb loads ${bin.peer} from the project in process, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`,
+	)
 	return (await import(pathToFileURL(binEntry(bin)).href)) as T
 }
 

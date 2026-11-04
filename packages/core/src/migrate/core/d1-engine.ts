@@ -11,6 +11,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { refuseCompiled } from "./compiled.ts"
 import type { ProofInput, ProofResult } from "./d1-engine-child.mjs"
 import { binEntry } from "./optional-peer.ts"
 import { type ProjectBin, type Run, run } from "./process.ts"
@@ -95,8 +96,18 @@ async function proofInput(
 async function proveOnD1(
 	live: readonly LiveObject[],
 	files: readonly File[],
-	{ bin, exec = run, table }: { bin: ProjectBin; exec?: Run | undefined; table: string },
+	{
+		bin,
+		exec = run,
+		moduleUrl = import.meta.url,
+		table,
+	}: { bin: ProjectBin; exec?: Run | undefined; moduleUrl?: string | undefined; table: string },
 ): Promise<void> {
+	/* the child is handed d1-engine-child.mjs by comb's own URL, which `moduleUrl` is unless a test says otherwise (D4-5 of the area D round-four review) */
+	refuseCompiled(
+		moduleUrl,
+		"check proves the pending files in a child on wrangler's runtime, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable",
+	)
 	for (const file of files) refuseRewritten(file)
 	const dir = mkdtempSync(join(tmpdir(), "comb-d1-proof-"))
 	try {

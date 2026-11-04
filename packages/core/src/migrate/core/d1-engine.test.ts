@@ -55,6 +55,31 @@ describe("refuseRewritten: the text wrangler --local rewrites (SD2 of r22)", () 
 	})
 })
 
+describe("proveOnD1 inside a Bun single-file executable", () => {
+	/* D4-5 of the area D round-four review: the child is handed a module the executable embeds, which node cannot read */
+	it("refuses inside a Bun single-file executable, saying why, and starts no child", async () => {
+		const calls: string[] = []
+		const exec: Run = (cmd) => {
+			calls.push(cmd)
+			return { code: 0, stderr: "", stdout: "" }
+		}
+		const files = [{ name: "1.sql", sql: "SELECT 1;" }]
+		await expect(
+			proveOnD1([], files, {
+				bin: wranglerBin(),
+				exec,
+				moduleUrl: "file:///$bunfs/root/app-exe",
+				table: "d1_migrations",
+			}),
+		).rejects.toThrow(
+			new Error(
+				"check proves the pending files in a child on wrangler's runtime, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable",
+			),
+		)
+		expect(calls).toEqual([])
+	})
+})
+
 describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runtime (SD1 of r22)", () => {
 	it("passes files D1 runs, the child started on node through the runner", async () => {
 		const runtimes: string[] = []

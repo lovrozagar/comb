@@ -346,6 +346,16 @@ describe("projectBin and binOf", () => {
 		writeFileSync(join(broken, "../index.js"), "throw new Error('boom')\n")
 		await expect(importBin({ ...bin, manifest: broken })).rejects.toThrow("boom")
 	})
+
+	/* D4-5 of the area D round-four review: wrangler's module cannot be loaded from the project inside a compiled executable */
+	it("refuses to import a peer from a Bun single-file executable, before any import, saying why", async () => {
+		const bin = { bin: "/nowhere/w.js", manifest: "/nowhere/package.json", peer: "wrangler", runtime: "node" } as const
+		await expect(importBin(bin, "file:///$bunfs/root/app-exe")).rejects.toThrow(
+			new Error(
+				"comb loads wrangler from the project in process, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable",
+			),
+		)
+	})
 })
 
 /* KC3, PA5, KC6 and PA22 of r22: Atlas and a declared FTS's ts-morph are rows of the one table, each named in the refusal */
