@@ -7,6 +7,7 @@ import { makeIo, projects, runCliWithFakes, writeTables } from "./__fixtures__/i
 import { diffProject, fakeAtlas } from "./__fixtures__/diff.ts"
 import { help } from "./run.ts"
 import { onBun } from "../../tests/support/runtime.ts"
+import { fixtureRoot } from "../codegen/__fixtures__/temp.ts"
 
 const temp = projects()
 const project = temp.make
@@ -225,6 +226,33 @@ describe("comb migrate diff: the config it reads", () => {
 		)
 		expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors.join("\n")).toMatch(/missing\.tables\.ts/)
+	})
+
+	/* D4-1 of the area D round-four review: inside the package, so the tables file imports drizzle and comb */
+	it("diffs a database with a declared FTS, writing its FTS5 table into the generated file", async () => {
+		const local = projects(fixtureRoot())
+		try {
+			const dir = diffProject(local.make)
+			writeTables(dir)
+			mkdirSync(join(dir, "atlas-migrations"))
+			writeFileSync(
+				join(dir, "comb.config.ts"),
+				'export default { databases: { core: { tables: "./db.core.tables.ts", fts: { post: { columns: ["title"] } } } } }\n',
+			)
+			const io = makeIo(
+				dir,
+				fakeAtlas(() => undefined),
+			)
+			expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
+			const written = readdirSync(join(dir, "atlas-migrations")).filter((file) => file.endsWith(".sql"))
+			expect(written).toEqual([expect.stringMatching(/^\d{14}_init\.sql$/)])
+			expect(io.outputs).toEqual([`Generated: ${join(dir, "atlas-migrations", written[0] as string)}`])
+			expect(readFileSync(join(dir, "atlas-migrations", written[0] as string), "utf8")).toMatch(
+				/CREATE VIRTUAL TABLE .*post_fts.* USING fts5/,
+			)
+		} finally {
+			local.clean()
+		}
 	})
 
 	it("refuses migrate diff for a database the config does not declare", async () => {
