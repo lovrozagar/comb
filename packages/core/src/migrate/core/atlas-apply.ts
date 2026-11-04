@@ -11,7 +11,6 @@
  * history holds another schema's 0.12 row (atlas-foreign.ts, M78): Atlas would count that row as
  * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
  */
-import { rmSync } from "node:fs"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
@@ -121,7 +120,8 @@ async function approvePending(
 
 /** Apply the pending migrations of `options.dir` through Atlas; returns the files applied, or only checked */
 async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
-	const copy = snapshotDir(options.exec ?? run, options.dir)
+	const snapshot = snapshotDir(options.exec ?? run, options.dir)
+	const copy = snapshot.dir
 	try {
 		const own = atlasStatus(options, copy, { notClean: true })
 		const ran = sharedRan(options, copy, own)
@@ -156,27 +156,27 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		const server = status.pending.length > 1 ? await (options.targetCode ?? targetCode)(options.target) : NO_SERVER_CODE
 		return applyRuns(options, copy, { files, foreign, report, server, status })
 	} finally {
-		rmSync(copy, { force: true, recursive: true })
+		snapshot.remove()
 	}
 }
 
 /** `body` on a snapshot of the directory, removed afterwards */
 function onSnapshot<T>(options: AtlasCommand, body: (copy: string) => T): T {
-	const copy = snapshotDir(options.exec ?? run, options.dir)
+	const snapshot = snapshotDir(options.exec ?? run, options.dir)
 	try {
-		return body(copy)
+		return body(snapshot.dir)
 	} finally {
-		rmSync(copy, { force: true, recursive: true })
+		snapshot.remove()
 	}
 }
 
 /** `body`, which reads the database as it goes, on a snapshot of the directory, removed once it is done */
 async function onSnapshotAsync<T>(options: AtlasCommand, body: (copy: string) => Promise<T>): Promise<T> {
-	const copy = snapshotDir(options.exec ?? run, options.dir)
+	const snapshot = snapshotDir(options.exec ?? run, options.dir)
 	try {
-		return await body(copy)
+		return await body(snapshot.dir)
 	} finally {
-		rmSync(copy, { force: true, recursive: true })
+		snapshot.remove()
 	}
 }
 

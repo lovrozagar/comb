@@ -61,11 +61,11 @@ describe("hashDir and verifySum", () => {
 describe("verifySum and snapshotDir on a directory without atlas.sum", () => {
 	it("take a directory with no migration as an empty history", () => {
 		expect(() => verifySum(fakeHash, dir)).not.toThrow()
-		const copy = snapshotDir(fakeHash, dir)
+		const snapshot = snapshotDir(fakeHash, dir)
 		try {
-			expect(readdirSync(copy)).toEqual([])
+			expect(readdirSync(snapshot.dir)).toEqual([])
 		} finally {
-			rmSync(copy, { force: true, recursive: true })
+			snapshot.remove()
 		}
 	})
 
@@ -82,12 +82,12 @@ describe("snapshotDir", () => {
 		writeFileSync(join(dir, "1_a.sql"), "")
 		writeFileSync(join(dir, "README.md"), "")
 		hashDir(fakeHash, dir)
-		const copy = snapshotDir(fakeHash, dir)
+		const snapshot = snapshotDir(fakeHash, dir)
 		try {
-			expect(readdirSync(copy).sort()).toEqual(["1_a.sql", "atlas.sum"])
-			expect(statSync(copy).mode & 0o777).toBe(0o700)
+			expect(readdirSync(snapshot.dir).sort()).toEqual(["1_a.sql", "atlas.sum"])
+			expect(statSync(snapshot.dir).mode & 0o777).toBe(0o700)
 		} finally {
-			rmSync(copy, { force: true, recursive: true })
+			snapshot.remove()
 		}
 	})
 

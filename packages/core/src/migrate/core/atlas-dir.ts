@@ -6,7 +6,7 @@
 import { copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Run } from "./process.ts"
-import { scratchDir } from "./cleanup.ts"
+import { type Scratch, scratchDir } from "./cleanup.ts"
 
 /** The migration files of `dir`, in the order Atlas applies them */
 function sqlFiles(dir: string): string[] {
@@ -59,17 +59,17 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 /**
  * A private 0700 copy of `dir`'s migrations and atlas.sum, checked against the sum. What comb
  * classifies and what Atlas applies are both read from it, so an edit to `dir` in between changes
- * nothing; the caller removes it.
+ * nothing; the caller removes it through the scratch's `remove`, which lets its hold go too.
  */
-function snapshotDir(exec: Run, dir: string): string {
-	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-snapshot-")
+function snapshotDir(exec: Run, dir: string): Scratch {
+	const snapshot = scratchDir("comb-migrate-snapshot-")
 	try {
 		const sum = existsSync(join(dir, "atlas.sum")) ? ["atlas.sum"] : []
-		for (const file of [...sqlFiles(dir), ...sum]) copyFileSync(join(dir, file), join(copy, file))
-		verifySum(exec, copy, dir)
-		return copy
+		for (const file of [...sqlFiles(dir), ...sum]) copyFileSync(join(dir, file), join(snapshot.dir, file))
+		verifySum(exec, snapshot.dir, dir)
+		return snapshot
 	} catch (error) {
-		removeCopy()
+		snapshot.remove()
 		throw error
 	}
 }
