@@ -66,11 +66,15 @@ const ONE_PART = /* @__PURE__ */ new RegExp(PART, "g")
 // per-process-constant: a name, its schema parts before it, as a pattern
 const NAME = `(?:(?:${PART})\\s*\\.\\s*)*(?:${PART})`
 
+/* Postgres's ONLY before an UPDATE's or a DELETE's table, which names no table (AB7 of area B): read as
+ * ONLY only where a name follows it, as SQLite, which has no ONLY, may name a bare table `only` */
+const ONLY = "(?:\\s+only(?=\\s+(?!(?:where|returning|set|as|indexed|not)\\b)[^\\s;]))?"
+
 /* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
  * statement's own verb on: a name its schema qualifies or not, each part quoted or bare */
 // per-process-constant: see above
 const STATEMENT_TABLE = /* @__PURE__ */ new RegExp(
-	`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into|update(?:\\s+or\\s+\\w+)?|delete\\s+from)\\s+(${NAME})`,
+	`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into|update(?:\\s+or\\s+\\w+)?${ONLY}|delete\\s+from${ONLY})\\s+(${NAME})`,
 	"i",
 )
 
@@ -95,7 +99,7 @@ export function statementTable(query: string | undefined): { schema: string | un
 
 // per-process-constant: an UPDATE up to its SET list, past an alias and an INDEXED BY or NOT INDEXED
 const UPDATE_SET = /* @__PURE__ */ new RegExp(
-	`^update(?:\\s+or\\s+\\w+)?\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?(?:\\s+indexed\\s+by\\s+(?:${PART})|\\s+not\\s+indexed)?\\s+set\\s+`,
+	`^update(?:\\s+or\\s+\\w+)?${ONLY}\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?(?:\\s+indexed\\s+by\\s+(?:${PART})|\\s+not\\s+indexed)?\\s+set\\s+`,
 	"i",
 )
 // per-process-constant: the head of one assignment: a column, or a parenthesized list of them, before its `=`

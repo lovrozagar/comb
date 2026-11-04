@@ -42,6 +42,14 @@ describe("statementTable on a schema-qualified table", () => {
 		["delete from [my app].[pa rent]", "my app", "pa rent"],
 		['delete from db."app"."parent"', "app", "parent"],
 		['delete from "parent"', undefined, "parent"],
+		/* AB7 of area B: Postgres's ONLY, a reserved word there, is no table; SQLite may name a bare table only */
+		['DELETE FROM ONLY "app"."org" WHERE id = $1', "app", "org"],
+		['UPDATE ONLY "app"."org" SET id = $1', "app", "org"],
+		["update only app.org set id = $1", "app", "org"],
+		["delete from only where id = 1", undefined, "only"],
+		["delete from only", undefined, "only"],
+		["update only set a = 1", undefined, "only"],
+		["update only as o set a = 1", undefined, "only"],
 	])("reads %s as %s.%s", (query, schema, table) => {
 		expect(statementTable(query)).toEqual({ schema, table })
 	})
@@ -78,6 +86,14 @@ describe("updatedColumns, as SQLite writes an UPDATE", () => {
 		['update "m" set () = ()', []],
 	])("reads %s", (query, columns) => {
 		expect(updatedColumns(query)).toEqual(columns)
+	})
+})
+
+/* AB7 of area B: an UPDATE ONLY's SET list is read past the ONLY, and a bare table named only is a table */
+describe("updatedColumns past Postgres's ONLY", () => {
+	it("reads the SET list after ONLY and after a table named only", () => {
+		expect(updatedColumns('UPDATE ONLY "app"."org" SET id = $1, "name" = $2 WHERE id = $3')).toEqual(["id", "name"])
+		expect(updatedColumns("update only set a = 1")).toEqual(["a"])
 	})
 })
 

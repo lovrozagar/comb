@@ -5,7 +5,7 @@
  * writes the schema into the SQL, on both Node drivers.
  */
 import { randomBytes } from "node:crypto"
-import { eq } from "drizzle-orm"
+import { eq, sql as drizzleSql } from "drizzle-orm"
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres"
 import { pgSchema, text } from "drizzle-orm/pg-core"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
@@ -77,4 +77,17 @@ describe("pgErrorHandler on a real server: a pgSchema table a child references (
 			expect(referenced).toMatchObject({ errorKey: "foreign_key_violation", table: `${SCHEMA}.org` })
 		})
 	}
+
+	/* AB7 of area B: raw SQL run through drizzle, which records it, may write ONLY, which named the table "ONLY" */
+	it("names the table by its key in a referenced DELETE FROM ONLY and UPDATE ONLY, on both drivers", async () => {
+		for (const db of [viaPg, viaPostgres])
+			for (const statement of [
+				`DELETE FROM ONLY "${SCHEMA}"."org" WHERE id = 'o1'`,
+				`UPDATE ONLY "${SCHEMA}"."org" SET id = 'o9' WHERE id = 'o1'`,
+			])
+				expect(await handled(() => db.execute(drizzleSql.raw(statement))), statement).toMatchObject({
+					errorKey: "foreign_key_violation",
+					table: `${SCHEMA}.org`,
+				})
+	})
 })
