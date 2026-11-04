@@ -83,6 +83,7 @@ describe("supervise: a child in a process group of its own", () => {
 
 /** A process stand-in for main: its argv's last entry the job, its exits and signal handlers recorded */
 function fakeProcess(job: object) {
+	const stdin = new EventEmitter()
 	const exits: number[] = []
 	const handlers = new Map<string, () => void>()
 	return {
@@ -92,7 +93,10 @@ function fakeProcess(job: object) {
 			argv: ["node", "-e", JSON.stringify(job)],
 			exit: ((code: number) => void exits.push(code)) as never,
 			on: ((signal: string, handler: () => void) => handlers.set(signal, handler)) as never,
+			/* the pipe codegen holds, which a case ends as codegen's end would */
+			stdin: Object.assign(stdin, { resume: () => stdin }) as never,
 		},
+		stdin,
 	}
 }
 
@@ -134,6 +138,26 @@ describe("main: the supervisor's process", () => {
 		expect(fake.exits[0]).toBe(130)
 		await new Promise((r) => setTimeout(r, 200))
 		expect(alive(grandchild)).toBe(false)
+	})
+
+	it("kills the group when codegen's pipe on its stdin ends, however codegen ended, then exits 129 (KC5 of r22b)", async () => {
+		const pids = path.join(dir, "pids")
+		const fake = fakeProcess({
+			args: ["-e", stuck(pids)],
+			cmd: process.execPath,
+			status: path.join(dir, "s"),
+			timeoutMs: 60_000,
+		})
+		const ended = main(fake.proc)
+		const grandchild = await grandchildOf(pids)
+		fake.stdin.emit("end")
+		/* bounded: a supervisor deaf to its stdin would hold the group the whole minute, so the case stops it by SIGTERM's handler and fails */
+		const late = await Promise.race([
+			ended.then(() => false),
+			new Promise<boolean>((r) => setTimeout(() => r(true), 5000)),
+		])
+		if (late) fake.handlers.get("SIGTERM")?.()
+		expect([late, fake.exits[0], await goneWithin(grandchild, 5000)]).toEqual([false, 129, true])
 	})
 })
 

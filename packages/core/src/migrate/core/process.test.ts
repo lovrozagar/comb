@@ -240,6 +240,16 @@ describe("run, asynchronous (PA4 of r22)", () => {
 		expect(result).toEqual({ code: 4, stderr: "", stdout: "" })
 	})
 
+	it("leaves a lifeline's stdin open and unwritten while comb runs, where any other run's ends at once (KC5 of r22b)", async () => {
+		const script =
+			"process.stdin.on('end', () => process.exit(3)); process.stdin.resume(); setTimeout(() => process.exit(0), 300)"
+		const [held, ended] = await Promise.all([
+			run("node", ["-e", script], { lifeline: true }),
+			run("node", ["-e", script]),
+		])
+		expect([held.code, ended.code]).toEqual([0, 3])
+	})
+
 	it("holds stderr to maxBuffer too", async () => {
 		const result = await run("node", ["-e", "process.stderr.write('x'.repeat(1025))"], { maxBuffer: 1024 })
 		expect(result).toEqual({ code: 1, stderr: "node: output exceeded 1024 bytes", stdout: "" })

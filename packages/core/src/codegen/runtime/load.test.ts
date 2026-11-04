@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -216,7 +216,60 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 		await new Promise((r) => setTimeout(r, 200))
 		expect([alive(loader), alive(grandchild), fs.readdirSync(tmp)]).toEqual([false, false, []])
 	})
+	it("leaves nothing when comb alone gets SIGTERM while the module loads, and ends by it (KC5 of r22b)", async () => {
+		const { codegen, ended, tmp } = codegenOf("bun")
+		const { grandchild, loader } = await pidsOf()
+		const supervisor = parentOf(loader)
+		/* a supervisor, a container stop or a CI step timeout signals comb's pid alone, not its group */
+		process.kill(codegen.pid as number, "SIGTERM")
+		const end = await ended
+		expect([await leftOf([supervisor, loader, grandchild]), fs.readdirSync(tmp), end]).toEqual([[], [], "SIGTERM"])
+	})
+
+	it("leaves neither the supervisor nor the module when comb is killed outright while it loads (KC5 of r22b)", async () => {
+		const { codegen, ended } = codegenOf("bun")
+		const { grandchild, loader } = await pidsOf()
+		const supervisor = parentOf(loader)
+		/* no step of comb's runs on SIGKILL: the supervisor reads comb's end from its stdin closing */
+		process.kill(codegen.pid as number, "SIGKILL")
+		await ended
+		expect(await leftOf([supervisor, loader, grandchild])).toEqual([])
+	})
 })
+
+/** codegen of the stuck module in a process of `runtime`'s own, with a temp directory of its own, and how it ended */
+function codegenOf(runtime: "bun" | "node") {
+	const script = path.join(dir, "codegen.ts")
+	fs.writeFileSync(
+		script,
+		`import { loadSnapshot } from ${JSON.stringify(new URL("./load.ts", import.meta.url).pathname)}\nawait loadSnapshot(${JSON.stringify(stuckTables())})\n`,
+	)
+	const tmp = fs.mkdtempSync(path.join(dir, "tmp-"))
+	const codegen = spawn(runtime, [script], { env: { ...process.env, TMPDIR: tmp }, stdio: "ignore" })
+	const ended = new Promise<NodeJS.Signals | number | null>((resolve) =>
+		codegen.on("exit", (code, signal) => resolve(signal ?? code)),
+	)
+	return { codegen, ended, tmp }
+}
+
+/** The parent of process `pid`, as ps reads it */
+function parentOf(pid: number): number {
+	const ppid = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim())
+	expect(ppid).toBeGreaterThan(1)
+	return ppid
+}
+
+/**
+ * Which of `pids` still run 10 s on: each one left is then killed, so a red run leaves nothing
+ * behind; a killed process stays a zombie until it is reaped, so the wait polls
+ */
+async function leftOf(pids: readonly number[]): Promise<number[]> {
+	for (const deadline = Date.now() + 10_000; Date.now() < deadline && pids.some(alive);)
+		await new Promise((r) => setTimeout(r, 100))
+	const left = pids.filter(alive)
+	for (const pid of left) process.kill(pid, "SIGKILL")
+	return left
+}
 
 /* F44 of the 0.13.0 round: a seeder the tables module imports only on demand never runs at codegen */
 describe("loadSnapshot on a tables module that imports a seeder on demand", () => {

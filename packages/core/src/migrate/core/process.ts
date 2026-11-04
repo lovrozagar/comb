@@ -36,7 +36,6 @@ export type RunOptions = {
 	env?: Readonly<Record<string, string | undefined>> | undefined
 	/** The child's whole environment, none of the parent's, in place of `env` */
 	exactEnv?: Readonly<Record<string, string>> | undefined
-	input?: string | undefined
 	/** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
 	maxBuffer?: number | undefined
 	/** The bin peer the process runs, whose runtime a failure to start names */
@@ -45,7 +44,17 @@ export type RunOptions = {
 	timeoutMs?: number | undefined
 	/** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
 	killAfterMs?: number | undefined
-}
+} & (
+	| { input?: string | undefined; lifeline?: false | undefined }
+	| {
+			input?: undefined
+			/**
+			 * The child's stdin left open and never written while comb runs, so its end tells the child
+			 * comb is gone, however comb ended, a SIGKILL included
+			 */
+			lifeline: true
+	  }
+)
 
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>
 
@@ -185,10 +194,14 @@ function started(cmd: string, args: readonly string[], options: RunOptions): Pro
 				)
 	/* a child that ends without reading its input closes the pipe: what it did is the result, not the EPIPE */
 	child.stdin.on("error", () => undefined)
-	child.stdin.end(options.input)
+	if (options.lifeline !== true) child.stdin.end(options.input)
 	const ended = new Promise<Ending | NodeJS.ErrnoException>((resolve) => {
 		child.on("error", resolve)
-		child.on("close", (code, signal) => resolve({ code, signal, stopped }))
+		child.on("close", (code, signal) => {
+			/* a lifeline's pipe goes with the child, so it holds no handle of comb's past it */
+			child.stdin.destroy()
+			resolve({ code, signal, stopped })
+		})
 	})
 	/* a signal to comb goes on to the child, and comb waits for its end before it ends itself */
 	let forwarded = false

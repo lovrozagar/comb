@@ -7,4 +7,4 @@ export function supervise(job: {
 	timeoutMs: number
 }): { done: Promise<{ code: number } | { timedOut: true }>; stop: () => void }
 
-export function main(proc: Pick<NodeJS.Process, "argv" | "exit" | "on">): Promise<void>
+export function main(proc: Pick<NodeJS.Process, "argv" | "exit" | "on" | "stdin">): Promise<void>

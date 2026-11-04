@@ -3,8 +3,9 @@
  * child runs in a process group of its own, so its whole group, every process a module's pool or
  * worker started, is killed with SIGKILL when the time runs out, when the child exits, or when a
  * signal reaches this supervisor: a terminal's Ctrl-C reaches codegen and the supervisor, never the
- * child's own group. The child also exits when the pipe on its stdin closes, should the supervisor
- * die unseen. A timeout is written to the status file, which codegen reads, as an exit code a module
+ * child's own group. The supervisor's own stdin is a pipe codegen holds and never writes (run's
+ * lifeline): its end means codegen is gone, a SIGKILL included, and the group goes then too. The
+ * child also exits when the pipe on its stdin closes, should the supervisor die unseen. A timeout is written to the status file, which codegen reads, as an exit code a module
  * may also use proves nothing. Plain JavaScript, run by node or bun before any hook loads. POSIX
  * only: a negative pid names a process group.
  */
@@ -63,8 +64,8 @@ function supervise({ args, cmd, kill = (pid, signal) => process.kill(pid, signal
 /**
  * The supervisor's process, its last argument `{ timeoutMs, status, cmd, args }` as JSON: the
  * child's exit code its own, a timeout written to `status` before exiting 124, and each of SIGNALS
- * turned into the group's kill before exiting 128 + its number
- * @param {Pick<NodeJS.Process, "argv" | "exit" | "on">} proc
+ * turned into the group's kill before exiting 128 + its number, as the end of stdin is, as SIGHUP
+ * @param {Pick<NodeJS.Process, "argv" | "exit" | "on" | "stdin">} proc
  * @returns {Promise<void>}
  */
 async function main(proc) {
@@ -76,6 +77,12 @@ async function main(proc) {
 			proc.exit(128 + constants.signals[signal])
 		})
 	}
+	/* the pipe codegen holds closed: codegen is gone, however it ended, as a terminal's hang-up says */
+	proc.stdin.on("end", () => {
+		run.stop()
+		proc.exit(128 + constants.signals.SIGHUP)
+	})
+	proc.stdin.resume()
 	const ended = await run.done
 	if ("timedOut" in ended) {
 		fs.writeFileSync(status, JSON.stringify({ timedOut: true }))

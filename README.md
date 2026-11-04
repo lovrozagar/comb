@@ -240,7 +240,7 @@ OPTIONS:
 
 The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migrate diff` runs the project's `drizzle-kit` bin on the runtime running comb, Bun here.
 
-The CLI is tested on Linux and macOS (CI runs its loader, codegen and SQLite-family migrate suites on both, with real Atlas) and relies on POSIX process groups, so Windows is not supported: `comb codegen` loads each tables module in a child of its own process group, which a supervisor kills whole, with every process the module started, after 60 s or when the run is interrupted. The library itself (columns, queries, error handling) runs wherever its database driver does.
+The CLI is tested on Linux and macOS (CI runs its loader, codegen and SQLite-family migrate suites on both, with real Atlas) and relies on POSIX process groups, so Windows is not supported: `comb codegen` loads each tables module in a child of its own process group, which a supervisor kills whole, with every process the module started, after 60 s, when the run is interrupted, or when codegen itself ends, a SIGKILL included. The library itself (columns, queries, error handling) runs wherever its database driver does.
 
 External tools the migration commands shell out to, none of them install-time dependencies: [Atlas](https://atlasgo.io) `>=1.2.0 <2` on `PATH`, and the project's own `drizzle-kit` and `wrangler`, `wrangler` authenticated against the account for a remote D1 database. Each command needs these, on the providers named; the npm clients a provider's commands load are in the peer dependencies table.
 

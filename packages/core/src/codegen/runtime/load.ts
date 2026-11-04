@@ -112,6 +112,8 @@ async function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Prom
 			{
 				cwd: options.cwd ?? process.cwd(),
 				exactEnv: childEnv(),
+				/* the supervisor reads codegen's end from its stdin, so a codegen killed outright leaves no module running */
+				lifeline: true,
 				timeoutMs: timeoutMs + SUPERVISOR_GRACE_MS,
 			},
 		)

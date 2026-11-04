@@ -120,7 +120,6 @@ export type RunOptions = {
     env?: Readonly<Record<string, string | undefined>> | undefined;
     /** The child's whole environment, none of the parent's, in place of `env` */
     exactEnv?: Readonly<Record<string, string>> | undefined;
-    input?: string | undefined;
     /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
     maxBuffer?: number | undefined;
     /** The bin peer the process runs, whose runtime a failure to start names */
@@ -129,7 +128,17 @@ export type RunOptions = {
     timeoutMs?: number | undefined;
     /** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
     killAfterMs?: number | undefined;
-};
+} & ({
+    input?: string | undefined;
+    lifeline?: false | undefined;
+} | {
+    input?: undefined;
+    /**
+     * The child's stdin left open and never written while comb runs, so its end tells the child
+     * comb is gone, however comb ended, a SIGKILL included
+     */
+    lifeline: true;
+});
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 /** Runs `cmd` and reports how it ended; it never rejects for a failed command. Started while a signal stops comb, it waits with the rest. */
 export declare const run: Run;
