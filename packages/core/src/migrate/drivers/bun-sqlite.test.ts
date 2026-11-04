@@ -70,6 +70,9 @@ describe("createBunSqliteProvider read-only, and the proof run's memory database
 		db.run("INSERT INTO t VALUES ('x')")
 		expect(db.all("SELECT a FROM t WHERE a = ?", ["007"])).toEqual([{ a: "007" }])
 		expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 2 }])
+		/* the proof's split (proof-split.ts) reads where SQLite ends a statement: a trigger's body whole, up to its ; */
+		const trigger = "CREATE TRIGGER g AFTER INSERT ON t BEGIN SELECT new.a; END;"
+		expect(db.firstStatement(`${trigger}\nINSERT INTO t VALUES ('y')`)).toBe(trigger)
 		db.close()
 	})
 })
