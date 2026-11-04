@@ -5,7 +5,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type Run, type RunOptions, run as realRun } from "../../migrate/core/process.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
-import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot } from "./load.ts"
+import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, refuseCompiled } from "./load.ts"
 
 let dir: string
 
@@ -62,6 +62,18 @@ describe("childArgs", () => {
 
 /** The tables file of the fixture directory */
 const tables = () => path.join(dir, "db.core.tables.ts")
+
+/* D3-4 of the area D round-three review: in a Bun single-file executable, process.execPath is the app and comb's modules live in its embedded filesystem */
+describe("refuseCompiled", () => {
+	it("refuses a module a Bun single-file executable embeds, on posix and on windows, and passes one on disk", () => {
+		const refusal = new Error(
+			"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
+		)
+		expect(() => refuseCompiled("file:///$bunfs/root/app-exe")).toThrow(refusal)
+		expect(() => refuseCompiled("file:///B:/~BUN/root/app-exe.exe")).toThrow(refusal)
+		expect(refuseCompiled(import.meta.url)).toBeUndefined()
+	})
+})
 
 describe("loadSnapshot", () => {
 	/* F58: the child runs where comb runs, as the app and drizzle-kit do, never beside the tables file */

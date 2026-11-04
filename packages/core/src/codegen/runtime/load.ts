@@ -83,8 +83,24 @@ type LoadOptions = {
 	timeoutMs?: number | undefined
 }
 
+/* where a Bun single-file executable embeds its modules, on posix and on windows */
+const EMBEDDED = /\/\$bunfs\/|\/~BUN\//
+
+/**
+ * Refuses `moduleUrl` when a Bun single-file executable embeds it: process.execPath is then the app
+ * itself, and no second process can read the modules it embeds, so the child would rerun the app
+ * (D3-4 of the area D round-three review)
+ */
+function refuseCompiled(moduleUrl: string): void {
+	if (EMBEDDED.test(moduleUrl))
+		throw new Error(
+			"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
+		)
+}
+
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
 function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
+	refuseCompiled(import.meta.url)
 	/* the child reads the module's imports with ts-morph, an optional peer (under node its hooks load it
 	   first): resolved here, so a project without it is told so, not that its tables file failed (K7 of r20) */
 	resolvePeer({ peer: "ts-morph", why: "read the modules a tables file imports" }, () =>
@@ -124,4 +140,4 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 	}
 }
 
-export { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, supervisorArgs }
+export { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, refuseCompiled, supervisorArgs }
