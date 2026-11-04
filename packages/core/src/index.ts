@@ -1,4 +1,5 @@
 export { isCidr } from "./cidr.ts"
+export { jsonValue } from "./json-value.ts"
 export { CombError } from "./error.ts"
 export {
 	type PasswordHash,

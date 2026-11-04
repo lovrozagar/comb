@@ -1,5 +1,6 @@
 // index.d.ts
 export { isCidr } from "./cidr.ts";
+export { jsonValue } from "./json-value.ts";
 export { CombError } from "./error.ts";
 export { type PasswordHash, passwordText, type PasswordTextOptions, type TypedPasswordOptions, } from "./password-text.ts";
 export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-text.ts";
@@ -17,6 +18,18 @@ export { type CombDatabaseErrorKey, type CombErrorKey, combDatabaseErrorKeys, ty
  */
 /** Whether `value` is a network Postgres's `cidr` takes, with no bit set past its prefix length */
 export declare function isCidr(value: string): boolean;
+
+// json-value.d.ts
+/**
+ * One JSON value, `CombJsonValue`, for every generated DTO of every database (A2-1 of r22). A
+ * schema under an id must be one object per process: zod refuses two schemas under one id in one
+ * JSON Schema run, so a definition each database's `_shared` module wrote threw when one document
+ * held the DTOs of two. z.json() as a union, its recursion lazy inside: the id on z.json() names
+ * its lazy, and its body still publishes as a positional `__schemaN` (AA9 of r22).
+ */
+import * as z from "zod";
+/** Any JSON value, null included, published once as `#/$defs/CombJsonValue` */
+export declare const jsonValue: z.ZodType<z.core.util.JSONType>;
 
 // error.d.ts
 import type { StatusKey } from "./types.ts";
