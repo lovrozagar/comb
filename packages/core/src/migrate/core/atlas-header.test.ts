@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { atlasHeader, outsideTransaction, strayDirective } from "./atlas-header.ts"
+import { atlasHeader, linesOf, outsideTransaction, strayDirective } from "./atlas-header.ts"
 
 describe("atlasHeader", () => {
 	it("reads the comment lines a blank line closes, with their directives, and keeps the header's text as the file has it", () => {
@@ -37,6 +37,35 @@ describe("atlasHeader", () => {
 			directives: [{ name: "txmode", value: "" }],
 			txmode: { refused: 'unknown txmode "" found in file directive' },
 		})
+	})
+})
+
+/** The lines of `file` from `at` as linesOf read them before (fc8c3cee): a sticky regex, a null exec read as the end */
+function* regexLines(file: string, at = 0): Generator<string> {
+	const next = /[^\n]*\n?/y
+	next.lastIndex = at
+	for (let line = next.exec(file)?.[0] ?? ""; line !== ""; line = next.exec(file)?.[0] ?? "") yield line
+}
+
+/* the gate's pin (comb-9d): the indexOf reader has no arm for the null exec the regex one never met, and reads as it did */
+describe("linesOf", () => {
+	it.each([
+		["a file that ends without a line break", "-- atlas:txmode none\nSELECT 1", 0],
+		["a file that ends with one", "-- atlas:txmode none\nSELECT 1\n", 0],
+		["a file of line breaks alone", "\n\n", 0],
+		["a file with a carriage return before each break", "-- a\r\n\r\nSELECT 1\r\n", 0],
+		["an empty file", "", 0],
+		["a start offset mid-line", "-- atlas:txmode none\nSELECT 1\n", 3],
+		["a start offset at a line's start", "-- atlas:txmode none\nSELECT 1\n", 21],
+		["a start offset at the end", "-- atlas:txmode none\nSELECT 1\n", 30],
+		["a start offset at the end of a file without a last break", "-- atlas:txmode none", 20],
+	])("reads %s as the regex reader did", (_, file, at) => {
+		expect([...linesOf(file, at)]).toEqual([...regexLines(file, at)])
+	})
+
+	it("reads every line with its break, the last without one where the file ends in none", () => {
+		expect([...linesOf("a\r\nb\n\nc")]).toEqual(["a\r\n", "b\n", "\n", "c"])
+		expect([...linesOf("a\n", 2)]).toEqual([])
 	})
 })
 

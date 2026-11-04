@@ -28,12 +28,14 @@ function txmodeOf(values: readonly string[]): Txmode {
 	return { refused: `unknown txmode ${JSON.stringify(value)} found in file directive` }
 }
 
-/** The lines of `file` from `at`, each with its line break */
+/** The lines of `file` from `at`, each with its line break, the last without one where the file ends in none */
 function* linesOf(file: string, at = 0): Generator<string> {
-	/* one line and the break that ends it, if any; sticky, so each read starts where the last ended */
-	const next = /[^\n]*\n?/y
-	next.lastIndex = at
-	for (let line = next.exec(file)?.[0] ?? ""; line !== ""; line = next.exec(file)?.[0] ?? "") yield line
+	for (let start = at; start < file.length;) {
+		const end = file.indexOf("\n", start)
+		const next = end === -1 ? file.length : end + 1
+		yield file.slice(start, next)
+		start = next
+	}
 }
 
 /** The header of the migration file `file` */
@@ -87,4 +89,4 @@ const NONE: AtlasHeader = { directives: [], text: "", txmode: "file" }
 /** Whether Atlas runs `file` outside a transaction, as its header's `atlas:txmode none` asks */
 const outsideTransaction = (file: string): boolean => atlasHeader(file).txmode === "none"
 
-export { type AtlasHeader, atlasHeader, outsideTransaction, strayDirective, type Txmode }
+export { type AtlasHeader, atlasHeader, linesOf, outsideTransaction, strayDirective, type Txmode }
