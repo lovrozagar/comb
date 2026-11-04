@@ -47,7 +47,9 @@ type DrizzleListOptions = {
 
 /**
  * The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake,
- * `sort_not_wired` as buildListQuery answers it (QL11 of r22b)
+ * `sort_not_wired` as buildListQuery answers it (QL11 of r22b). A table with no `id` has no tiebreak,
+ * which listOptions needs on every request, so it is refused by its own cause, keyed as buildListQuery
+ * keys a cursor over it
  */
 function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: SortKey[]; tiebreak: SortKey } {
 	const column = (field: string): SQLWrapper => {
@@ -59,6 +61,12 @@ function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: Sor
 		})
 	}
 	const keys = sort.map(({ direction, field, nulls }) => ({ column: column(field), direction, nulls }))
+	if (!Object.hasOwn(table, CURSOR_TIEBREAK_COLUMN))
+		throw new CombError({
+			cause: "listOptions breaks ties on the table's `id` column, which this table lacks",
+			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+			status: "internal_server_error",
+		})
 	return { keys, tiebreak: { column: column(CURSOR_TIEBREAK_COLUMN), direction: sort[0]?.direction ?? "desc" } }
 }
 

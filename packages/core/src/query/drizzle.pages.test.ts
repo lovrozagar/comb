@@ -85,4 +85,18 @@ describe("listOptions on a sort it cannot run (QL11 of r22b; sibling: buildListQ
 		expect(() => buildListQuery({ ...SEALED, parsed: parsedBy("nope"), table: t })).toThrow(notWired)
 		expect(() => queryHelpers.listOptions(parsedBy("n"), SEALED).orderBy(t as never)).not.toThrow()
 	})
+
+	/* AB8 of area B: the tiebreak went through the sort field's throw, blaming a sort on 'id' no request asked for */
+	it("refuses a table with no id by its own cause, the tiebreak it lacks, as 0.20 keyed it", () => {
+		const keyless = sqliteTable("keyless", { n: integer("n") })
+		const lacksId = expect.objectContaining({
+			cause: "listOptions breaks ties on the table's `id` column, which this table lacks",
+			errorKey: "cursor_pagination_unsupported",
+			status: 500,
+		})
+		expect(() => queryHelpers.listOptions(parsedBy("n"), SEALED).orderBy(keyless as never)).toThrow(lacksId)
+		expect(() =>
+			queryHelpers.listOptions({ ...parsedBy("n"), parsedSort: [] }, SEALED).orderBy(keyless as never),
+		).toThrow(lacksId)
+	})
 })
