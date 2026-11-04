@@ -241,6 +241,12 @@ const CASES: Case[] = [
 	["iv", "PT9999999999H", false, false],
 	["iv", "PT999999999999H", false, false],
 	["iv", "P999999999999W", false, false],
+	/* A3-5 of r23: one digit past each part's most, the step where the DTO's digit bound meets Postgres's */
+	["iv", "P999999999Y", false, false],
+	["iv", "P9999999999M", false, false],
+	["iv", "P999999999W", false, false],
+	["iv", "PT999999999999M", false, false],
+	["iv", "PT9999999999999S", false, false],
 	["iv", "P99999999Y", true, true],
 	["iv", "P999999999M", true, true],
 	["iv", "P99999999W", true, true],

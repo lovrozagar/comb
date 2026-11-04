@@ -3,11 +3,16 @@
  * with it takes what the server takes: each column's `min`, `max`, `patterns` and `maxBytes` are
  * read here against the bounds the create DTO publishes, on both dialects.
  */
-import { describe, expect, it } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
+import { afterAll, describe, expect, it } from "vitest"
 import * as z from "zod"
 import { tableOf } from "../__fixtures__/runtime.ts"
 import type { FieldMeta, ImportsMeta } from "../analyzer-types.ts"
 import { isStorableText } from "../../storable-text.ts"
+import { elementNullsOf } from "../runtime/element-types.ts"
+import { snapshotOf } from "../runtime/read-tables.ts"
+import { toAnalysis } from "../runtime/to-meta.ts"
 import { generateFieldSchema } from "./dtos/field-schema.ts"
 import { buildManifest, type ManifestColumn } from "./manifest.ts"
 
@@ -225,5 +230,27 @@ describe("the manifest names a plain Postgres column's SQL type (AA8 of r22)", (
 		})
 		const [entity] = buildManifest([{ ...table, fields }], "test", "postgres").entities
 		expect(entity?.columns.map((column) => column.dimensions)).toEqual([0])
+	})
+})
+
+/* inside the package, so the tables file's drizzle import resolves as an app's does */
+const DIR = fs.mkdtempSync(path.join(import.meta.dirname, "../../../.tmp-manifest-elements-"))
+afterAll(() => fs.rmSync(DIR, { force: true, recursive: true }))
+
+/* A3-5 of r23: the element type TypeScript reads from the tables file, carried to the manifest */
+describe("the manifest states an array element's null as the tables file's type declares it", () => {
+	it("states nullElements true for a $type<string | null>() array, and false for a plain one", async () => {
+		const file = path.join(DIR, "db.core.tables.ts")
+		fs.writeFileSync(
+			file,
+			`import { pgTable, text } from "drizzle-orm/pg-core"
+export const row = pgTable("row", { id: text("id").primaryKey(), open: text("open").array().$type<string | null>(), tags: text("tags").array() })
+`,
+		)
+		const namespace = (await import(file)) as Record<string, unknown>
+		const snapshot = snapshotOf([{ external: false, module: file, namespace }], elementNullsOf(file))
+		const [entity] = buildManifest(toAnalysis(snapshot, file).tables, "test", "postgres").entities
+		const stated = Object.fromEntries((entity?.columns ?? []).map((column) => [column.name, column.nullElements]))
+		expect(stated).toEqual({ id: false, open: true, tags: false })
 	})
 })

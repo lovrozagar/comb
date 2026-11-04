@@ -112,6 +112,15 @@ export const row = pgTable("row", { tags: text("tags").array().$type<Tag>() })`,
 })
 
 /* A3-1 of r23: a tables module in JavaScript, which declares no $type, its element as its builder types it */
+/* A3-5 of r23: the checker reads `| null` under strictNullChecks whatever the app's tsconfig sets */
+describe("elementNullsOf under a tsconfig that sets strict false", () => {
+	it("reads a $type<string | null>() array as taking null, and a plain one as taking none", () => {
+		const beside = { "tsconfig.json": JSON.stringify({ compilerOptions: { strict: false } }) }
+		const nulls = elementNullsOf(tables("loose", ROW, { beside }))
+		expect([nulls("row", "open", 1), nulls("row", "before", 1), nulls("row", "tags", 1)]).toEqual([true, true, false])
+	})
+})
+
 describe("elementNullsOf on a JavaScript tables module", () => {
 	const JS = `export const row = pgTable("row", { tags: text("tags").array(), grid: integer("grid").array("[][]") })`
 
