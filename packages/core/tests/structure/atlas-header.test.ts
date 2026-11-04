@@ -50,6 +50,20 @@ const ATLASES: Readonly<Record<string, string>> = {
 		"atlas",
 }
 
+/**
+ * `binary <args>` run to its end, with `env`; one that could not start or a signal ended throws,
+ * naming which, as a SIGKILL'd apply prints nothing, which would read as "none" (A's AA9 run, a
+ * hash that ended with no status under memory pressure)
+ */
+function ran(binary: string, args: readonly string[], env: NodeJS.ProcessEnv) {
+	const run = spawnSync(binary, args, { encoding: "utf8", env })
+	if (run.error !== undefined || run.signal !== null)
+		throw new Error(
+			`${binary} ${args.slice(0, 2).join(" ")} did not run to its end: ${run.error?.message ?? `ended by ${run.signal}`}`,
+		)
+	return run
+}
+
 /** How the Atlas `binary` ran `head` before a VACUUM, as a txmode; any other failure throws Atlas's words */
 function atlasRead(head: string, binary: string): Txmode {
 	const dir = mkdtempSync(path.join(os.tmpdir(), "comb-atlas-header-"))
@@ -60,11 +74,9 @@ function atlasRead(head: string, binary: string): Txmode {
 		writeFileSync(path.join(migrations, "20260102000000_v.sql"), `${head}VACUUM;\n`)
 		const at = ["--dir", `file://${migrations}`]
 		const env = { ...process.env, TMPDIR: dir }
-		expect(spawnSync(binary, ["migrate", "hash", ...at], { env }).status).toBe(0)
-		const apply = spawnSync(binary, ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], {
-			encoding: "utf8",
-			env,
-		})
+		const hash = ran(binary, ["migrate", "hash", ...at], env)
+		if (hash.status !== 0) throw new Error(`${binary} migrate hash exited ${hash.status}: ${hash.stderr}`)
+		const apply = ran(binary, ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], env)
 		const said = `${apply.stdout}${apply.stderr}`
 		if (!said.includes("Error")) return "none"
 		if (said.includes("cannot VACUUM from within a transaction")) return "file"
