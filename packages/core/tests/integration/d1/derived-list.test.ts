@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { type JoinedKey, SEED, SERVED, SERVED_NULLS, servedBy } from "../support/joined-keys.ts"
 import { drizzle } from "drizzle-orm/d1"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
+import { NUMERIC_SEED, NUMERIC_SERVED, servedNumeric } from "../support/numeric-key.ts"
 
 let harness: D1Harness | undefined
 afterEach(async () => {
@@ -58,5 +59,30 @@ describe("a list key is read back exactly or treated as anchorless (QL1, QL2; si
 		const db = await seeded()
 		for (const direction of ["asc", "desc"] as const)
 			expect(await servedBy(db, { direction, key: "at", shape: "anchorless" })).toEqual(SERVED[direction])
+	})
+})
+
+/* B2-4 of area B: a numeric() key read as text, carried as the bigint its integer class reads, refused its own cursor */
+describe("a drizzle numeric() key pages with no anchor and merged (B2-4 of area B; sibling: QL1's anchorless list)", () => {
+	const shards: D1Harness[] = []
+	afterEach(async () => {
+		await Promise.all(shards.splice(0).map((shard) => shard.dispose()))
+	})
+
+	/** A D1 database seeded with `statements` */
+	async function holding(statements: readonly string[]) {
+		const shard = await d1Memory()
+		shards.push(shard)
+		for (const statement of statements) await shard.CORE.prepare(statement).run()
+		return drizzle(shard.CORE)
+	}
+
+	it("pages a numeric() key holding a fraction and integers on the anchorless and the merged list, every row once", async () => {
+		const one = [await holding(NUMERIC_SEED())]
+		const two = [await holding(NUMERIC_SEED(0)), await holding(NUMERIC_SEED(1))]
+		for (const direction of ["asc", "desc"] as const) {
+			expect(await servedNumeric(one, { direction, shape: "anchorless" }), direction).toEqual(NUMERIC_SERVED[direction])
+			expect(await servedNumeric(two, { direction, shape: "merged" }), direction).toEqual(NUMERIC_SERVED[direction])
+		}
 	})
 })

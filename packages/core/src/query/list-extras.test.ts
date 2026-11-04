@@ -35,6 +35,15 @@ describe("malformed: _combKeyTypes", () => {
 })
 
 describe("typedKeys", () => {
+	/* B2-4 of area B: drizzle's SQLite numeric() reads a REAL as the text of its double */
+	it("reads a sort key SQLite stored as a REAL, which the mapper read as its double's text, as that double, and no other text", () => {
+		expect(typedKeys({ _combKeyTypes: "real,real,text", k: "0.1", name: "1e21" }, SORT)).toEqual({
+			_combKeyTypes: "real,real,text",
+			k: 0.1,
+			name: "1e21",
+		})
+	})
+
 	it("reads a sort key SQLite stored as an integer, which the driver read as a decimal string, as that integer", () => {
 		expect(typedKeys({ _combKeyTypes: "integer,text,text", k: "12", name: "42" }, SORT)).toEqual({
 			_combKeyTypes: "integer,text,text",

@@ -67,11 +67,18 @@ function storedClasses(row: Record<string, unknown>): readonly KeyClass[] | unde
 	return typeof types === "string" ? (types.split(",") as KeyClass[]) : undefined
 }
 
-/** `value` as SQLite stored it under `stored`: an integer read as a decimal string as that integer, a ±Infinity read as null (D1) as itself */
+/**
+ * `value` as SQLite stored it under `stored`: an integer read as a decimal string as that integer, a
+ * REAL read as the text of its double (drizzle's `numeric()`, B2-4 of area B) as that double, and a
+ * ±Infinity read as null (D1) as itself
+ */
 function storedValue(value: unknown, stored: KeyClass | undefined): unknown {
 	if (stored === "+inf") return Number.POSITIVE_INFINITY
 	if (stored === "-inf") return Number.NEGATIVE_INFINITY
-	return stored === "integer" && typeof value === "string" && INTEGER_TEXT.test(value) ? BigInt(value) : value
+	if (typeof value !== "string") return value
+	if (stored === "integer" && INTEGER_TEXT.test(value)) return BigInt(value)
+	/* only the text JS writes for that very double, so the number is exact */
+	return stored === "real" && String(Number(value)) === value ? Number(value) : value
 }
 
 /**

@@ -19,7 +19,10 @@ import { INTEGER_TEXT } from "../list-extras.ts"
  * it refuses (AB2 of area B). A json column holds nothing a cursor carries, nor an array one; a
  * buffer-mode blob its bytes (QL5 of r22b). A number column holds a bigint too where the driver returns
  * integers as one (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string
- * (libsql's intMode "string", Q2 of r19), and a cursor minted from its row carries it. A `customType`
+ * (libsql's intMode "string", Q2 of r19), and a cursor minted from its row carries it. A SQLite
+ * `numeric()` column reads every value as a string, but a list that binds it as read carries a value
+ * as SQLite stored it, an integer as a bigint and a REAL as its double (B2-4 of area B), which NUMERIC
+ * affinity compares as the number it is, so it holds those too. A `customType`
  * column holds whatever its `fromDriver` read, opaque to comb: any value a cursor carries, bound back
  * through its `toDriver`.
  */
@@ -36,7 +39,9 @@ const HOLDS: Record<ColumnDataType, (value: unknown, dataType: string) => boolea
 	object: (value, dataType) =>
 		(dataType === "object date" && value instanceof Date) ||
 		(dataType === "object buffer" && value instanceof Uint8Array),
-	string: (value) => typeof value === "string",
+	string: (value, dataType) =>
+		typeof value === "string" ||
+		(dataType === "string numeric" && (typeof value === "bigint" || typeof value === "number")),
 }
 
 /** Whether `value` is what a column of this drizzle `dataType` holds (HOLDS) */
