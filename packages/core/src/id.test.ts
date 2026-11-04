@@ -109,3 +109,30 @@ describe("createUlidFactory (S-L3)", () => {
 		expect(() => factory.id("Bad")).toThrow("Invalid entity prefix")
 	})
 })
+
+describe("createUlidFactory's clock (QE7 of r22b)", () => {
+	it("reads a high-resolution clock at its millisecond", () => {
+		const { clock, factory } = onClock(1_700_000_000_000.75)
+		const ids = [factory.ulid(), factory.ulid()]
+		clock.now += 1.5
+		ids.push(factory.ulid())
+		expect(ids.every((id) => /^[0-9a-hjkmnp-tv-z]{26}$/.test(id))).toBe(true)
+		expect(ids.slice(0, 2).map((id) => id.slice(0, 10))).toEqual(
+			Array(2).fill(onClock(1_700_000_000_000).factory.ulid().slice(0, 10)),
+		)
+		expect(ids.every((id, i) => i === 0 || id > (ids[i - 1] as string))).toBe(true)
+	})
+
+	it("takes ULID's last millisecond and refuses a clock outside 0 to 2^48 - 1, naming it", () => {
+		expect(
+			onClock(2 ** 48 - 0.5)
+				.factory.ulid()
+				.slice(0, 10),
+		).toBe("7zzzzzzzzz")
+		for (const reading of [Number.NaN, Number.POSITIVE_INFINITY, -1, 2 ** 48]) {
+			expect(() => onClock(reading).factory.ulid()).toThrow(
+				new RangeError(`createUlidFactory: the clock must read a millisecond from 0 to 2^48 - 1, got ${reading}`),
+			)
+		}
+	})
+})

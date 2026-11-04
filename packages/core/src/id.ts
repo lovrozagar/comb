@@ -17,9 +17,11 @@ const ENCODING_LEN = 32
 const TIME_LEN = 10
 const RANDOM_LEN = 16
 const PREFIX_PATTERN = /^[a-z][a-z0-9]{1,9}$/
+/** The last millisecond a ULID's 48-bit time holds */
+const MAX_TIME = 2 ** 48 - 1
 
 type UlidFactoryOptions = {
-	/** The clock, ms since epoch; `Date.now` by default */
+	/** The clock, ms since epoch, a fraction read at its millisecond; `Date.now` by default */
 	now?: (() => number) | undefined
 	/** Fills the bytes with randomness; `crypto.getRandomValues` by default */
 	random?: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined
@@ -58,6 +60,18 @@ function increment(digits: readonly number[]): number[] | null {
 	return null
 }
 
+/**
+ * The clock's millisecond: a high-resolution reading such as `performance.timeOrigin + performance.now()`
+ * is floored, and one a ULID's time cannot hold is refused, rather than encode "undefined" or wrap (QE7 of r22b)
+ */
+function readClock(now: () => number): number {
+	const reading = now()
+	if (!(reading >= 0 && reading < MAX_TIME + 1)) {
+		throw new RangeError(`createUlidFactory: the clock must read a millisecond from 0 to 2^48 - 1, got ${reading}`)
+	}
+	return Math.floor(reading)
+}
+
 const webRandom = (bytes: Uint8Array<ArrayBuffer>) => {
 	crypto.getRandomValues(bytes)
 }
@@ -83,7 +97,7 @@ function createUlidFactory(options: UlidFactoryOptions = {}): { id: (prefix: str
 	let lastDigits: number[] = []
 
 	function ulid(): string {
-		const time = Math.max(now(), lastTime)
+		const time = Math.max(readClock(now), lastTime)
 		const counted = time === lastTime ? increment(lastDigits) : null
 		lastTime = counted === null && time === lastTime ? time + 1 : time
 		lastDigits = counted ?? randomDigits(random)

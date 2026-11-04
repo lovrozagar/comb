@@ -146,7 +146,7 @@ export type { ReadOptions } from "./meta/read.ts";
  * hold, not in this module, so it is never shared across requests unless you share it.
  */
 type UlidFactoryOptions = {
-    /** The clock, ms since epoch; `Date.now` by default */
+    /** The clock, ms since epoch, a fraction read at its millisecond; `Date.now` by default */
     now?: (() => number) | undefined;
     /** Fills the bytes with randomness; `crypto.getRandomValues` by default */
     random?: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined;
