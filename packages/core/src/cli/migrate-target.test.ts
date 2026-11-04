@@ -187,3 +187,31 @@ describe("diff beside a database's own provider (KC4a; sibling: environments tha
 		)
 	})
 })
+
+/* D2-11 of the area D round-two review: in a project of several databases, an environment refusal named none */
+describe("resolveMigrateTarget: an environment refusal names its database", () => {
+	it("prefixes each refusal resolving the database's environments gives", async () => {
+		const cwd = project({
+			blog: { migrationsDir: "m", name: "blog", provider: LITE },
+			core: {
+				environments: { bare: { name: "core-bare", provider: LITE }, prod: { name: "core-prod", provider: LITE } },
+				migrationsDir: "m",
+			},
+		})
+		const cases: Array<[Parameters<typeof resolveMigrateTarget>[0], string]> = [
+			[
+				{ cwd, db: "core", mode: "apply" },
+				'database "core": Database config has environments; pass -e/--env with one of: bare, prod',
+			],
+			[
+				{ cwd, db: "core", env: "nope", mode: "apply" },
+				'database "core": Environment "nope" not found in config. Available: bare, prod',
+			],
+			[
+				{ cwd, db: "blog", env: "prod", mode: "apply" },
+				'database "blog": the database declares no environments, so -e prod names none; drop -e',
+			],
+		]
+		for (const [request, message] of cases) await expect(resolveMigrateTarget(request)).rejects.toThrow(message)
+	})
+})

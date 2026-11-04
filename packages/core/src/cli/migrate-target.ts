@@ -70,6 +70,20 @@ function diffConfig(name: string, db: DatabaseConfig, resolve: Resolve): Resolve
 	)
 }
 
+/**
+ * `resolve`, its refusals prefixed with the database they are about, as a project of several
+ * databases needs (D2-11 of the area D round-two review); each one resolveDatabaseConfig throws is an Error
+ */
+const naming =
+	(name: string, resolve: Resolve): Resolve =>
+	(db, env) => {
+		try {
+			return resolve(db, env)
+		} catch (error) {
+			throw new CliError(`database "${name}": ${(error as Error).message}`, 1, { cause: error })
+		}
+	}
+
 /** A database is one dialect, so every environment's provider must agree */
 function assertOneDialect(name: string, db: DatabaseConfig): void {
 	const types = [db.provider, ...Object.values(db.environments ?? {}).map((env) => env.provider)]
@@ -107,10 +121,11 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 	const { config, configDir } = await loadConfig(configFile, request.cwd)
 	const db = databaseIn(config, configFile, request.db)
 	assertOneDialect(request.db, db)
+	const resolve = naming(request.db, resolveDatabaseConfig)
 	const resolved =
 		request.mode === "diff" && request.env === undefined
-			? diffConfig(request.db, db, resolveDatabaseConfig)
-			: resolveDatabaseConfig(db, request.env)
+			? diffConfig(request.db, db, resolve)
+			: resolve(db, request.env)
 	const dialect = dialectOf(resolved.provider.type)
 	const codegen = db.codegen ?? request.db
 	if (dialect === "postgres") await assertNoFts(request.cwd, codegen)
