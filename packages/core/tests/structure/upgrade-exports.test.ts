@@ -5,8 +5,10 @@
  * hash of its emitted declaration, are checked in (__snapshots__/released-exports.json); after a
  * release, regenerate them from the tag with support/write-released-exports.ts.
  */
-import { readFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import { type Exports, exportsOf } from "./support/exports-of.ts"
 
@@ -41,6 +43,55 @@ const differing = (from: Exports, to: Exports): string[] => {
 			.map(([name]) => name),
 	)
 	return [...new Set(names)].sort()
+}
+
+const API = join(import.meta.dirname, "__snapshots__/api")
+
+/** The snapshot's subpath: `index` is `.`, `a__b` is `./a/b` */
+const subpathOf = (file: string): string =>
+	file === "index.d.ts.txt" ? "." : `./${file.replace(/\.d\.ts\.txt$/, "").replaceAll("__", "/")}`
+
+/** Each callable a snapshot declares, a function, a const or a type of function type, and whether it returns a promise */
+function callablesOf(text: string): Map<string, boolean> {
+	const found = new Map<string, boolean>()
+	const note = (name: string, type: ts.TypeNode | undefined) =>
+		found.set(name, found.get(name) === true || /^Promise\s*</.test(type?.getText() ?? ""))
+	const visit = (node: ts.Node): void => {
+		if (ts.isFunctionDeclaration(node) && node.name !== undefined) note(node.name.text, node.type)
+		if ((ts.isVariableDeclaration(node) || ts.isTypeAliasDeclaration(node)) && ts.isIdentifier(node.name)) {
+			if (node.type !== undefined && ts.isFunctionTypeNode(node.type)) note(node.name.text, node.type.type)
+		}
+		ts.forEachChild(node, visit)
+	}
+	visit(ts.createSourceFile("snapshot.d.ts", text, ts.ScriptTarget.Latest, true))
+	return found
+}
+
+/** The snapshot `file` at the release's tag, or nothing when the release had no such subpath */
+function releasedSnapshot(file: string, version: string): string {
+	const path = `packages/core/tests/structure/__snapshots__/api/${file}`
+	const shown = spawnSync("git", ["show", `v${version}:${path}`], { cwd: ROOT, encoding: "utf8" })
+	if (shown.status === 0) return shown.stdout
+	expect(shown.stderr, `git show v${version}:${path}`).toMatch(/does not exist|exists on disk, but not in/)
+	return ""
+}
+
+/** Each public callable the release exports that returned no promise there and returns one now, sorted, once */
+function becamePromises(exports: Exports, version: string): string[] {
+	const names = readdirSync(API).flatMap((file) => {
+		const now = callablesOf(readFileSync(join(API, file), "utf8"))
+		const then = callablesOf(releasedSnapshot(file, version))
+		const exported = exports[subpathOf(file)] ?? {}
+		return Object.keys(exported).filter((name) => then.get(name) === false && now.get(name) === true)
+	})
+	return [...new Set(names)].sort()
+}
+
+/** The backticked names in the section's one "`a`, `b` … return a promise:" clause, up to its colon, sorted */
+function promised(section: string): string[] {
+	const lines = [...section.matchAll(/^ *(`[^:\n]*? returns? a promise[^:\n]*):/gm)]
+	expect(lines, 'one "… return a promise:" sentence in the section').toHaveLength(1)
+	return [...(lines[0]?.[1] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1] as string).sort()
 }
 
 /** The backticked names on the section's one `label:` line, sorted; `none.` names none */
@@ -82,5 +133,11 @@ describe("the newest upgrade section's exports", () => {
 					removed: listed(section, "Removed"),
 				}
 		expect(lists, `changed since ${RELEASED.version}, against "Upgrading to ${version}"`).toEqual(since)
+	})
+
+	/* D5-1 of the area D round-five review: the async paragraph left out exportDrizzleSchema and named a bare run */
+	it("names, in its async paragraph, exactly the public callables that return a promise since then", () => {
+		const became = becamePromises(RELEASED.exports, RELEASED.version)
+		expect(released ? [] : promised(section), `became promises since ${RELEASED.version}`).toEqual(became)
 	})
 })
