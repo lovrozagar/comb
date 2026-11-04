@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { RunResult } from "../migrate/core/process.ts"
 import { diffProject as diffProjectIn, fakeAtlas } from "./__fixtures__/diff.ts"
 import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
@@ -65,8 +66,9 @@ describe("comb migrate diff --dry-run", () => {
 })
 
 describe("comb migrate diff: its migrations dir", () => {
-	/* D2-7 of the area D round-two review: a file there fell through to ENOTDIR after drizzle-kit and Atlas ran */
-	it("refuses a migrations dir that is a file before anything runs, as the other commands do", async () => {
+	/* D2-7 of the area D round-two review: a file there fell through to ENOTDIR after drizzle-kit and Atlas ran;
+	   Atlas's version read bypasses `run`, so it is counted on its own (D4-7 of round four) */
+	it("refuses a migrations dir that is a file before anything runs, Atlas's version read included, as the other commands do", async () => {
 		const dir = diffProject()
 		writeFileSync(join(dir, "atlas-migrations"), "SELECT 1;\n")
 		for (const argv of [
@@ -74,11 +76,21 @@ describe("comb migrate diff: its migrations dir", () => {
 			["migrate", "diff", "core", "--dry-run"],
 		]) {
 			const run = fakeAtlas(() => undefined)
-			const io = makeIo(dir, run)
+			const base = makeIo(dir, run)
+			let versionReads = 0
+			const readAtlasVersion = base.readAtlasVersion as () => RunResult
+			const io = {
+				...base,
+				readAtlasVersion: () => {
+					versionReads++
+					return readAtlasVersion()
+				},
+			}
 			expect(await runCliWithFakes(argv, io)).toBe(1)
-			expect({ calls: run.calls, errors: io.errors }).toEqual({
+			expect({ calls: run.calls, errors: io.errors, versionReads }).toEqual({
 				calls: [],
 				errors: [`Migrations dir ${join(dir, "atlas-migrations")} is not a directory`],
+				versionReads: 0,
 			})
 		}
 	})
