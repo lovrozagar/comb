@@ -177,6 +177,26 @@ describe("insideOnly and blockAfter", () => {
 		expect(insideOnly(...nodeOf(parsePostgres(sql).stmts))).toBe(named)
 	})
 
+	/*
+	 * the gate's pin (comb-9d): libpg-query sets a DECLARE's options on every form a history can hold,
+	 * which insideOnly reads with no fallback; a parser that drops them fails here, before a NaN
+	 * reads every cursor as one without WITH HOLD
+	 */
+	it.each([
+		"DECLARE c CURSOR FOR SELECT 1",
+		"DECLARE c BINARY CURSOR FOR SELECT 1",
+		"DECLARE c INSENSITIVE CURSOR FOR SELECT 1",
+		"DECLARE c ASENSITIVE CURSOR FOR SELECT 1",
+		"DECLARE c SCROLL CURSOR FOR SELECT 1",
+		"DECLARE c NO SCROLL CURSOR FOR SELECT 1",
+		"DECLARE c CURSOR WITH HOLD FOR SELECT 1",
+		"DECLARE c CURSOR WITHOUT HOLD FOR SELECT 1",
+		"DECLARE c BINARY INSENSITIVE SCROLL CURSOR WITH HOLD FOR SELECT 1",
+	])("reads the integer options the parser sets on %s", (sql) => {
+		const [type, node] = nodeOf(parsePostgres(sql).stmts)
+		expect([type, Number.isInteger(node["options"])]).toEqual(["DeclareCursorStmt", true])
+	})
+
 	it.each([
 		[false, "BEGIN", true],
 		[false, "START TRANSACTION", true],

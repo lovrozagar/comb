@@ -158,7 +158,7 @@ const CURSOR_OPT_HOLD = 0x20
 
 // lookup-table: each statement Postgres runs only inside a transaction block, by node type, with how its refusal names it (PA13 of r22b)
 const INSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
-	DeclareCursorStmt: (node) => ((Number(node["options"] ?? 0) & CURSOR_OPT_HOLD) === 0 ? "DECLARE CURSOR" : undefined),
+	DeclareCursorStmt: (node) => ((Number(node["options"]) & CURSOR_OPT_HOLD) === 0 ? "DECLARE CURSOR" : undefined),
 	LockStmt: () => "LOCK TABLE",
 	TransactionStmt: (node) =>
 		({
