@@ -19,13 +19,19 @@ export function readmeConstraintMap(): ConstraintMap {
 	return new Function(`return (${literal})`)() as ConstraintMap
 }
 
-/** The tables README's map is written for: a unique email, an org reference and a named locale CHECK */
+/**
+ * The tables README's map is written for: a unique email, an org reference and a named locale CHECK.
+ * author also references team, a key the map leaves out, so the org case holds only while README keys
+ * org_id by its column, which SQLite's message never names (AB11 of area B)
+ */
 export const README_MAP_DDL = [
 	"CREATE TABLE org (id TEXT PRIMARY KEY)",
+	"CREATE TABLE team (id TEXT PRIMARY KEY)",
 	`CREATE TABLE author (
 		id TEXT PRIMARY KEY,
 		email TEXT NOT NULL,
 		org_id TEXT REFERENCES org(id),
+		team_id TEXT REFERENCES team(id),
 		locale TEXT,
 		CONSTRAINT author_locale_check CHECK (locale IN ('en', 'hr'))
 	)`,
@@ -53,5 +59,11 @@ export const README_MAP_CASES = [
 		label: "a bad locale",
 		statement: "INSERT INTO author (id, email, locale) VALUES ('a4', 'c@x', 'xx')",
 		status: 400,
+	},
+	{
+		errorKey: "foreign_key_violation",
+		label: "a missing team, a key the map leaves out",
+		statement: "INSERT INTO author (id, email, team_id) VALUES ('a5', 'd@x', 'nope')",
+		status: 409,
 	},
 ] as const

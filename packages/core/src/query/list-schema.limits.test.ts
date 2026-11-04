@@ -198,6 +198,9 @@ describe("createListQuerySchema's limits", () => {
 	})
 })
 
+/** A filter of `length` characters */
+const filterOf = (length: number) => `a.eq.${"x".repeat(length - "a.eq.".length)}`
+
 /* KT1 of r22b: a key set to undefined is the key left out, so the schema enforces and publishes its default */
 /** What a schema with these limits publishes */
 const metaOf = (limits: Record<string, undefined>) =>
@@ -206,6 +209,17 @@ const metaOf = (limits: Record<string, undefined>) =>
 describe("an explicit undefined list limit means the default (KT1; sibling: `NaN` and `-1` above)", () => {
 	it.each(Object.keys(LIST_QUERY_LIMITS))("builds with %s set to undefined, publishing the default", (key) => {
 		expect(metaOf({ [key]: undefined })).toEqual(metaOf({}))
+	})
+
+	/* AB11 of area B: the meta publishes no maxFilterLength, so only a parse pins its default */
+	it("holds a filter to the default maxFilterLength when it is set to undefined", () => {
+		const schema = createListQuerySchema({
+			filter: { a: "string" },
+			limits: { maxFilterLength: undefined },
+			sort: ["a"],
+		})
+		expect(schema.safeParse({ filter: filterOf(LIST_QUERY_LIMITS.maxFilterLength) }).success).toBe(true)
+		expect(schema.safeParse({ filter: filterOf(LIST_QUERY_LIMITS.maxFilterLength + 1) }).success).toBe(false)
 	})
 })
 
