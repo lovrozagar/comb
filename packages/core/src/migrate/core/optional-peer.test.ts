@@ -381,6 +381,10 @@ describe("Atlas is a row of the peer table (PA5, KC6 + PA22; sibling: K3's PATH-
 		expect(() => requirePeers("diff", "d1", { atlas: says("", 1), cwd: ROOT, locate: only("drizzle-kit") })).toThrow(
 			`atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1)`,
 		)
+		/* D4-1 of the area D round-four review: one that exits 0 and prints no version */
+		expect(() =>
+			requirePeers("diff", "d1", { atlas: says("atlas: unknown\n"), cwd: ROOT, locate: only("drizzle-kit") }),
+		).toThrow(`atlas (${ATLAS_RANGE}, found no version)`)
 	})
 
 	it("names Atlas with the npm peers in one refusal, the installs together", () => {
