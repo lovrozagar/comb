@@ -69,9 +69,10 @@ const OFFSET = "(?:Z|[+-](?:0[0-9]|1[0-5]):[0-5][0-9])"
 
 /*
  * zod's ISO date, date-time and time regexes, each \d written as [0-9] and nothing else changed (a test
- * holds each copy to zod's own, read as it runs), and passed as their
- * `pattern`: zod's publish \d, which Rust's regex reads as any Unicode digit, so comb publishes its
- * own, which ECMAScript, Go's RE2 and Rust's regex read alike (AA7 of r22)
+ * holds each copy to zod's own, read as it runs): zod's publish \d, which Rust's regex reads as any
+ * Unicode digit, so comb publishes its own, which ECMAScript, Go's RE2 and Rust's regex read alike
+ * (AA7 of r22). Each is a z.stringFormat of zod's format name, which checks and publishes the regex it
+ * is given: zod's types refuse a `pattern` param on z.iso.*, which a consumer's tsc reads
  */
 const ISO_DATE =
 	"(?:(?:[0-9][0-9][2468][048]|[0-9][0-9][13579][26]|[0-9][0-9]0[48]|[02468][048]00|[13579][26]00)-02-29|[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|(?:02)-(?:0[1-9]|1[0-9]|2[0-8])))"
@@ -116,15 +117,15 @@ const timetz = (precision: number | null): string =>
 function timestampRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
 	const type = withTimeZone ? "timestamp with time zone" : "timestamp"
 	if (!withTimeZone)
-		return `z.iso.datetime({ local: true, pattern: /${ISO_LOCAL}/u }).regex(/[^Zz]$/u, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })${fractionRule(type, precision, "")}`
-	return `z.iso.datetime({ offset: true, pattern: /${ISO_OFFSET}/u }).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
+		return `z.stringFormat("datetime", /${ISO_LOCAL}/u).regex(/[^Zz]$/u, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })${fractionRule(type, precision, "")}`
+	return `z.stringFormat("datetime", /${ISO_OFFSET}/u).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
 }
 
 /** A time, local or with its offset, its fraction held to its precision (CD5, CD6 of r22b) */
 function timeRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
 	return withTimeZone
 		? timetz(precision)
-		: `z.iso.time({ pattern: /${ISO_TIME}/u })${fractionRule("time", precision, "")}`
+		: `z.stringFormat("time", /${ISO_TIME}/u)${fractionRule("time", precision, "")}`
 }
 
 /* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it (CS3 of
@@ -263,7 +264,7 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"number float": () => REAL,
 	"string binary": ({ sqlType }) => bitString(sqlType),
 	"string cidr": () => CIDR,
-	"string date": () => `z.iso.date({ pattern: /^${ISO_DATE}$/u })`,
+	"string date": () => `z.stringFormat("date", /^${ISO_DATE}$/u)`,
 	"string inet": () => INET,
 	"string interval": ({ sqlType }) => intervalRule(modifierAs(sqlType, "interval")),
 	"string macaddr": macaddr,

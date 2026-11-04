@@ -54,6 +54,7 @@ export const OFF_UTC_INTEGRATION = [
 	"tests/integration/codegen/pg-types.test.ts",
 	"tests/integration/codegen/pg-typmods.test.ts",
 	"tests/integration/codegen/shared-imports.test.ts",
+	"tests/integration/codegen/zod-builders.test.ts",
 	"tests/integration/d1/list-query-nonfinite.test.ts",
 	"tests/integration/libsql/date-filter.test.ts",
 	"tests/integration/libsql/iso-date-filter.test.ts",

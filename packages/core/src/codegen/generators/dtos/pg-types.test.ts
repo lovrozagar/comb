@@ -21,16 +21,16 @@ const rule = (source: string) => pgWriteRule(parseField("v", source, { dialect: 
 describe("pgWriteRule: a plain Postgres column's write rule by its data type (F50)", () => {
 	it("gives the date and time types their ISO rule, a time with a zone its offset", () => {
 		/* each format with comb's own pattern, its digits [0-9], as Rust's regex reads zod's \\d as any digit (AA7 of r22) */
-		expect(rule('date("v")')).toMatch(/^z\.iso\.date\(\{ pattern: \/\^\(\?:\(\?:\[0-9\]\[0-9\]\[2468\].*\$\/u \}\)$/)
+		expect(rule('date("v")')).toMatch(/^z\.stringFormat\("date", \/\^\(\?:\(\?:\[0-9\]\[0-9\]\[2468\].*\$\/u\)$/)
 		/* each keeps the instant: a timestamp only a local time, a timestamptz only one with its offset */
 		expect(rule('timestamp("v", { mode: "string" })')).toMatch(
-			/^z\.iso\.datetime\(\{ local: true, pattern: \/\^.*\$\/u \}\)\.regex\(/,
+			/^z\.stringFormat\("datetime", \/\^.*\$\/u\)\.regex\(\/\[\^Zz\]/,
 		)
 		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toMatch(
-			/^z\.iso\.datetime\(\{ offset: true, pattern: \/\^.*\$\/u \}\)\.regex\(/,
+			/^z\.stringFormat\("datetime", \/\^.*Z\|\(\[\+-\].*\$\/u\)\.regex\(/,
 		)
 		expect(rule('time("v")')).toBe(
-			String.raw`z.iso.time({ pattern: /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\.[0-9]+)?)?$/u })`,
+			String.raw`z.stringFormat("time", /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\.[0-9]+)?)?$/u)`,
 		)
 		expect(rule('time("v", { withTimezone: true })')).toMatch(/^z\.string\(\)\.regex\(.*\(\?:Z\|\[\+-\]/)
 		expect(rule('text("v")')).toBeUndefined()
@@ -259,7 +259,26 @@ describe("comb's ISO patterns are zod's, each \\d written as [0-9] (AA7 of r22)"
 		['timestamp("v", { mode: "string", withTimezone: true })', z.iso.datetime({ offset: true })],
 		['time("v")', z.iso.time()],
 	] as const)("%s", (column, zod) => {
-		const comb = /pattern: \/(.*?)\/u \}/.exec(rule(column) as string)?.[1]
+		const comb = /^z\.stringFormat\("[a-z]+", \/(.*?)\/u\)/.exec(rule(column) as string)?.[1]
 		expect(comb).toBe(zodPattern(zod).replaceAll(String.raw`\d`, "[0-9]"))
+	})
+})
+
+/*
+ * What a consumer sees of the move from z.iso.* to z.stringFormat (AA7 of r22): an issue of the same
+ * code, format and message, with no origin and no pattern, as the Upgrading item says
+ */
+describe("an ISO rule's issue, as z.stringFormat raises it (AA7 of r22)", () => {
+	it.each([
+		['date("v")', z.iso.date(), "2024-02-30"],
+		['timestamp("v", { mode: "string" })', z.iso.datetime({ local: true }), "2024-01-01 10:00"],
+		['time("v")', z.iso.time(), "25:00"],
+	] as const)("%s keeps zod's code, format and message, with no origin or pattern", (column, zod, bad) => {
+		const comb = new Function("z", `return ${rule(column)}`)(z) as z.ZodType
+		const [issue] = comb.safeParse(bad).error?.issues ?? []
+		const [own] = zod.safeParse(bad).error?.issues ?? []
+		expect(Object.keys(issue ?? {}).sort()).toEqual(["code", "format", "message", "path"])
+		expect(Object.keys(own ?? {}).sort()).toEqual(["code", "format", "message", "origin", "path", "pattern"])
+		expect(issue).toEqual({ ...own, origin: undefined, pattern: undefined })
 	})
 })
