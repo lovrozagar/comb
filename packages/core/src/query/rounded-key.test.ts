@@ -64,7 +64,8 @@ describe("roundedKey on the keys a list binds as read (QL1 of r22b; sibling: a d
 /* QL3 of r22b: a number under a class no double names may be a rounded read, a fraction as much as an integer */
 describe("roundedKey on a fraction under a class no double names (QL3 of r22b; sibling: Q1 of r22's integer rule)", () => {
 	it.each([
-		["postgres fixed", "fixed", true],
+		["postgres fixed, a mapper's fraction (B2-2 of area B)", "fixed", false],
+		["sqlite integer, a mapper's fraction (B2-2 of area B)", "integer", false],
 		["postgres other", "other", true],
 		["sqlite text", "text", true],
 		["sqlite real", "real", false],

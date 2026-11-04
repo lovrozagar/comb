@@ -34,9 +34,12 @@ const FRACTION: Readonly<Record<"derived" | "merged" | "unread", string>> = {
  * `unread` names, which its anchor row doesn't supply (QL1 of r22b); none where every such key is
  * exact. A bigint, a safe integer and ±Infinity or NaN are exact, and so is a number SQLite stored
  * as a REAL (Q1 of r20) or Postgres typed a double precision or real (Q2 of r21). Under any other
- * class, an integer past ±(2^53 − 1) and a fraction are not (QL3 of r22b): a Postgres numeric
- * carries its text instead (`_combKeyTexts`), so no number of one reaches here; with no class,
- * only the integer is known rounded.
+ * class, an integer past ±(2^53 − 1) is not, and so is a fraction (QL3 of r22b), but under an
+ * integer or a fixed class: no driver reads an integer type as a fraction, so one there is the app's
+ * mapper's, a customType in cents, which the cursor binds back through its `toDriver` (B2-2 of area
+ * B). A Postgres numeric, the one fixed type that holds a fraction, carries its text instead
+ * (`_combKeyTexts`), so no number of one reaches here; with no class, only the integer is known
+ * rounded.
  */
 function roundedKey(
 	row: Record<string, unknown>,
@@ -51,7 +54,9 @@ function roundedKey(
 		if (typeof value !== "number" || !Number.isFinite(value) || Number.isSafeInteger(value)) return false
 		/* with no class, only an integer past 2^53 is known rounded; under one, any number but a double's may be (QL3 of r22b) */
 		if (stored === undefined) return Number.isInteger(value)
-		return stored[i] !== "real" && stored[i] !== "float"
+		if (stored[i] === "real" || stored[i] === "float") return false
+		/* no driver reads an integer type as a fraction: one under it is the app's mapper's, bound back through its toDriver (B2-2 of area B) */
+		return Number.isInteger(value) || (stored[i] !== "integer" && stored[i] !== "fixed")
 	})
 	if (rounded === undefined) return undefined
 	const value = row[rounded.field] as number

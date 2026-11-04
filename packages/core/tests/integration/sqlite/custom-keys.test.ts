@@ -5,7 +5,9 @@
  * custom column's value is what its `fromDriver` read, opaque to comb, so a cursor carries it and
  * binds it back through `toDriver`: each list pages every row once. One key is citext-like text, the
  * other a number its mapper scales, so a bound that skipped `toDriver` would compare the wrong value.
- * Ids are out of key order.
+ * Ids are out of key order. B2-2 of area B: a mapper that reads an integer as a fraction (cents) was a
+ * 500 `sort_not_wired` on the derived and the merged list, which bind the key as read, as though the
+ * driver had rounded it; no driver reads an integer type as a fraction.
  */
 import { createClient } from "@libsql/client"
 import { getTableColumns } from "drizzle-orm"
@@ -31,10 +33,22 @@ const tenths = customType<{ data: number; driverData: number }>({
 	toDriver: (value) => value / 10,
 })
 
-const item = sqliteTable("custom_item", { id: text("id").primaryKey(), name: folded("name"), price: tenths("price") })
-const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["name", "price"] })
-const CREATE = "CREATE TABLE custom_item (id TEXT PRIMARY KEY, name TEXT COLLATE NOCASE, price INTEGER)"
-/* name order, case-blind and binary alike, as a merge compares in JS: apple < banana < cherry < date; price order: 150 < 200 < 1000 < 2500 */
+/* an amount the database holds in cents and the app in units, so every value but a whole one reads as a fraction (B2-2 of area B) */
+const cents = customType<{ data: number; driverData: number }>({
+	dataType: () => "integer",
+	fromDriver: (value) => value / 100,
+	toDriver: (value) => Math.round(value * 100),
+})
+
+const item = sqliteTable("custom_item", {
+	cost: cents("cost"),
+	id: text("id").primaryKey(),
+	name: folded("name"),
+	price: tenths("price"),
+})
+const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["cost", "name", "price"] })
+const CREATE = "CREATE TABLE custom_item (id TEXT PRIMARY KEY, name TEXT COLLATE NOCASE, price INTEGER, cost INTEGER)"
+/* name order, case-blind and binary alike, as a merge compares in JS: apple < banana < cherry < date; price and cost order: 150 < 200 < 1000 < 2500 */
 const ROWS = [
 	["d", "apple", 1000],
 	["a", "banana", 150],
@@ -42,6 +56,8 @@ const ROWS = [
 	["b", "date", 200],
 ] as const
 const SERVED = {
+	"cost.asc": ["a", "b", "d", "c"],
+	"cost.desc": ["c", "d", "b", "a"],
 	"name.asc": ["d", "a", "c", "b"],
 	"name.desc": ["b", "c", "a", "d"],
 	"price.asc": ["a", "b", "d", "c"],
@@ -54,7 +70,7 @@ async function holding(rows: readonly (readonly [string, string, number])[]): Pr
 	const client = createClient({ url: ":memory:" })
 	await client.execute(CREATE)
 	for (const [id, name, price] of rows)
-		await client.execute({ args: [id, name, price], sql: "INSERT INTO custom_item VALUES (?, ?, ?)" })
+		await client.execute({ args: [id, name, price, price], sql: "INSERT INTO custom_item VALUES (?, ?, ?, ?)" })
 	return drizzle({ client })
 }
 
@@ -84,7 +100,7 @@ async function served(path: Path, order: keyof typeof SERVED): Promise<string[]>
 							...SEALED,
 							idColumn: item.id,
 							parsed,
-							sortColumns: { name: item.name, price: item.price },
+							sortColumns: { cost: item.cost, name: item.name, price: item.price },
 						})
 			const rows = await applyListQuery(select(dbs[0] as LibSQLDatabase), list)
 			const [items, meta] = queryHelpers.paginate(rows, list)
