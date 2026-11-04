@@ -177,12 +177,14 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }) })
 			db = workspace(OUT, IN)
 		})
 
-		it.each(["bun", "node"] as const)("starts the proxy of the wrangler it checked (comb on %s)", (comb) => {
+		it.each(["bun", "node"] as const)("starts the proxy of the wrangler it checked, on node (comb on %s)", (comb) => {
 			const { ran, result } = script(db, `apply:${comb}`)
-			/* the version on each line, whichever process starts the proxy (SD1r moves the proof into a node child) */
+			/* the version on each line, and node starting the proxy under either comb: SD1r of r22 proves in a node child, as
+			   wrangler's apply runs Miniflare on node */
 			expect(result.status).not.toBe(0)
 			const proxies = ran.filter((line) => line.includes(" getPlatformProxy "))
 			expect(proxies, `${result.output}\n${ran.join("\n")}`).toHaveLength(1)
+			expect(proxies[0]?.split(" ").at(-1)).toBe("node")
 			for (const line of ran) expect(line.startsWith(`wrangler ${IN.wrangler} `), line).toBe(true)
 		})
 	})
