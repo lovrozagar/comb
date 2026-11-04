@@ -6,6 +6,7 @@
 import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
+import { jsonValue } from "../../../json-value.ts"
 import { isStorableText } from "../../../storable-text.ts"
 import { parseField } from "../../__fixtures__/runtime.ts"
 import type { SchemaType } from "./dto-types.ts"
@@ -19,8 +20,8 @@ const jsonValueSchema = z.union([
 	z.string(),
 	z.number(),
 	z.boolean(),
-	z.array(z.json()),
-	z.record(z.string(), z.json()),
+	z.array(jsonValue),
+	z.record(z.string(), jsonValue),
 ])
 
 /** The evaluated `schemaType` schema of the nullable column `raw` */
@@ -35,7 +36,7 @@ function generated(raw: string, schemaType: SchemaType, dialect: "postgres" | "s
 	}) as string
 	return new Function("z", "comb", "_m", "Doc", "jsonValueSchema", ts.transpile(`return ${code}`))(
 		z,
-		{ isStorableText },
+		{ isStorableText, jsonValue },
 		META,
 		Doc,
 		jsonValueSchema,

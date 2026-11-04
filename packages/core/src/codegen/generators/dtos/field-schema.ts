@@ -47,7 +47,7 @@ const JSON_NUL_CHECK =
 
 /*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
- * JSON value, written as the shared schema that holds no null of its own, as z.json() does, so null
+ * JSON value, comb.jsonValue read, and written as the shared schema that holds no null of its top, so null
  * is the column's to take (C5 of r19). A written JSON value is its refined schema behind z.lazy: meta
  * on the refined copy itself would publish the schema inline beside its $ref, while the lazy publishes
  * the $ref, or the schema where none is registered, with the refines' rules in x- keys beside it
@@ -61,9 +61,10 @@ const isJson = (field: FieldMeta): boolean => field.combKind === "json" || field
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const declared = field.combKind === "json"
 	if (!isJson(field)) return undefined
-	/* z.json() takes null itself, as a NOT NULL jsonb holds 'null'::jsonb, so a nullable one adds no second null (C6 of r20) */
+	/* comb's JSON value takes null itself, as a NOT NULL jsonb holds 'null'::jsonb, so a nullable one adds no
+	   second null (C6 of r20); comb's, as a write's is, so a read publishes CombJsonValue too (A2-4 of r22) */
 	if (!isMutative(schemaType))
-		return declared ? plain(field.jsonSchemaName as string) : { ...plain("z.json()"), takesNull: true }
+		return declared ? plain(field.jsonSchemaName as string) : { ...plain("comb.jsonValue"), takesNull: true }
 	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
 	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }

@@ -219,7 +219,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })]).meta(_m.real)',
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
-		expect(schema("x", 'blob("x")', "read")).toBe("z.json()")
+		expect(schema("x", 'blob("x")', "read")).toBe("comb.jsonValue")
 		/* written, it takes the refine behind z.lazy, nullable as any field is, its rule as meta (F63, C5 of r19, C2 of r21, C2a) */
 		expect(schema("x", 'blob("x")', "create")).toBe("z.lazy(() => jsonValueSchema).nullable().optional()")
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(

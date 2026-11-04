@@ -7,6 +7,7 @@
 import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
+import { jsonValue } from "../../../json-value.ts"
 import { fieldOf } from "../../__fixtures__/runtime.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateFieldSchema } from "./field-schema.ts"
@@ -113,10 +114,10 @@ function plainRead(raw: string): Record<string, unknown> {
 		dialect: "postgres",
 		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
 	}) as string
-	return published(new Function("z", `return ${code}`)(z) as z.ZodType).p
+	return published(new Function("z", "comb", `return ${code}`)(z, { jsonValue }) as z.ZodType).p
 }
 
-/* C6 of r20: z.json() takes null itself, so a nullable plain json read publishes no second null beside it */
+/* C6 of r20: comb's JSON value takes null itself, so a nullable plain json read publishes no second null beside it */
 describe("a plain json column's read", () => {
 	it.each(["json", "jsonb"])("takes null once, nullable or not, on %s", (type) => {
 		const nullable = plainRead(`${type}("p")`)
@@ -130,8 +131,8 @@ const jsonValueSchema = z.union([
 	z.string(),
 	z.number(),
 	z.boolean(),
-	z.array(z.json()),
-	z.record(z.string(), z.json()),
+	z.array(jsonValue),
+	z.record(z.string(), jsonValue),
 ])
 
 /** The written `schemaType` schema of `raw`, a nullable JSON column, evaluated */
