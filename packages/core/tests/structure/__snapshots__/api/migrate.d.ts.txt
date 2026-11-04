@@ -1095,6 +1095,8 @@ declare function reindexedOf(statements: readonly string[]): Set<string>;
 /** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
 type ReadStatement = {
     code: string;
+    /** on Postgres, the BEGIN, COMMIT, ROLLBACK or PREPARE TRANSACTION the statement is */
+    control?: string | undefined;
     dialect: Dialect;
     inside?: string | undefined;
     outside?: string | undefined;
@@ -1112,7 +1114,7 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
  * overrides this
  */
-declare function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
+declare function refuseUnrunnable({ code, control, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
 /**
  * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
  * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this

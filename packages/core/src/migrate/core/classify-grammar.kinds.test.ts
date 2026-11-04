@@ -8,11 +8,11 @@ import type { Dialect, MigrationSafety } from "../types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 
-/* Postgres runs these only outside a transaction, so check refuses them anywhere but a file of their own (P8 of r19) */
+/* Postgres runs these only outside a transaction, and Atlas's transaction ends at a file's own BEGIN, COMMIT or ROLLBACK, so comb refuses them anywhere but a txmode none file, which is cautious at least (P8 of r19, PA2 of r22b) */
 const NO_TX = "-- atlas:txmode none\n\n"
 
 const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
-	["postgres", "ABORT", "unsafe"],
+	["postgres", NO_TX + "ABORT", "unsafe"],
 	["postgres", "ALTER AGGREGATE a(int) RENAME TO b", "unsafe"],
 	["postgres", "ALTER COLLATION c RENAME TO d", "unsafe"],
 	["postgres", "ALTER DATABASE d SET x = 1", "unsafe"],
@@ -48,14 +48,14 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ALTER USER MAPPING FOR u SERVER s OPTIONS (SET x 'y')", "unsafe"],
 	["postgres", "ALTER VIEW v OWNER TO r", "cautious"],
 	["postgres", "ANALYZE post", "safe"],
-	["postgres", "BEGIN", "safe"],
+	["postgres", NO_TX + "BEGIN", "cautious"],
 	/* a procedure's body is code comb does not read (pg-tree.ts) */
 	["postgres", "CALL p()", "unsafe"],
 	["postgres", "CHECKPOINT", "unsafe"],
 	["postgres", "CLOSE c", "unsafe"],
 	["postgres", "CLUSTER post USING i", "safe"],
 	["postgres", "COMMENT ON TABLE post IS 'x'", "safe"],
-	["postgres", "COMMIT", "safe"],
+	["postgres", NO_TX + "COMMIT", "cautious"],
 	["postgres", "COPY post FROM STDIN", "unsafe"],
 	["postgres", "CREATE ACCESS METHOD m TYPE TABLE HANDLER h", "unsafe"],
 	["postgres", "CREATE AGGREGATE a(int) (SFUNC = f, STYPE = int)", "unsafe"],
@@ -116,7 +116,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "DROP TRIGGER t ON post", "unsafe"],
 	["postgres", "DROP TYPE mood", "unsafe"],
 	["postgres", "DROP VIEW v", "cautious"],
-	["postgres", "END", "safe"],
+	["postgres", NO_TX + "END", "cautious"],
 	["postgres", "EXECUTE s", "unsafe"],
 	["postgres", "EXPLAIN SELECT 1", "safe"],
 	["postgres", "FETCH c", "unsafe"],
@@ -137,13 +137,13 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "RELEASE SAVEPOINT a", "safe"],
 	["postgres", "RESET x", "safe"],
 	["postgres", "REVOKE SELECT ON post FROM r", "cautious"],
-	["postgres", "ROLLBACK", "safe"],
+	["postgres", NO_TX + "ROLLBACK", "cautious"],
 	["postgres", "SAVEPOINT a", "safe"],
 	["postgres", "SECURITY LABEL ON TABLE post IS 'x'", "unsafe"],
 	["postgres", "SELECT 1", "safe"],
 	["postgres", "SET x = 1", "safe"],
 	["postgres", "SHOW x", "unsafe"],
-	["postgres", "START TRANSACTION", "safe"],
+	["postgres", NO_TX + "START TRANSACTION", "cautious"],
 	["postgres", "TRUNCATE post", "unsafe"],
 	["postgres", "UNLISTEN x", "unsafe"],
 	["postgres", "UPDATE post SET a = 1 WHERE id = 1", "unsafe"],

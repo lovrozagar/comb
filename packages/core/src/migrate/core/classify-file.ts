@@ -79,6 +79,8 @@ function reindexedOf(statements: readonly string[]): Set<string> {
 /** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
 type ReadStatement = {
 	code: string
+	/** on Postgres, the BEGIN, COMMIT, ROLLBACK or PREPARE TRANSACTION the statement is */
+	control?: string | undefined
 	dialect: Dialect
 	inside?: string | undefined
 	outside?: string | undefined
@@ -146,7 +148,7 @@ function pragmaRefusal(pragma: Pragma): string | undefined {
  * overrides this
  */
 function refuseUnrunnable(
-	{ code, dialect, inside, outside, stmt }: ReadStatement,
+	{ code, control, dialect, inside, outside, stmt }: ReadStatement,
 	sql: string,
 	kind: TargetKind = "local",
 ): void {
@@ -167,14 +169,31 @@ function refuseUnrunnable(
 			`${preview(stmt)}: comb runs each file in a transaction of its own; remove the file's BEGIN, COMMIT, END and ROLLBACK (a SAVEPOINT nests inside it)`,
 		)
 	}
+	refuseOutOfScope({ control, inside, outside, stmt }, outsideTransaction(sql))
+}
+
+/**
+ * Refuses a Postgres statement the transaction Atlas runs its file in, or the lack of one in a
+ * txmode none file (`bare`), cannot hold
+ */
+function refuseOutOfScope(
+	{ control, inside, outside, stmt }: Pick<ReadStatement, "control" | "inside" | "outside" | "stmt">,
+	bare: boolean,
+): void {
+	/* PA2 of r22b: Atlas records the file in its transaction, which the file's own control would end */
+	if (control !== undefined && !bare) {
+		throw new Error(
+			`${preview(stmt)}: Atlas runs this file in one transaction and records it there, so its own ${control} ends that transaction; to commit as you go, start the file with "-- atlas:txmode none" and a blank line`,
+		)
+	}
 	/* P8 of r19: from the parse tree, so DETACH CONCURRENTLY, a bare CLUSTER and a REINDEX of a schema are caught too */
-	if (outside !== undefined && !outsideTransaction(sql)) {
+	if (outside !== undefined && !bare) {
 		throw new Error(
 			`${preview(stmt)}: Postgres runs ${outside} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`,
 		)
 	}
 	/* PA13 of r22b: Atlas sends a txmode none file's statements bare, so Postgres refuses these there */
-	if (inside !== undefined && outsideTransaction(sql)) {
+	if (inside !== undefined && bare) {
 		throw new Error(
 			`${preview(stmt)}: Postgres runs ${inside} only inside a transaction block ("${inside} can only be used in transaction blocks"), and Atlas sends a "-- atlas:txmode none" file's statements bare; put it between the file's own BEGIN and COMMIT, or in a file without the txmode line`,
 		)

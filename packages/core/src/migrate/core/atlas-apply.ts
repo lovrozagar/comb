@@ -9,8 +9,7 @@
  * history holds another schema's 0.12 row (atlas-foreign.ts, M78): Atlas would count that row as
  * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
  */
-import { readFileSync, rmSync } from "node:fs"
-import { join } from "node:path"
+import { rmSync } from "node:fs"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
@@ -31,15 +30,13 @@ import { NOT_CLEAN } from "./atlas-failure.ts"
 import { SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, NO_HISTORY, scrubbing } from "./atlas-status.ts"
 import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
-import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { sweepDev } from "./pg-replay-database.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
-import { pgRead } from "./pg-split.ts"
-import { schemaOfRead } from "./schema.ts"
+import { classifyPending } from "./atlas-pending.ts"
 
 type ApplyOptions = AtlasCommand & {
 	/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
@@ -85,46 +82,23 @@ async function adopt(
 /** The snapshot's files after `ran`, as Atlas lists a pending file */
 const after = (copy: string, ran: readonly string[]): AtlasFile[] => filesOf(copy).slice(ran.length)
 
-/** `read()`, a file `name` Atlas cannot split refused by name */
-function named<T>(name: string, read: () => T): T {
-	try {
-		return read()
-	} catch (error) {
-		throw new Error(`comb could not read ${name}: ${(error as Error).message}`, { cause: error })
-	}
-}
-
 /**
- * Each pending file read from the snapshot, classified as Postgres against the schema the files
- * before it leave, names keyed under the target's schema, approved, its lock warnings shown; on a
- * check, first replayed on dev with the history before it (pg-check-replay.ts)
+ * Each pending file classified (classifyPending); on a check, then replayed on dev with the history
+ * before it (pg-check-replay.ts); then each approved, its lock warnings shown
  */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
 	/* Postgres statements are read from Postgres's parser, loaded once */
 	await loadPostgresParser()
+	const waiting = new Set(pending.map((file) => file.Name))
+	/* what the file alone refuses goes before the replay, which never runs it (PA2 of r22b) */
+	const migrations = classifyPending(options, copy, waiting)
 	/* a check lets Postgres decide what no database runs, before any file is approved (P13 of r19) */
 	if (options.checkOnly === true) {
 		const names = pending.map((file) => file.Name)
 		await (options.replayPending ?? replayPending)(options, { files: throughPending(copy, names), pending: names })
 	}
-	const waiting = new Set(pending.map((file) => file.Name))
-	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
-	const readAs = { dialect: "postgres" as const, schema: options.target.schema }
-	let schema = extractSchema("", undefined, readAs)
-	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown (M75) */
-	let unread: string | undefined
-	for (const Name of sqlFiles(copy)) {
-		const sql = readFileSync(join(copy, Name), "utf8")
-		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
-		const before = schema
-		/* the file's one parse, for the schema it leaves and, pending, its approval (M86) */
-		const file = { dialect: "postgres" as const, read: named(Name, () => pgRead(sql)), sql }
-		schema = schemaOfRead(file, readAs.schema, before)
-		const { unreadable } = file.read
-		unread ??=
-			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
-		if (!waiting.has(Name)) continue
-		const migration = parseRead({ ...file, filename: Name }, { before, schema: readAs.schema })
+	for (const migration of migrations) {
+		const Name = migration.filename
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
 		if (!approval.ok) throw new Refused(approval.message, { pending: [...waiting] })

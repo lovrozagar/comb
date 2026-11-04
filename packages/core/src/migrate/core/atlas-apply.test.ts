@@ -170,11 +170,11 @@ describe("applyWithAtlas: a file before a pending one that it cannot read (M75)"
 		)
 	})
 
-	it("rates a pending file the parser cannot read, then refuses the pending file after it", async () => {
+	it("refuses the pending file after a pending file the parser cannot read, before asking for either (PA2)", async () => {
 		writeFileSync(join(dir, "1_a.sql"), "CREATE TABL b (id int);\n")
 		const run = options(fakeAtlas({ apply: APPLIED, status: PENDING }))
 		await expect(applyWithAtlas(run)).rejects.toThrow('comb could not read 1_a.sql: "CREATE TABL b (id int)"')
-		expect(run.seen).toEqual(["1_a.sql"])
+		expect(run.seen).toEqual([])
 	})
 })
 

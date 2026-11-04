@@ -16,7 +16,7 @@
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { ftsCommandFindings, refuseHeader, reindexedOf } from "./classify-file.ts"
+import { ftsCommandFindings, type ReadStatement, refuseHeader, reindexedOf } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
 import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
@@ -25,7 +25,7 @@ import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts, tableOf } from "./pg-history.ts"
-import { blockAfter, insideOnly, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
+import { blockAfter, insideOnly, nodeOf, outsideOnly, transactionControl } from "./pg-outside-transaction.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
@@ -191,14 +191,14 @@ const partitionedIn =
  * A reader of a file's statements in order: what Postgres runs only outside a transaction, and only
  * inside a block, the file's own BEGIN followed, as Postgres sees a txmode none file's (PA13 of r22b)
  */
-function scopeReader(): (tree: unknown, facts: Facts) => { inside?: string | undefined; outside?: string | undefined } {
+function scopeReader(): (tree: unknown, facts: Facts) => Pick<ReadStatement, "control" | "inside" | "outside"> {
 	let block = false
 	return (tree, facts) => {
 		const parsed = nodeOf(tree)
 		const inside = block ? undefined : insideOnly(...parsed)
 		block = blockAfter(block, ...parsed)
 		/* before the statement's findings follow what it makes: a table partitioned so far (P9 of r21) */
-		return { inside, outside: outsideOnly(...parsed, partitionedIn(facts)) }
+		return { control: transactionControl(...parsed), inside, outside: outsideOnly(...parsed, partitionedIn(facts)) }
 	}
 }
 
@@ -247,7 +247,7 @@ function readFile(
 	const scoped = scopeReader()
 	return statements.map((stmt, i) => {
 		const tree = read?.statements[i]?.tree
-		const { inside, outside } = tree === undefined ? {} : scoped(tree, ctx.facts)
+		const { control, inside, outside } = tree === undefined ? {} : scoped(tree, ctx.facts)
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
@@ -258,7 +258,7 @@ function readFile(
 			followAdds(codes[i] as string, ctx.fresh)
 			ctx.schema = extractSchema(stmt, ctx.schema)
 		}
-		return { code: codes[i] as string, dialect, findings, inside, outside, stmt, tree }
+		return { code: codes[i] as string, control, dialect, findings, inside, outside, stmt, tree }
 	})
 }
 

@@ -180,6 +180,19 @@ function blockAfter(open: boolean, type: string, node: Node): boolean {
 /** What a statement is, by its parse tree's node `type`, when Postgres runs it only inside a transaction block */
 const insideOnly = (type: string, node: Node): string | undefined => INSIDE[type]?.(node)
 
+// lookup-table: the TRANSACTION kinds that begin, end or prepare a transaction, by how Postgres names them (PA2 of r22b); a savepoint nests
+const CONTROL: Readonly<Record<string, string>> = {
+	TRANS_STMT_BEGIN: "BEGIN",
+	TRANS_STMT_COMMIT: "COMMIT",
+	TRANS_STMT_PREPARE: "PREPARE TRANSACTION",
+	TRANS_STMT_ROLLBACK: "ROLLBACK",
+	TRANS_STMT_START: "START TRANSACTION",
+}
+
+/** What a statement is, by its parse tree's node `type`, when it begins, ends or prepares a transaction */
+const transactionControl = (type: string, node: Node): string | undefined =>
+	type === "TransactionStmt" ? CONTROL[String(node["kind"])] : undefined
+
 // lookup-table: the shared objects a statement names by its object type, which every database of the server sees
 const SHARED: Readonly<Record<string, string>> = {
 	OBJECT_DATABASE: "a database",
@@ -269,4 +282,15 @@ function serverCall(type: string, node: Node): string | undefined {
 /** What a statement is, by its parse tree's node `type`, when its scope is the server or another database; undefined when it is its database's */
 const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node) ?? serverCall(type, node)
 
-export { BEYOND, beyondDatabase, blockAfter, CONCURRENT, INSIDE, insideOnly, nodeOf, OUTSIDE, outsideOnly }
+export {
+	BEYOND,
+	beyondDatabase,
+	blockAfter,
+	CONCURRENT,
+	INSIDE,
+	insideOnly,
+	nodeOf,
+	OUTSIDE,
+	outsideOnly,
+	transactionControl,
+}
