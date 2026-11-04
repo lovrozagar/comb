@@ -162,28 +162,15 @@ const DRIZZLE_CONFIGS = ["drizzle.config.ts", "drizzle.config.js", "drizzle.conf
 /**
  * The drizzle config a diff exports with: the database's, which must exist, else the first of
  * DRIZZLE_CONFIGS in `cwd`; refused before drizzle-kit runs, whose own lookup names a file `init`
- * never writes (K21 of the 0.15.0 review). drizzle-kit runs on comb's runtime, and on Node it
- * cannot load a JSON one (D2-14 of the area D round-two review).
+ * never writes (K21 of the 0.15.0 review)
  */
 function drizzleConfig(configured: string | undefined, cwd: string): string {
-	const file = configured === undefined ? foundConfig(cwd) : configuredFile(configured)
-	if (path.extname(file) === ".json" && process.versions["bun"] === undefined)
-		throw new CliError(
-			`${file} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
-		)
-	return file
-}
-
-/** The drizzle config a database names, which must be a file */
-function configuredFile(configured: string): string {
-	if (!fs.existsSync(configured)) throw new CliError(`drizzleConfigPath ${configured} does not exist`)
-	if (!fs.statSync(configured).isFile())
-		throw new CliError(`drizzleConfigPath ${configured} is a directory, not a drizzle config`)
-	return configured
-}
-
-/** The first of DRIZZLE_CONFIGS in `cwd` */
-function foundConfig(cwd: string): string {
+	if (configured !== undefined) {
+		if (!fs.existsSync(configured)) throw new CliError(`drizzleConfigPath ${configured} does not exist`)
+		if (!fs.statSync(configured).isFile())
+			throw new CliError(`drizzleConfigPath ${configured} is a directory, not a drizzle config`)
+		return configured
+	}
 	const found = DRIZZLE_CONFIGS.map((name) => path.join(cwd, name)).find((file) => fs.existsSync(file))
 	if (found !== undefined) return found
 	throw new CliError(

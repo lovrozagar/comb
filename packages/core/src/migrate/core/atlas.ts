@@ -163,6 +163,11 @@ export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 export function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string {
 	const { configPath, cwd, dialect, run: exec = run } = options
 
+	/* drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config (D2-14 of the area D round-two review) */
+	if (configPath?.endsWith(".json") === true && process.versions["bun"] === undefined)
+		throw new Error(
+			`${configPath} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
+		)
 	const config = configPath === undefined ? [] : ["--config", configPath]
 	const result = runPeer(exec, drizzleKit)(["export", ...config], { cwd })
 

@@ -3,6 +3,7 @@ import { devNull, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ATLAS_RANGE, run, runPeer } from "./process.ts"
+import { onBun } from "../../../tests/support/runtime.ts"
 
 describe("run", () => {
 	it("returns the exit code and both streams", () => {
@@ -126,19 +127,6 @@ describe("run: an exact environment and a timeout", () => {
 		expect(result).toEqual({ code: 124, stderr: `${process.execPath}: stopped after 200 ms`, stdout: "" })
 	})
 })
-
-/** Runs `body` with `process.versions.bun` as `version`, none for undefined, whatever runtime runs the test */
-function onBun(version: string | undefined, body: () => void): void {
-	const own = Object.getOwnPropertyDescriptor(process.versions, "bun")
-	if (version === undefined) Reflect.deleteProperty(process.versions, "bun")
-	else Object.defineProperty(process.versions, "bun", { configurable: true, enumerable: true, value: version })
-	try {
-		body()
-	} finally {
-		if (own === undefined) Reflect.deleteProperty(process.versions, "bun")
-		else Object.defineProperty(process.versions, "bun", own)
-	}
-}
 
 describe("runPeer (K1 of r22)", () => {
 	/* a bin peer runs on its runtime and the bin the project's package names, never from PATH */

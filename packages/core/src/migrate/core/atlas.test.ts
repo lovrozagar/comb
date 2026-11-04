@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { describe, expect, it } from "vitest"
 import { checkAtlasInstalled, exportDrizzleSchema, exportWith, generateSchemaDiff, getAtlasVersion } from "./atlas.ts"
+import { onBun } from "../../../tests/support/runtime.ts"
 import { OPTIONAL_PEER_RANGES } from "./optional-peer.ts"
 
 /** A drizzle-kit as a command resolves it, for a fake runner */
@@ -160,6 +161,22 @@ describe("exportDrizzleSchema", () => {
 		expect(() => exportDrizzleSchema({ cwd: tmpdir(), dialect: "sqlite", run })).toThrow(
 			`comb needs drizzle-kit (${OPTIONAL_PEER_RANGES["drizzle-kit"]}) to export the drizzle schema for comb migrate diff`,
 		)
+	})
+
+	/* D2-14 of the area D round-two review: drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
+	it("refuses a JSON drizzle config when comb runs on Node, before drizzle-kit runs, and exports it on Bun", () => {
+		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
+		const options = { configPath: "/w/drizzle.config.json", cwd: import.meta.dirname, dialect: "sqlite" as const, run }
+		onBun(undefined, () =>
+			expect(() => exportDrizzleSchema(options)).toThrow(
+				new Error(
+					"/w/drizzle.config.json is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun",
+				),
+			),
+		)
+		expect(run.calls).toEqual([])
+		expect(onBun("1.3.0", () => exportDrizzleSchema(options))).toBe("CREATE TABLE t (a integer);")
+		expect(run.calls[0]?.args.slice(1)).toEqual(["export", "--config", "/w/drizzle.config.json"])
 	})
 
 	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
