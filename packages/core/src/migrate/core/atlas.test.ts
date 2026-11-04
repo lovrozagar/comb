@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { checkAtlasInstalled, exportDrizzleSchema, exportWith, generateSchemaDiff, getAtlasVersion } from "./atlas.ts"
 import { onBun } from "../../../tests/support/runtime.ts"
@@ -163,6 +164,24 @@ describe("exportDrizzleSchema", () => {
 		)
 	})
 
+	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
+		const run = fakeRun(ok("CREATE TABLE `a` (\n\t`id` text PRIMARY KEY\n);\n"))
+		expect(exportWith(KIT, { cwd: "/w", dialect: "sqlite", run })).toBe(
+			"CREATE TABLE `a` (\n\t`id` text NOT NULL PRIMARY KEY\n);\n",
+		)
+	})
+
+	it("returns Postgres output as is and throws stderr on failure", () => {
+		expect(exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
+			"PRAGMA x;\nDEFAULT true",
+		)
+		expect(() => exportWith(KIT, { cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
+			new Error("drizzle-kit export failed: no config"),
+		)
+	})
+})
+
+describe("exportDrizzleSchema's drizzle config", () => {
 	/* D2-14 of the area D round-two review: drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
 	it("refuses a JSON drizzle config when comb runs on Node, before drizzle-kit runs, and exports it on Bun", () => {
 		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
@@ -179,20 +198,29 @@ describe("exportDrizzleSchema", () => {
 		expect(run.calls[0]?.args.slice(1)).toEqual(["export", "--config", "/w/drizzle.config.json"])
 	})
 
-	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
-		const run = fakeRun(ok("CREATE TABLE `a` (\n\t`id` text PRIMARY KEY\n);\n"))
-		expect(exportWith(KIT, { cwd: "/w", dialect: "sqlite", run })).toBe(
-			"CREATE TABLE `a` (\n\t`id` text NOT NULL PRIMARY KEY\n);\n",
-		)
-	})
-
-	it("returns Postgres output as is and throws stderr on failure", () => {
-		expect(exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
-			"PRAGMA x;\nDEFAULT true",
-		)
-		expect(() => exportWith(KIT, { cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
-			new Error("drizzle-kit export failed: no config"),
-		)
+	/* D3-2 of the area D round-three review: with no configPath, drizzle-kit looks up drizzle.config.ts, .js, then .json in cwd */
+	it("refuses the JSON config drizzle-kit's own lookup finds when comb runs on Node, and exports it on Bun", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "comb-dk-lookup-"))
+		try {
+			writeFileSync(join(cwd, "drizzle.config.json"), "{}")
+			const run = fakeRun(ok("CREATE TABLE t (a integer);"), ok("CREATE TABLE t (a integer);"))
+			const options = { cwd, dialect: "sqlite" as const, run }
+			onBun(undefined, () =>
+				expect(() => exportWith(KIT, options)).toThrow(
+					new Error(
+						`${join(cwd, "drizzle.config.json")} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
+					),
+				),
+			)
+			expect(run.calls).toEqual([])
+			expect(onBun("1.3.0", () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
+			expect(run.calls[0]?.args.slice(1)).toEqual(["export"])
+			/* a drizzle.config.ts beside it is the one drizzle-kit loads */
+			writeFileSync(join(cwd, "drizzle.config.ts"), "export default {}")
+			expect(onBun(undefined, () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
+		} finally {
+			rmSync(cwd, { force: true, recursive: true })
+		}
 	})
 })
 

@@ -1,7 +1,7 @@
 /**
  * Atlas CLI integration for schema diffing
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
@@ -159,14 +159,24 @@ export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 	return exportWith(projectBin(DIFF, options.cwd), options)
 }
 
+/** The config drizzle-kit loads: the one given, else the first of its own defaults cwd holds (D3-2 of the area D round-three review) */
+function drizzleConfigOf(configPath: string | undefined, cwd: string): string | undefined {
+	if (configPath !== undefined) return configPath
+	const found = ["drizzle.config.ts", "drizzle.config.js", "drizzle.config.json"].find((name) =>
+		existsSync(join(cwd, name)),
+	)
+	return found === undefined ? undefined : join(cwd, found)
+}
+
 /** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
 export function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string {
 	const { configPath, cwd, dialect, run: exec = run } = options
 
 	/* drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config (D2-14 of the area D round-two review) */
-	if (configPath?.endsWith(".json") === true && process.versions["bun"] === undefined)
+	const loads = drizzleConfigOf(configPath, cwd)
+	if (loads?.endsWith(".json") === true && process.versions["bun"] === undefined)
 		throw new Error(
-			`${configPath} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
+			`${loads} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
 		)
 	const config = configPath === undefined ? [] : ["--config", configPath]
 	const result = runPeer(exec, drizzleKit)(["export", ...config], { cwd })
