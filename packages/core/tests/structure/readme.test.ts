@@ -243,6 +243,21 @@ describe("README getHandle upgrade item", () => {
 	})
 })
 
+/* D4-6 of the area D round-four review: item 2 promises what a Bun single-file executable refuses */
+describe("README peer install upgrade item", () => {
+	const item =
+		/^\d+\. \*\*Install `wrangler` and `drizzle-kit` in the project that runs comb\.\*\*.*$/m.exec(README)?.[0] ?? ""
+	const refused = item.split(/(?<=\.) /).find((sentence) => sentence.includes("are refused in such an executable"))
+
+	it("says codegen's analyze and the D1 commands but diff are refused in a compiled executable, and why", () => {
+		expect(item).toContain("an app compiled to one executable")
+		expect(refused).toContain("Codegen's `analyze` and every D1 command but `migrate diff`")
+		expect(refused).toContain("(`status`, `check`, `apply` and `baseline`)")
+		expect(refused).toMatch(/cannot read the modules the executable embeds/)
+		expect(refused).toMatch(/run them with bun or node/)
+	})
+})
+
 /* K9 of r19: the table stopped at 0.14, and the three newest upgrade sections, read first, had no entry */
 describe("README table of contents", () => {
 	it("lists every section, in the order the README has them", () => {
