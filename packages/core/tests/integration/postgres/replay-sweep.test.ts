@@ -225,11 +225,14 @@ describe("a check killed by SIGKILL mid-replay", () => {
 })
 
 /* the replay's statement a test leaves running, as a seed or an index build on seeded data runs for minutes */
-const SLEEP = "SELECT pg_sleep(60)"
+const SLEEP = "SELECT pg_sleep(120)"
 
-/** The backends on the server running SLEEP */
+/* half the sleep: what a check's statement or an apply takes here only by waiting the sleep out, under any load */
+const HALF_SLEEP_MS = 60_000
+
+/** The backends on the server running SLEEP, each by its pid and state */
 const sleeping = async (): Promise<unknown[]> =>
-	query(pgUrl(), `SELECT pid FROM pg_stat_activity WHERE query LIKE '%${SLEEP}%' AND pid <> pg_backend_pid()`)
+	query(pgUrl(), `SELECT pid, state FROM pg_stat_activity WHERE query LIKE '%${SLEEP}%' AND pid <> pg_backend_pid()`)
 
 /** Until a backend runs SLEEP, at most 60 s; a check that `ended` first fails with what it wrote */
 async function untilSleeping(ended: Promise<string[]>): Promise<void> {
@@ -243,40 +246,62 @@ async function untilSleeping(ended: Promise<string[]>): Promise<void> {
 	}
 }
 
-/* P4 of r22: a SIGKILL left the replay's statement running, which held its database and its role until it ended */
+/**
+ * Until no backend runs SLEEP, at most half of it, else fails naming each that does: the statement
+ * the kill left running, which only ends by waiting the sleep out
+ */
+async function untilAwake(): Promise<void> {
+	const deadline = Date.now() + HALF_SLEEP_MS
+	for (let left = await sleeping(); left.length > 0; left = await sleeping()) {
+		if (Date.now() > deadline)
+			throw new Error(`the killed check's statement ran on past half its sleep: ${JSON.stringify(left)}`)
+		await new Promise((done) => setTimeout(done, 100))
+	}
+}
+
+/*
+ * P4 of r22: a SIGKILL left the replay's statement running, which held its database and its role
+ * until it ended. The mechanism, not the clock: the statement ends with its client, so none runs at
+ * the apply's start, and the apply takes under half the sleep, which only waiting it out exceeds.
+ */
 describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 	leavesStale()
-	it("leaves nothing that stops the next apply's CREATE ROLE of its role, which passes at once", async () => {
-		const made = unique("comb_t_orphan")
-		try {
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					write([
-						`${UNSAFE}CREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nGRANT SELECT ON t TO ${made};\n`,
-						`${UNSAFE}${SLEEP};\n`,
-					])
-					const child = childCheck(dev, url)
-					await untilSleeping(child.ended)
-					await child.kill("SIGKILL")
-					expect((await child.ended).at(-1)).toBe("exit 137")
-					/* the apply's own history alone: the sleep file stays out of it */
-					for (const name of readdirSync(dir)) rmSync(join(dir, name))
-					write([`${UNSAFE}CREATE ROLE ${made};\n`])
-					const started = Date.now()
-					await withScratchDb((target) => applyWithAtlas(options(dev, target)))
-					expect([await replayDatabases(made), await sleeping()]).toEqual([[], []])
-					/* at once: the statement the killed check left ended with it, and the sweep waits on nothing */
-					expect(Date.now() - started).toBeLessThan(20_000)
-				}),
-			)
-		} finally {
-			await query(
-				pgUrl(),
-				`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%${SLEEP}%' AND pid <> pg_backend_pid()`,
-			)
-			await dropRoles(made)
-		}
-	}, 60_000)
+	it(
+		"leaves nothing that stops the next apply's CREATE ROLE of its role, which passes at once",
+		async () => {
+			const made = unique("comb_t_orphan")
+			try {
+				await withScratchDb((dev) =>
+					withScratchDb(async (url) => {
+						write([
+							`${UNSAFE}CREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nGRANT SELECT ON t TO ${made};\n`,
+							`${UNSAFE}${SLEEP};\n`,
+						])
+						const child = childCheck(dev, url)
+						await untilSleeping(child.ended)
+						await child.kill("SIGKILL")
+						expect((await child.ended).at(-1)).toBe("exit 137")
+						await untilAwake()
+						/* the apply's own history alone: the sleep file stays out of it */
+						for (const name of readdirSync(dir)) rmSync(join(dir, name))
+						write([`${UNSAFE}CREATE ROLE ${made};\n`])
+						expect(await sleeping()).toEqual([])
+						const started = Date.now()
+						await withScratchDb((target) => applyWithAtlas(options(dev, target)))
+						expect(Date.now() - started).toBeLessThan(HALF_SLEEP_MS)
+						expect([await replayDatabases(made), await sleeping()]).toEqual([[], []])
+					}),
+				)
+			} finally {
+				await query(
+					pgUrl(),
+					`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%${SLEEP}%' AND pid <> pg_backend_pid()`,
+				)
+				await dropRoles(made)
+			}
+		},
+		3 * HALF_SLEEP_MS,
+	)
 })
 
 /* PR7 of r22b: apply connected to devUrl's server before every apply, waiting 30 s on one the deploy cannot reach */
