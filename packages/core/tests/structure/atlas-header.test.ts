@@ -4,7 +4,8 @@
  * transaction: Atlas runs it when it reads `txmode none`, fails it in the file's transaction when it
  * reads no directive or `file`, and refuses the file, naming the txmode, for any other value. Atlas
  * reads the header the same on every dialect (sql/migrate/dir.go), so SQLite, which needs no server,
- * is the oracle for Postgres too.
+ * is the oracle for Postgres too. comb runs on every Atlas in ATLAS_RANGE, so each shape is read by
+ * the pinned v1.2.0 floor and by the Atlas on PATH alike, and one they read apart fails naming both.
  */
 import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -12,6 +13,7 @@ import os from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { atlasHeader, type Txmode } from "../../src/migrate/core/atlas-header.ts"
+import { ATLAS_FLOOR_VERSION, requireAtlasFloor } from "../support/atlas-floor.ts"
 
 /* each header shape r22b's t-txmode-header.ts ran, and what it shows; the file's VACUUM follows it */
 const SHAPES: Readonly<Record<string, string>> = {
@@ -38,8 +40,15 @@ const SHAPES: Readonly<Record<string, string>> = {
 	"an indented statement right after": "-- atlas:txmode none\n   ",
 }
 
-/** How the pinned Atlas ran `head` before a VACUUM, as a txmode */
-function atlasRead(head: string): Txmode | "unrun" {
+/* each Atlas the shapes are read by, by its version: the range's floor, and the one on PATH */
+const ATLASES: Readonly<Record<string, string>> = {
+	[`v${ATLAS_FLOOR_VERSION}`]: requireAtlasFloor(),
+	[/v\d+\.\d+\.\d+/.exec(spawnSync("atlas", ["version"], { encoding: "utf8" }).stdout)?.[0] ?? "atlas on PATH"]:
+		"atlas",
+}
+
+/** How the Atlas `binary` ran `head` before a VACUUM, as a txmode */
+function atlasRead(head: string, binary: string): Txmode | "unrun" {
 	const dir = mkdtempSync(path.join(os.tmpdir(), "comb-atlas-header-"))
 	try {
 		const migrations = path.join(dir, "m")
@@ -47,8 +56,8 @@ function atlasRead(head: string): Txmode | "unrun" {
 		writeFileSync(path.join(migrations, "20260101000000_t.sql"), "CREATE TABLE t (x int);\n")
 		writeFileSync(path.join(migrations, "20260102000000_v.sql"), `${head}VACUUM;\n`)
 		const at = ["--dir", `file://${migrations}`]
-		expect(spawnSync("atlas", ["migrate", "hash", ...at]).status).toBe(0)
-		const apply = spawnSync("atlas", ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], {
+		expect(spawnSync(binary, ["migrate", "hash", ...at]).status).toBe(0)
+		const apply = spawnSync(binary, ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], {
 			encoding: "utf8",
 		})
 		const said = `${apply.stdout}${apply.stderr}`
@@ -64,6 +73,10 @@ function atlasRead(head: string): Txmode | "unrun" {
 
 describe("comb reads a txmode header as Atlas does (PA3; sibling: comb's own -- comb:allow-unsafe: line)", () => {
 	it.each(Object.entries(SHAPES))("%s", (_, head) => {
-		expect(atlasHeader(`${head}VACUUM;\n`).txmode).toEqual(atlasRead(head))
+		const reads = Object.fromEntries(
+			Object.entries(ATLASES).map(([version, binary]) => [version, atlasRead(head, binary)]),
+		)
+		const comb = atlasHeader(`${head}VACUUM;\n`).txmode
+		expect(Object.fromEntries(Object.keys(ATLASES).map((version) => [version, comb]))).toEqual(reads)
 	})
 })
