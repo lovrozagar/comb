@@ -148,7 +148,8 @@ const KEPT_BY: Readonly<Record<Exclude<IntervalField, "second">, string>> = {
  * An interval: an ISO 8601 duration with no part below its last field, which Postgres drops
  * (`PT1H` into an `interval day` is stored as 0), and no fraction of a second past its precision,
  * which it rounds (CD6 of r22b). A string and its pattern, with no `format: "duration"`: that format
- * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one (AA10 of r22)
+ * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one (AA10 of r22). Its precision
+ * is never 0: drizzle writes `precision: 0` as no precision, which a test holds
  */
 function intervalRule({ field, precision }: { field: IntervalField | null; precision: number | null }): string {
 	const fields =
@@ -158,7 +159,7 @@ function intervalRule({ field, precision }: { field: IntervalField | null; preci
 	const fraction =
 		precision === null
 			? ""
-			: `.regex(/^[^.]*${precision === 0 ? "" : `(?:\\.[0-9]{1,${precision}}S)?`}$/u, { message: "${roundedBy("interval", precision)}" })`
+			: `.regex(/^[^.]*(?:\\.[0-9]{1,${precision}}S)?$/u, { message: "${roundedBy("interval", precision)}" })`
 	return `z.string().regex(/${DURATION}/u, { message: "Must be an ISO 8601 duration" })${fields}${fraction}`
 }
 

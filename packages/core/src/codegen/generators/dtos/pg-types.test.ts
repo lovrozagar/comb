@@ -169,6 +169,19 @@ describe("a time's rules read the parsed modifier (CD5, CD6; sibling: a timestam
 	})
 })
 
+/* drizzle writes an interval's precision 0 as no precision, so the rule never reads 0: a drizzle
+   that kept it fails here before a {1,0} reached a published pattern */
+describe("an interval's precision 0, as drizzle writes it (sibling: the interval's fraction rule)", () => {
+	it.each(['interval("v", { precision: 0 })', 'interval("v", { fields: "second", precision: 0 })'])(
+		"reads no precision from %s, and holds no fraction rule",
+		(column) => {
+			const field = parseField("v", column, { dialect: "postgres" })
+			expect(pgModifierOf(field.sqlType)).toMatchObject({ base: "interval", precision: null })
+			expect(pgWriteRule(field)).not.toContain("[^.]")
+		},
+	)
+})
+
 describe("an interval's and a numeric's rules read the parsed modifier (CD5, CD6; sibling: numeric's scale bound)", () => {
 	it("keeps an interval's parts at and above its last field, and its fraction to its precision", () => {
 		expect(takes('interval("v", { fields: "year" })', ["P2Y", "P2Y1M"])).toEqual([true, false])
