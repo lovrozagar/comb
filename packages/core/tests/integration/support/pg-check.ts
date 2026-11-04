@@ -50,11 +50,11 @@ const optionsOf = (dir: string, target: { devUrl: string; url: string }, out: st
 })
 
 /** `one` then `two`, written in `dir` and hashed: a history of `one` with `two` pending, as check replays them */
-function filesIn(dir: string, one: string, two: string): void {
+async function filesIn(dir: string, one: string, two: string): Promise<void> {
 	/* CREATE STATISTICS is a kind comb does not rate: the history's own approval lets it pass */
 	writeFileSync(join(dir, "20260101000000_one.sql"), `-- comb:allow-unsafe: the test's history\n${one}`)
 	writeFileSync(join(dir, "20260102000000_two.sql"), two)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** Why `ran` refused, or undefined when it passed */
@@ -84,7 +84,7 @@ function pgCheck() {
 		two: string,
 		dev = devUrl(),
 	): Promise<{ out: string[]; refused?: string | undefined }> {
-		files(one, two)
+		await files(one, two)
 		const out: string[] = []
 		const refused = await refusal(
 			applyWithAtlas({ ...options({ devUrl: dev, url: targetUrl() }, out), checkOnly: true }),
@@ -95,7 +95,7 @@ function pgCheck() {
 	/** `one` then `two` checked, then applied, on a fresh target replayed on devUrl: why each refused, or undefined; check's lines in `out` */
 	const checkThenApply = (one: string, two: string, out: string[] = []) =>
 		withScratchDb(async (url) => {
-			files(one, two)
+			await files(one, two)
 			const tried = (checkOnly: boolean) =>
 				refusal(applyWithAtlas({ ...options({ devUrl: devUrl(), url }, checkOnly ? out : []), checkOnly }))
 			return { check: await tried(true), apply: await tried(false) }

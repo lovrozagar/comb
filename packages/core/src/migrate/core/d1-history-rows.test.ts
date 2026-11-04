@@ -36,7 +36,7 @@ async function target(): Promise<D1Target & { db: ReturnType<typeof fakeD1>["db"
 
 describe("readHistory", () => {
 	it("reads a database with none of the history tables as nothing applied, recorded, intended or copied", async () => {
-		expect(readHistory(read, await target(), "d1_migrations")).toEqual({
+		expect(await readHistory(read, await target(), "d1_migrations")).toEqual({
 			applied: new Set(),
 			appliedAt: new Map(),
 			drizzle: undefined,
@@ -55,7 +55,7 @@ describe("readHistory", () => {
 			...hashStatements([{ hash: "h1", name: "1_it's.sql" }]),
 			...intentStatements([{ hash: "h2", name: "2_it's.sql" }]),
 		])
-		expect(readHistory(read, d1, 'my "history"')).toEqual({
+		expect(await readHistory(read, d1, 'my "history"')).toEqual({
 			applied: new Set(["1_it's.sql"]),
 			appliedAt: new Map([["1_it's.sql", Date.parse("2026-11-01T12:00:00Z")]]),
 			drizzle: new Set(["h0"]),

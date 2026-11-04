@@ -9,4 +9,4 @@ import type { CliIo, Run, RunOptions, RunResult } from "../../src/cli/index.ts"
 expectTypeOf<keyof CliIo>().toEqualTypeOf<"confirm" | "cwd" | "err" | "out" | "run">()
 expectTypeOf<CliIo["run"]>().toEqualTypeOf<Run | undefined>()
 expectTypeOf<Run>().parameters.toEqualTypeOf<[cmd: string, args: readonly string[], options?: RunOptions]>()
-expectTypeOf<Run>().returns.toEqualTypeOf<RunResult>()
+expectTypeOf<Run>().returns.toEqualTypeOf<Promise<RunResult>>()

@@ -11,7 +11,7 @@ type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefi
 function fakeRun(answer: (call: Call) => RunResult): Run & { calls: Call[]; spawns: Call[] } {
 	const calls: Call[] = []
 	const spawns: Call[] = []
-	const fake = (spawned: string, argv: readonly string[], options?: RunOptions) => {
+	const fake = async (spawned: string, argv: readonly string[], options?: RunOptions) => {
 		spawns.push({ args: argv, cmd: spawned, options })
 		const [cmd, args] = asCalled(spawned, argv, options?.peer)
 		const call = { args, cmd, options }
@@ -32,18 +32,18 @@ async function connect(run: Run, config: D1ProviderConfig = CONFIG) {
 
 /* R1: several statements in one wrangler process, each answered */
 describe("executeAll", () => {
-	it("runs every statement in one wrangler call, and refuses an answer that leaves one out", () => {
+	it("runs every statement in one wrangler call, and refuses an answer that leaves one out", async () => {
 		const two = fakeRun(() => json([{ results: [{ n: 1 }] }, { results: [] }]))
 		expect(
-			executeAll(two, { flags: ["--local"], name: "core", wrangler: wranglerBin() }, [
+			await executeAll(two, { flags: ["--local"], name: "core", wrangler: wranglerBin() }, [
 				"SELECT 1 AS n",
 				"CREATE TABLE t (x)",
 			]),
 		).toEqual([[{ n: 1 }], []])
 		const one = fakeRun(() => json([{ results: [] }]))
-		expect(() =>
+		await expect(
 			executeAll(one, { flags: [], name: "core", wrangler: wranglerBin() }, ["SELECT 1", "SELECT 2"]),
-		).toThrow("wrangler answered 1 results for 2 statements")
+		).rejects.toThrow("wrangler answered 1 results for 2 statements")
 	})
 })
 

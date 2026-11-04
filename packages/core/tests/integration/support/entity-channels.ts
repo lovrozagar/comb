@@ -37,7 +37,7 @@ export async function entityChannels(
 	const module = dtos[kebab] as Record<string, unknown>
 	const published = z.toJSONSchema(module[`${entity}DtoReadSchema`] as z.ZodType, { unrepresentable: "any" })
 	const stamp = readCombEntityMeta(published)
-	const analysis = analyze(path.join(generatedDir(name), "db.x.tables.ts"))
+	const analysis = await analyze(path.join(generatedDir(name), "db.x.tables.ts"))
 	const manifest = buildManifest(analysis.tables, "x", options.dialect).entities.find((each) => each.varName === entity)
 	if (manifest === undefined) throw new Error(`the manifest holds no ${entity}`)
 	return {

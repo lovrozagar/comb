@@ -46,7 +46,7 @@ beforeAll(async () => {
 	dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-partial-unique-"))
 	const tables = path.join(dir, "db.app.tables.ts")
 	fs.writeFileSync(tables, TABLES)
-	const analysis = analyze(tables)
+	const analysis = await analyze(tables)
 	table = analysis.tables[0] as TableMeta
 	const output = path.join(dir, "constraints.gen.ts")
 	generateConstraints(testContext(analysis, { cwd: dir }), { output })

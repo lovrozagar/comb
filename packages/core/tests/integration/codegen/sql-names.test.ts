@@ -54,7 +54,7 @@ beforeAll(async () => {
 	dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-sql-names-"))
 	const tables = path.join(dir, "db.app.tables.ts")
 	fs.writeFileSync(tables, TABLES)
-	analysis = analyze(tables)
+	analysis = await analyze(tables)
 	const output = path.join(dir, "constraints.gen.ts")
 	generateConstraints(testContext(analysis, { cwd: dir }), { output })
 	map = ((await import(output)) as Record<string, ConstraintMap>).APP_DB_CONSTRAINT_MAP as ConstraintMap

@@ -1,9 +1,14 @@
 /**
  * The one place comb starts a process. Everything that shells out (atlas, wrangler,
- * drizzle-kit) takes a `Run`, so tests pass a fake and the real one is tested here.
+ * drizzle-kit) takes a `Run`, so tests pass a fake and the real one is tested here. A process runs
+ * asynchronously under comb's one cleanup rule (cleanup.ts, PA4 of r22): SIGINT or SIGTERM to comb
+ * goes on to the child, comb waits for its end, and its caller never goes on to the next step. On
+ * POSIX the child leads a process group of its own, so a stop reaches what it started too, and one
+ * that outlives the stop by killAfterMs is killed with SIGKILL.
  */
-import { spawnSync } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 import { constants, devNull } from "node:os"
+import { hold, pastStop } from "./cleanup.ts"
 /** An optional peer comb spawns rather than imports */
 export type BinPeer = "drizzle-kit" | "wrangler"
 
@@ -38,13 +43,42 @@ export type RunOptions = {
 	peer?: BinPeer | undefined
 	/** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
 	timeoutMs?: number | undefined
+	/** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
+	killAfterMs?: number | undefined
 }
 
-export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>
 
 /* `wrangler d1 execute --json` on a large SELECT or `drizzle-kit export` of a big schema
- * passes spawnSync's 1 MiB default */
+ * passes Node's 1 MiB default */
 const DEFAULT_MAX_BUFFER = 256 * 1024 * 1024
+
+/* a child that traps SIGTERM would hold comb past any stop: this long, then SIGKILL */
+const DEFAULT_KILL_AFTER_MS = 10_000
+
+/*
+ * On POSIX a child is the leader of a process group of its own, which every stop signals whole: wrangler
+ * starts workerd and drizzle-kit esbuild, which a signal to the child alone would leave running. The
+ * group gets no terminal's Ctrl-C, so comb's forward is its only signal. Windows has no groups to name.
+ */
+const GROUPS = process.platform !== "win32"
+
+/* process.kill as the OS answers it, bound as this module loads, so a stand-in a host installs later never takes a child's stop */
+const killProcess = /* @__PURE__ */ process.kill.bind(process)
+
+/** `signal` to `child` and, on POSIX, every process of its group */
+function signalTree(child: ChildProcess, signal: NodeJS.Signals): void {
+	const pid = child.pid
+	if (!GROUPS || pid === undefined) {
+		child.kill(signal)
+		return
+	}
+	try {
+		killProcess(-pid, signal)
+	} catch {
+		// reason: the group has ended already, which is what stopping it asks for
+	}
+}
 
 /**
  * The child's environment: the parent's without any PG* variable, so libpq-style defaults a shell
@@ -75,29 +109,118 @@ function installHint(cmd: string, peer: BinPeer | undefined): string {
 	return `; comb runs ${peer} on ${cmd}, and finds no ${cmd} on PATH: install ${RUNTIMES[cmd]}`
 }
 
-/** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
-function startFailure(cmd: string, error: NodeJS.ErrnoException, options: RunOptions): RunResult {
-	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
-	if (error.code === "ETIMEDOUT")
-		return { code: 124, stderr: `${cmd}: stopped after ${options.timeoutMs} ms`, stdout: "" }
+/** How a process the OS could not start is reported: POSIX shell codes where they exist. */
+function startFailure(cmd: string, error: NodeJS.ErrnoException, peer: BinPeer | undefined): RunResult {
 	if (error.code === "ENOENT")
-		return { code: 127, stderr: `${cmd}: command not found${installHint(cmd, options.peer)}`, stdout: "" }
-	if (error.code === "ENOBUFS") return { code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" }
+		return { code: 127, stderr: `${cmd}: command not found${installHint(cmd, peer)}`, stdout: "" }
 	return { code: 126, stderr: `${cmd}: ${error.message}`, stdout: "" }
 }
 
-/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
-export const run: Run = (cmd, args, options = {}) => {
+/** A stream's bytes, kept up to `limit`; `over` once one more came */
+function collect(stream: NodeJS.ReadableStream, limit: number, over: () => void): () => string {
+	const chunks: Buffer[] = []
+	let size = 0
+	stream.on("data", (chunk: Buffer) => {
+		size += chunk.length
+		if (size > limit) return over()
+		chunks.push(chunk)
+	})
+	return () => Buffer.concat(chunks).toString("utf8")
+}
+
+/** How the child ended: its code, or 128 + the signal that stopped it, or the stop comb made (124 past timeoutMs, 1 past maxBuffer) */
+type Ending = { code: number | null; signal: NodeJS.Signals | null; stopped?: RunResult | undefined }
+
+/**
+ * The stops of `child`: each signals its group, and the first holds its end to killAfterMs, past
+ * which SIGKILL ends it; `ended` clears that and says what comb did when it came
+ */
+function stopsOf(child: ChildProcess, cmd: string, killAfterMs: number) {
+	let first: { signal: NodeJS.Signals; timer: NodeJS.Timeout } | undefined
+	let killed = false
+	return {
+		ended(): string | undefined {
+			clearTimeout(first?.timer)
+			return killed && first !== undefined
+				? `${cmd} did not end ${killAfterMs} ms after ${first.signal}: comb killed it with SIGKILL`
+				: undefined
+		},
+		stop(signal: NodeJS.Signals): void {
+			signalTree(child, signal)
+			first ??= {
+				signal,
+				timer: setTimeout(() => {
+					killed = true
+					signalTree(child, "SIGKILL")
+				}, killAfterMs),
+			}
+		},
+	}
+}
+
+/** `cmd` started, and the result of its end; the child is held so a signal to comb stops it first */
+function started(cmd: string, args: readonly string[], options: RunOptions): Promise<RunResult> {
 	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
 	const env = options.exactEnv === undefined ? childEnv(options.env) : { ...options.exactEnv }
-	const { cwd, input, timeoutMs: timeout } = options
-	const result = spawnSync(cmd, args, { cwd, encoding: "utf8", env, input, maxBuffer, timeout })
-	if (result.error !== undefined) return startFailure(cmd, result.error as NodeJS.ErrnoException, options)
-	const signal = result.signal === null ? 0 : 128 + constants.signals[result.signal]
+	const child = spawn(cmd, args, { cwd: options.cwd, detached: GROUPS, env, stdio: ["pipe", "pipe", "pipe"] })
+	const stops = stopsOf(child, cmd, options.killAfterMs ?? DEFAULT_KILL_AFTER_MS)
+	let stopped: RunResult | undefined
+	const stopFor = (result: RunResult) => {
+		stopped ??= result
+		stops.stop("SIGTERM")
+	}
+	const over = () => stopFor({ code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" })
+	const [stdout, stderr] = [collect(child.stdout, maxBuffer, over), collect(child.stderr, maxBuffer, over)]
+	const timer =
+		options.timeoutMs === undefined
+			? undefined
+			: setTimeout(
+					() => stopFor({ code: 124, stderr: `${cmd}: stopped after ${options.timeoutMs} ms`, stdout: "" }),
+					options.timeoutMs,
+				)
+	/* a child that ends without reading its input closes the pipe: what it did is the result, not the EPIPE */
+	child.stdin.on("error", () => undefined)
+	child.stdin.end(options.input)
+	const ended = new Promise<Ending | NodeJS.ErrnoException>((resolve) => {
+		child.on("error", resolve)
+		child.on("close", (code, signal) => resolve({ code, signal, stopped }))
+	})
+	/* a signal to comb goes on to the child, and comb waits for its end before it ends itself */
+	let forwarded = false
+	const release = hold(async (signal) => {
+		forwarded = true
+		stops.stop(signal)
+		await ended
+	})
+	return ended.then(async (end) => {
+		clearTimeout(timer)
+		release()
+		const killed = stops.ended()
+		/* a child a signal's step stopped: no caller reads its result, so the kill is said here; and its caller waits with every other, so it starts nothing next */
+		if (forwarded) {
+			if (killed !== undefined) process.stderr.write(`${killed}\n`)
+			await pastStop()
+		}
+		if (end instanceof Error) return startFailure(cmd, end, options.peer)
+		const result = resultOf(cmd, end, { stderr: stderr(), stdout: stdout() })
+		/* a killed child's stderr is never empty: it is the stop comb made, or it names the signal that ended it */
+		return killed === undefined ? result : { ...result, stderr: `${result.stderr}; ${killed}` }
+	})
+}
+
+/** The result of a child that ran and ended as `end` says */
+function resultOf(cmd: string, end: Ending, said: { stderr: string; stdout: string }): RunResult {
+	if (end.stopped !== undefined) return end.stopped
+	const signal = end.signal === null ? 0 : 128 + constants.signals[end.signal]
 	/* a process a signal stopped before it said anything would fail with an empty reason: name the signal */
-	const stderr =
-		result.signal !== null && result.stderr === "" ? `${cmd} was stopped by ${result.signal}` : result.stderr
-	return { code: result.status ?? signal, stderr, stdout: result.stdout }
+	const stderr = end.signal !== null && said.stderr === "" ? `${cmd} was stopped by ${end.signal}` : said.stderr
+	return { code: end.code ?? signal, stderr, stdout: said.stdout }
+}
+
+/** Runs `cmd` and reports how it ended; it never rejects for a failed command. Started while a signal stops comb, it waits with the rest. */
+export const run: Run = async (cmd, args, options = {}) => {
+	await pastStop()
+	return started(cmd, args, options)
 }
 
 /**
@@ -106,7 +229,7 @@ export const run: Run = (cmd, args, options = {}) => {
  */
 export const runPeer =
 	(exec: Run, bin: ProjectBin) =>
-	(args: readonly string[], options: RunOptions = {}): RunResult =>
+	(args: readonly string[], options: RunOptions = {}): Promise<RunResult> =>
 		exec(bin.runtime, [bin.bin, ...args], { ...asBun(bin, options), peer: bin.peer })
 
 /**

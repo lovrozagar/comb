@@ -68,7 +68,7 @@ async function history(
 }> {
 	const table = resolveBinding(read, target)
 	if (!writes) assertLocalExists(read, target)
-	const rows = readHistory(read, target, table)
+	const rows = await readHistory(read, target, table)
 	const { applied, appliedAt, drizzle: hashes, recorded } = rows
 	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
@@ -117,15 +117,17 @@ function wranglerError({ stderr, stdout }: { stderr: string; stdout: string }): 
  * that failed may have made no table. Once wrangler has run, a read that fails is a Refused that says so: which of
  * `names` committed is then unknown, its `unknown` (S3 of r20), and status reads it
  */
-function appliedAfter(
+async function appliedAfter(
 	target: D1Target,
 	read: ReadConfig,
 	{ names, ok, table }: { names: string[]; ok: boolean; table: string },
-): Set<string> {
+): Promise<Set<string>> {
 	try {
 		return ok
-			? new Set((executeAll(target.exec, target, [namesOf(table)])[0] as Rows).map((row) => String(row["name"])))
-			: readHistory(read, target, table).applied
+			? new Set(
+					((await executeAll(target.exec, target, [namesOf(table)]))[0] as Rows).map((row) => String(row["name"])),
+				)
+			: (await readHistory(read, target, table)).applied
 	} catch (error) {
 		throw new Refused(
 			`wrangler d1 migrations apply ${ok ? "ran" : "failed"}, then reading back what it recorded in ${table} failed: ${(error as Error).message}; comb migrate status says which of the files it applied`,
@@ -200,8 +202,8 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	await target.conn.batch([...settleStatements(settle, hasIntents), ...intentStatements(hashed)])
 	for (const name of names) options.print(`Apply: ${name}`)
 	const apply = ["d1", "migrations", "apply", target.name, ...target.flags]
-	const ran = runPeer(target.exec, target.wrangler)(apply, { input: "" })
-	const after = appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
+	const ran = await runPeer(target.exec, target.wrangler)(apply, { input: "" })
+	const after = await appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
 	const moved = await moveIntents(
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
@@ -229,7 +231,7 @@ async function baselineD1(
 	print: (line: string) => void,
 ): Promise<{ hashed: string[]; marked: string[] }> {
 	const table = resolveBinding(read, target)
-	const { applied, drizzle: hashes, recorded } = readHistory(read, target, table)
+	const { applied, drizzle: hashes, recorded } = await readHistory(read, target, table)
 	if (hashes === undefined) {
 		throw new Error(
 			`${target.name} has no ${DRIZZLE_HISTORY_TABLE} to copy from; baseline records only what a history shows was applied`,

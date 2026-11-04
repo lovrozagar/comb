@@ -29,7 +29,7 @@ const replayPgHistory = async (_target: unknown, { targetUser }: { targetUser: s
 const locatePeer = (peer: string): string => import.meta.resolve(peer)
 
 /* the Atlas comb is tested against, which a test's faked Atlas stands for: its version read spawns nothing */
-const readAtlasVersion = (): RunResult =>
+const readAtlasVersion = async (): Promise<RunResult> =>
 	ok("atlas version v1.3.0\nhttps://github.com/ariga/atlas/releases/tag/v1.3.0\n")
 
 /* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */

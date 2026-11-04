@@ -45,7 +45,7 @@ async function exec(url: string, sql: string): Promise<void> {
 /** Baseline the database at `url` against a history of one file, `history`; what it printed, or why it refused */
 async function baseline(url: string, devUrl: string, history: string) {
 	writeFileSync(join(dir, "20260101000000_init.sql"), history)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 	const out: string[] = []
 	const target = { devUrl, lockTimeout: "5s", schema: "public", url }
 	try {

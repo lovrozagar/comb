@@ -17,11 +17,11 @@ afterEach(() => {
 })
 
 /** Write `schema` as the tables file, generate DTOs from it, and return the dtos directory. */
-function generate(schema: string): string {
+async function generate(schema: string): Promise<string> {
 	const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 	fs.writeFileSync(tablesPath, schema)
 	const dtosDir = path.join(tmpDir, "dtos")
-	generateDtos(testContext(analyze(tablesPath), { cwd: tmpDir, tablesPath }), { output: dtosDir })
+	generateDtos(testContext(await analyze(tablesPath), { cwd: tmpDir, tablesPath }), { output: dtosDir })
 	return dtosDir
 }
 
@@ -49,11 +49,11 @@ export const user = createTable("user", {
 ])
 `
 
-const readUser = () => read(generate(basicSchema), "user")
+const readUser = async () => read(await generate(basicSchema), "user")
 
 describe("generateDtos — files and schemas", () => {
-	it("generates per-entity DTO files + shared file", () => {
-		const dtosDir = generate(basicSchema)
+	it("generates per-entity DTO files + shared file", async () => {
+		const dtosDir = await generate(basicSchema)
 
 		/* Shared file */
 		const sharedPath = path.join(dtosDir, "_shared", "index.gen.ts")
@@ -66,28 +66,28 @@ describe("generateDtos — files and schemas", () => {
 		expect(fs.existsSync(userPath)).toBe(true)
 	})
 
-	it("generates read, readPartial, create, update schemas", () => {
-		const { entity: content } = readUser()
+	it("generates read, readPartial, create, update schemas", async () => {
+		const { entity: content } = await readUser()
 		expect(content).toContain("userDtoReadSchema")
 		expect(content).toContain("userDtoReadPartialSchema")
 		expect(content).toContain("userDtoCreateSchema")
 		expect(content).toContain("userDtoUpdateSchema")
 	})
 
-	it("applies email validation with transforms on create/update", () => {
+	it("applies email validation with transforms on create/update", async () => {
 		/* Schemas may be in entity or shared file (deduped) */
-		const { all } = readUser()
+		const { all } = await readUser()
 		expect(all).toContain("z.email()")
 		expect(all).toContain(".trim()")
 		expect(all).toContain(".toLowerCase()")
 	})
 
-	it("applies max constraint to text fields", () => {
-		expect(readUser().all).toContain(".max(100)")
+	it("applies max constraint to text fields", async () => {
+		expect((await readUser()).all).toContain(".max(100)")
 	})
 
-	it("generates TypeScript type exports", () => {
-		const { entity: content } = readUser()
+	it("generates TypeScript type exports", async () => {
+		const { entity: content } = await readUser()
 		expect(content).toContain("export type UserDtoRead =")
 		expect(content).toContain("export type UserDtoCreate =")
 		expect(content).toContain("export type UserDtoUpdate =")
@@ -95,9 +95,9 @@ describe("generateDtos — files and schemas", () => {
 })
 
 describe("generateDtos — keys and tables", () => {
-	it("quotes a property key that is not an identifier (D6)", () => {
+	it("quotes a property key that is not an identifier (D6)", async () => {
 		const { entity } = read(
-			generate(`
+			await generate(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })
@@ -108,8 +108,8 @@ export const member = createTable("member", { id: c.id(), "display-name": c.text
 		expect(entity).not.toMatch(/^\tdisplay-name:/m)
 	})
 
-	it("handles multiple tables", () => {
-		const dtosDir = generate(`
+	it("handles multiple tables", async () => {
+		const dtosDir = await generate(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id(), name: c.text("name") })
@@ -122,22 +122,22 @@ export const post = createTable("post", { id: c.id(), title: c.text("title") })
 })
 
 describe("generateDtos — timestamps and optionality", () => {
-	it("generates timestamp spreads in shared file", () => {
-		const { shared } = readUser()
+	it("generates timestamp spreads in shared file", async () => {
+		const { shared } = await readUser()
 		expect(shared).toContain("timestampsCreatedUpdatedDeletedReadSnakeCase")
 		/* a create body takes no timestamp (F4) */
 		expect(shared).not.toContain("timestampsCreatedUpdatedDeletedCreateSnakeCase")
 	})
 
-	it("uses timestamp spreads in entity files", () => {
-		const { entity: content } = readUser()
+	it("uses timestamp spreads in entity files", async () => {
+		const { entity: content } = await readUser()
 		expect(content).toContain("...timestampsCreatedUpdatedDeletedReadSnakeCase")
 		/* Should NOT have individual timestamp fields since they're spread */
 		expect(content).not.toMatch(/\tcreated_at: timestampSchema/)
 	})
 
-	it("leaves the generated id out of the create schema, and makes nullable fields optional (D9)", () => {
-		const { entity: content } = readUser()
+	it("leaves the generated id out of the create schema, and makes nullable fields optional (D9)", async () => {
+		const { entity: content } = await readUser()
 		const createMatch = content.match(/userDtoCreateSchema[\s\S]*?^\}\)/m)
 		expect(createMatch).toBeTruthy()
 		const createBlock = createMatch?.[0] ?? ""
@@ -145,8 +145,8 @@ describe("generateDtos — timestamps and optionality", () => {
 		expect(createBlock).toContain("name: _")
 	})
 
-	it("makes all fields optional in update schema", () => {
-		const { entity: content, shared } = readUser()
+	it("makes all fields optional in update schema", async () => {
+		const { entity: content, shared } = await readUser()
 		const updateMatch = content.match(/userDtoUpdateSchema[\s\S]*?^\}\)/m)
 		expect(updateMatch).toBeTruthy()
 		const updateBlock = updateMatch?.[0] ?? ""
@@ -183,11 +183,11 @@ export const item = createTable("item", {
 })
 `
 
-const readItem = () => read(generate(metaSchema), "item")
+const readItem = async () => read(await generate(metaSchema), "item")
 
 describe("generateDtos — meta examples: shared", () => {
-	it("emits shared meta object in shared file", () => {
-		const { shared } = readItem()
+	it("emits shared meta object in shared file", async () => {
+		const { shared } = await readItem()
 		expect(shared).toContain("export const _m = {")
 		expect(shared).toContain('email: { examples: ["user@example.com"] }')
 		expect(shared).toContain('string: { examples: ["string"] }')
@@ -195,52 +195,52 @@ describe("generateDtos — meta examples: shared", () => {
 		expect(shared).toContain("timestamp: { examples: [1711468800000] }")
 	})
 
-	it("uses shared _m.timestamp in timestampSchema", () => {
-		expect(readItem().shared).toContain(".meta(_m.timestamp)")
+	it("uses shared _m.timestamp in timestampSchema", async () => {
+		expect((await readItem()).shared).toContain(".meta(_m.timestamp)")
 	})
 
-	it("imports _m from shared", () => {
-		const { entity } = readItem()
+	it("imports _m from shared", async () => {
+		const { entity } = await readItem()
 		expect(entity).toContain("_m")
 		expect(entity).toMatch(/import \{.*_m.*\} from "\.\.\/_shared\/index\.gen"/)
 	})
 })
 
 describe("generateDtos — meta examples: per field", () => {
-	it("includes email example in output", () => {
-		expect(readItem().all).toContain(".meta(_m.email)")
+	it("includes email example in output", async () => {
+		expect((await readItem()).all).toContain(".meta(_m.email)")
 	})
 
-	it("includes url example in output", () => {
-		expect(readItem().all).toContain(".meta(_m.url)")
+	it("includes url example in output", async () => {
+		expect((await readItem()).all).toContain(".meta(_m.url)")
 	})
 
-	it("adds prefixed ULID example on id fields (inline)", () => {
-		expect(readItem().entity).toMatch(/\.meta\(\{ examples: \["itm_\w+"\] \}\)/)
+	it("adds prefixed ULID example on id fields (inline)", async () => {
+		expect((await readItem()).entity).toMatch(/\.meta\(\{ examples: \["itm_\w+"\] \}\)/)
 	})
 
-	it("includes boolean example in output", () => {
-		expect(readItem().all).toContain(".meta(_m.boolean)")
+	it("includes boolean example in output", async () => {
+		expect((await readItem()).all).toContain(".meta(_m.boolean)")
 	})
 
-	it("includes first enum value as example", () => {
-		expect(readItem().all).toContain('.meta({ examples: ["admin"] })')
+	it("includes first enum value as example", async () => {
+		expect((await readItem()).all).toContain('.meta({ examples: ["admin"] })')
 	})
 
-	it("includes integer midpoint example", () => {
-		expect(readItem().all).toContain(".meta({ examples: [550] })")
+	it("includes integer midpoint example", async () => {
+		expect((await readItem()).all).toContain(".meta({ examples: [550] })")
 	})
 
-	it("includes real example in output", () => {
-		expect(readItem().all).toContain(".meta(_m.real)")
+	it("includes real example in output", async () => {
+		expect((await readItem()).all).toContain(".meta(_m.real)")
 	})
 
-	it("adds exact-length string example", () => {
-		expect(readItem().all).toContain('.meta({ examples: ["a1b2c3d4"] })')
+	it("adds exact-length string example", async () => {
+		expect((await readItem()).all).toContain('.meta({ examples: ["a1b2c3d4"] })')
 	})
 
-	it("includes generic string example in output", () => {
-		expect(readItem().all).toContain(".meta(_m.string)")
+	it("includes generic string example in output", async () => {
+		expect((await readItem()).all).toContain(".meta(_m.string)")
 	})
 })
 
@@ -270,8 +270,8 @@ export const gamma = createTable("gamma", {
 })
 `
 
-function generateDedup(): { alpha: string; beta: string; shared: string } {
-	const dtosDir = generate(dedupSchema)
+async function generateDedup(): Promise<{ alpha: string; beta: string; shared: string }> {
+	const dtosDir = await generate(dedupSchema)
 	return {
 		alpha: fs.readFileSync(path.join(dtosDir, "alpha", "index.gen.ts"), "utf-8"),
 		beta: fs.readFileSync(path.join(dtosDir, "beta", "index.gen.ts"), "utf-8"),
@@ -280,32 +280,32 @@ function generateDedup(): { alpha: string; beta: string; shared: string } {
 }
 
 describe("generateDtos — auto-dedup shared schemas", () => {
-	it("emits _z* constants in shared file for repeated schemas", () => {
-		const { shared } = generateDedup()
+	it("emits _z* constants in shared file for repeated schemas", async () => {
+		const { shared } = await generateDedup()
 		/* the reference's text rules, shared across the three tables, base type aliased */
 		expect(shared).toMatch(/export const _z_[0-9a-f]{8} = _str\b/)
 	})
 
-	it("entity files reference _z* instead of inline schemas", () => {
-		const { alpha } = generateDedup()
+	it("entity files reference _z* instead of inline schemas", async () => {
+		const { alpha } = await generateDedup()
 		/* owner_id uses its shared schema, not an inline z.string() */
 		expect(alpha).toMatch(/owner_id: _z_[0-9a-f]{8}/)
 	})
 
-	it("entity files import _z* constants from shared", () => {
-		const { alpha } = generateDedup()
+	it("entity files import _z* constants from shared", async () => {
+		const { alpha } = await generateDedup()
 		expect(alpha).toMatch(/import \{.*_z_[0-9a-f]{8}.*\} from "\.\.\/_shared\/index\.gen"/)
 	})
 
-	it("does not dedup schemas with unique per-table values", () => {
-		const { shared } = generateDedup()
+	it("does not dedup schemas with unique per-table values", async () => {
+		const { shared } = await generateDedup()
 		/* ID schemas with unique prefixes stay inline in entity files */
 		expect(shared).not.toContain("alp_")
 		expect(shared).not.toContain("bet_")
 	})
 
-	it("adds usage count comment to shared constants", () => {
-		const { shared } = generateDedup()
+	it("adds usage count comment to shared constants", async () => {
+		const { shared } = await generateDedup()
 		expect(shared).toMatch(/export const _z_[0-9a-f]{8} = .+ \/\* \d+x \*\//)
 	})
 })
@@ -320,10 +320,10 @@ export const author = createTable("author", { id: c.id("aut"), name: c.text("nam
 `
 
 describe("generateDtos — shared schema names (F35)", () => {
-	it("leave another table's DTO file unchanged when a column is added to one table", () => {
-		const before = read(generate(sharingTables("")), "book").entity
+	it("leave another table's DTO file unchanged when a column is added to one table", async () => {
+		const before = read(await generate(sharingTables("")), "book").entity
 		const after = read(
-			generate(sharingTables(', a: c.integer("a"), b: c.integer("b"), d: c.integer("d"), e: c.integer("e")')),
+			await generate(sharingTables(', a: c.integer("a"), b: c.integer("b"), d: c.integer("d"), e: c.integer("e")')),
 			"book",
 		).entity
 		expect(after).toBe(before)

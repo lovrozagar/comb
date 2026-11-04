@@ -64,7 +64,7 @@ describe("runCli", () => {
 		expect(advertised.length).toBeGreaterThan(5)
 		for (const flag of new Set(advertised)) {
 			if (flag === "--help" || flag === "-h" || flag === "--version") continue
-			const io = makeIo(dir, () => ({ code: 1, stderr: "stop", stdout: "" }))
+			const io = makeIo(dir, async () => ({ code: 1, stderr: "stop", stdout: "" }))
 			await runCli(["migrate", "apply", "core", flag, "x"], io)
 			await runCli(["codegen", flag, "x"], io)
 			expect(io.errors.join("\n"), flag).not.toMatch(new RegExp(`Unknown option: ${flag}(\\s|$)`))
@@ -189,7 +189,7 @@ const seam = (): never => {
 describe("runCli reads only the io it documents", () => {
 	it("runs Atlas's version through run, not through a seam an io happens to carry", async () => {
 		const calls: string[][] = []
-		const run: Run = (cmd, args) => {
+		const run: Run = async (cmd, args) => {
 			calls.push([cmd, ...args])
 			return { code: 127, stderr: "atlas: command not found", stdout: "" }
 		}

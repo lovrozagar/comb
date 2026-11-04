@@ -26,10 +26,10 @@ function readInspect(stdout: string): Inspected {
 }
 
 /** Refuses, with apply's baseline message, a database Atlas would call not clean; reads only */
-function refuseUnclean(options: { exec: Run; target: PgTarget }): void {
-	const { schemas = [] } = withAtlasEnv(options.target, { url: true }, (env) => {
+async function refuseUnclean(options: { exec: Run; target: PgTarget }): Promise<void> {
+	const { schemas = [] } = await withAtlasEnv(options.target, { url: true }, async (env) => {
 		const args = ["schema", "inspect", "--url", "env://url", "--format", "{{ json . }}", ...env.args]
-		const result = options.exec("atlas", args, { env: env.env })
+		const result = await options.exec("atlas", args, { env: env.env })
 		/* a failure's output is free text, scrubbed; a success's is JSON, parsed before anything is masked */
 		if (result.code !== 0)
 			throw new Error(

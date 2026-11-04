@@ -299,7 +299,7 @@ describe("migrate diff on Postgres: the drizzle export", () => {
 	})
 	afterEach(() => rmSync(work, { force: true, recursive: true }))
 
-	it("refuses a drizzle schema with an object outside the database's schema, on drizzle-kit's real export", () => {
+	it("refuses a drizzle schema with an object outside the database's schema, on drizzle-kit's real export", async () => {
 		writeFileSync(
 			join(work, "schema.ts"),
 			'import { integer, pgSchema, pgTable, uuid } from "drizzle-orm/pg-core"\nexport const auth = pgSchema("auth")\nexport const users = auth.table("users", { id: uuid("id").primaryKey() })\nexport const post = pgTable("post", { id: integer("id").primaryKey(), author: uuid("author").references(() => users.id) })\n',
@@ -308,9 +308,9 @@ describe("migrate diff on Postgres: the drizzle export", () => {
 			join(work, "drizzle.config.ts"),
 			`export default { dialect: "postgresql", schema: "${join(work, "schema.ts")}" }\n`,
 		)
-		expect(() =>
+		await expect(
 			exportDrizzleSchema({ configPath: join(work, "drizzle.config.ts"), cwd: core, dialect: "postgres" }),
-		).toThrow('the drizzle schema creates objects outside schema "public"')
+		).rejects.toThrow('the drizzle schema creates objects outside schema "public"')
 	}, 60_000)
 })
 

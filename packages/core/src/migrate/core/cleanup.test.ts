@@ -1,9 +1,11 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { deliver, settle, stubKill, until, worker } from "../../../tests/support/signals.ts"
 import {
 	hold,
+	pastStop,
 	hostMark,
 	isAlive,
 	onceCleanup,
@@ -166,31 +168,6 @@ describe("scratchDir", () => {
 	})
 })
 
-const settle = () => new Promise((resolve) => setImmediate(resolve))
-/* the worker's own listeners, read as the file is collected, before any test arms comb's */
-const worker = { SIGINT: process.listeners("SIGINT"), SIGTERM: process.listeners("SIGTERM") }
-/* the signal as Node delivers it to this process, with only comb listening */
-async function deliver(signal: "SIGINT" | "SIGTERM"): Promise<void> {
-	const others = worker[signal]
-	for (const listener of others) process.off(signal, listener)
-	try {
-		process.emit(signal, signal)
-		await settle()
-	} finally {
-		for (const listener of others) process.on(signal, listener)
-	}
-}
-
-/* process.kill stubbed for each test of a describe, so the end a signal asks for is read, not done */
-function stubKill(): { calls: () => unknown[][] } {
-	let kill: MockInstance<typeof process.kill> | undefined
-	beforeEach(() => {
-		kill = vi.spyOn(process, "kill").mockImplementation(() => true)
-	})
-	afterEach(() => kill?.mockRestore())
-	return { calls: () => kill?.mock.calls ?? [] }
-}
-
 describe("a signal (S2, KC5 and PA4 of r22)", () => {
 	const kill = stubKill()
 
@@ -238,6 +215,133 @@ describe("a signal, on what comb holds and with a host listening", () => {
 			await settle()
 			release()
 			expect([step.mock.calls.length, host.mock.calls.length, kill.calls()]).toEqual([1, 1, []])
+		} finally {
+			process.off("SIGTERM", host)
+			for (const listener of worker.SIGTERM) process.on("SIGTERM", listener)
+		}
+	})
+})
+
+describe("a signal's steps, in order (PA4 of r22)", () => {
+	const kill = stubKill()
+
+	it("runs the steps last held first, each after the one before ends, as a child stops before what it used goes", async () => {
+		const order: string[] = []
+		const releases = [
+			hold(() => order.push("scratch")),
+			hold(async () => {
+				order.push("child stopping")
+				await settle()
+				order.push("child stopped")
+			}),
+		]
+		try {
+			await deliver("SIGTERM")
+			await until(() => kill.calls().length > 0, "the end")
+			expect(order).toEqual(["child stopping", "child stopped", "scratch"])
+		} finally {
+			for (const release of releases) release()
+		}
+	})
+
+	it("runs the next step past one that throws", async () => {
+		const after = vi.fn()
+		const releases = [hold(after), hold(() => Promise.reject(new Error("step")))]
+		try {
+			await deliver("SIGINT")
+			await until(() => kill.calls().length > 0, "the end")
+			expect([after.mock.calls, kill.calls()]).toEqual([[["SIGINT"]], [[process.pid, "SIGINT"]]])
+		} finally {
+			for (const release of releases) release()
+		}
+	})
+})
+
+describe("work a signal's stop holds (PA4 of r22)", () => {
+	stubKill()
+
+	it("lets work through at once with no stop running, and a step's own work through during one", async () => {
+		await pastStop()
+		const host = vi.fn()
+		process.on("SIGTERM", host)
+		for (const listener of worker.SIGTERM) process.off("SIGTERM", listener)
+		const order: string[] = []
+		try {
+			const release = hold(async () => {
+				await pastStop()
+				order.push("step's own work")
+				await settle()
+				order.push("step done")
+			})
+			try {
+				process.emit("SIGTERM", "SIGTERM")
+				await pastStop().then(() => order.push("work outside"))
+			} finally {
+				release()
+			}
+			/* a host that listens ends the process its own way: once the steps end, work outside goes on */
+			expect(order).toEqual(["step's own work", "step done", "work outside"])
+			await pastStop()
+		} finally {
+			process.off("SIGTERM", host)
+			for (const listener of worker.SIGTERM) process.on("SIGTERM", listener)
+		}
+	})
+})
+
+describe("a second signal while a stop's steps run (PA4 of r22)", () => {
+	const kill = stubKill()
+
+	it("ends the process once, after the first stop's steps end", async () => {
+		const { promise: stopped, resolve: stop } = Promise.withResolvers<void>()
+		const order: string[] = []
+		const release = hold(async () => {
+			order.push("step started")
+			await stopped
+			order.push("step done")
+		})
+		try {
+			await deliver("SIGTERM")
+			await deliver("SIGTERM")
+			order.push(`ends asked while the step runs: ${kill.calls().length}`)
+			stop()
+			await settle()
+			await settle()
+		} finally {
+			release()
+		}
+		/* a supervisor that sends SIGTERM twice must not end comb before the child it stops has ended */
+		expect([order, kill.calls()]).toEqual([
+			["step started", "ends asked while the step runs: 0", "step done"],
+			[[process.pid, "SIGTERM"]],
+		])
+	})
+
+	it("holds work outside until the first stop's steps end, with a host listening", async () => {
+		const { promise: stopped, resolve: stop } = Promise.withResolvers<void>()
+		const host = vi.fn()
+		process.on("SIGTERM", host)
+		for (const listener of worker.SIGTERM) process.off("SIGTERM", listener)
+		const order: string[] = []
+		try {
+			const release = hold(async () => {
+				order.push("step started")
+				await stopped
+				order.push("step done")
+			})
+			try {
+				process.emit("SIGTERM", "SIGTERM")
+				process.emit("SIGTERM", "SIGTERM")
+				const outside = pastStop().then(() => order.push("work outside"))
+				await settle()
+				order.push("both signals in")
+				stop()
+				await outside
+			} finally {
+				release()
+			}
+			expect([order, kill.calls()]).toEqual([["step started", "both signals in", "step done", "work outside"], []])
+			await pastStop()
 		} finally {
 			process.off("SIGTERM", host)
 			for (const listener of worker.SIGTERM) process.on("SIGTERM", listener)

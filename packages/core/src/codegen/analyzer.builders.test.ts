@@ -21,10 +21,10 @@ describe("analyzer: table builders", () => {
 		fs.rmSync(dir, { force: true, recursive: true })
 	})
 
-	function tablesOf(source: string): string[] {
+	async function tablesOf(source: string): Promise<string[]> {
 		const file = path.join(dir, "db.test.tables.ts")
 		fs.writeFileSync(file, source)
-		return analyze(file).tables.map((table) => `${table.varName}:${table.sqlName}`)
+		return (await analyze(file)).tables.map((table) => `${table.varName}:${table.sqlName}`)
 	}
 
 	it.each([
@@ -37,17 +37,17 @@ describe("analyzer: table builders", () => {
 			'import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"',
 			"createTable",
 		],
-	])("finds a table declared with %s", (_name, imports, builder) => {
-		expect(tablesOf(`${imports}\nexport const post = ${builder}("posts", ${COLUMNS})\n`)).toEqual(["post:posts"])
+	])("finds a table declared with %s", async (_name, imports, builder) => {
+		expect(await tablesOf(`${imports}\nexport const post = ${builder}("posts", ${COLUMNS})\n`)).toEqual(["post:posts"])
 	})
 
-	it("ignores calls that are not a table builder", () => {
+	it("ignores calls that are not a table builder", async () => {
 		const source = `import { text } from "drizzle-orm/sqlite-core"
 const define = (name: string, cols: object) => ({ cols, name })
 const make = (name: string, cols: object) => ({ name, cols })
 export const a = make("a", ${COLUMNS})
 export const b = define("b", ${COLUMNS})
 `
-		expect(tablesOf(source)).toEqual([])
+		expect(await tablesOf(source)).toEqual([])
 	})
 })

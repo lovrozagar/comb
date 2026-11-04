@@ -29,9 +29,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** The migrations directory holding `files`, hashed */
-function migrations(files: Record<string, string>): void {
+async function migrations(files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** The options applyWithAtlas takes for the database at `url`, collecting what it prints */
@@ -78,11 +78,13 @@ const revisions = async (url: string) =>
 			"SELECT version FROM atlas_schema_revisions.atlas_schema_revisions ORDER BY 1",
 		)
 	).map((r) => r.version)
+const UNTRACKED = /^the database has objects but no migration history/
+const NOTE = "/* a /* b */ DELETE FROM users WHERE email <> '*/ SELECT 1 --';\n"
 
 /** An approval that, while it is asked, rewrites the file it approves and rehashes the directory */
 async function editWhileAsking(m: ParsedMigration) {
 	writeFileSync(join(dir, m.filename), 'CREATE TABLE "swapped" ("id" integer);\n')
-	hashDir(run, dir)
+	await hashDir(run, dir)
 	return approveMigration(m, { target: "core", yes: false })
 }
 
@@ -90,7 +92,7 @@ describe("migrate apply on Postgres", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("applies, keeps the history out of public, and applies nothing the second time", async () => {
 			await withScratchDb(async (url) => {
-				migrations({
+				await migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n',
 					"20260102000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n',
 				})
@@ -105,12 +107,12 @@ describe("migrate apply on Postgres", () => {
 
 		it("refuses an unsafe file without approval, and applies it with the file's own approval", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
-				migrations({ "20260102000000_drop.sql": 'DROP TABLE "a";\n' })
+				await migrations({ "20260102000000_drop.sql": 'DROP TABLE "a";\n' })
 				await expect(applyWithAtlas(command(url))).rejects.toThrow("20260102000000_drop.sql is unsafe")
 				expect(await tables(url)).toEqual(["a"])
-				migrations({ "20260102000000_drop.sql": '-- comb:allow-unsafe: a is retired\nDROP TABLE "a";\n' })
+				await migrations({ "20260102000000_drop.sql": '-- comb:allow-unsafe: a is retired\nDROP TABLE "a";\n' })
 				const approved = command(url)
 				await applyWithAtlas(approved)
 				expect(approved.out).toContain("Approved in 20260102000000_drop.sql: a is retired")
@@ -120,7 +122,7 @@ describe("migrate apply on Postgres", () => {
 
 		it("rolls back a failing file and keeps the ones before it", async () => {
 			await withScratchDb(async (url) => {
-				migrations({
+				await migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n',
 					"20260102000000_bad.sql": 'CREATE TABLE "b" ("id" integer);\nALTER TABLE "nope" ADD COLUMN "x" integer;\n',
 				})
@@ -139,12 +141,12 @@ describe("migrate apply on Postgres rates what Postgres runs", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses a DELETE a nested leading comment hides, without approval, applying nothing", async () => {
 			await withScratchDb(async (url) => {
-				migrations({
+				await migrations({
 					"20260101000000_a.sql":
 						"CREATE TABLE users (id int PRIMARY KEY, email text);\nINSERT INTO users VALUES (1, 'a'), (2, 'b');\n",
 				})
 				await applyWithAtlas(command(url))
-				migrations({ "20260102000000_note.sql": "/* a /* b */ DELETE FROM users WHERE email <> '*/ SELECT 1 --';\n" })
+				await migrations({ "20260102000000_note.sql": NOTE })
 				await expect(applyWithAtlas(command(url))).rejects.toThrow("20260102000000_note.sql is unsafe")
 				expect(await revisions(url)).toEqual(["20260101000000"])
 			})
@@ -156,7 +158,7 @@ describe("migrate check on Postgres reads only (M11)", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("checks a database with no history without creating Atlas's revisions schema on it", async () => {
 			await withDevAndTarget(async (dev, url) => {
-				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				await migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
 				const schemas = () =>
 					query<{ nspname: string }>(
 						url,
@@ -173,17 +175,15 @@ describe("migrate check on Postgres reads only (M11)", () => {
 		/* M79: Atlas's inspect of a table with a primary key holds "primary_key", which the scrubber took for a secret */
 		it("refuses a database whose table has a primary key, with the baseline message, not a parse error", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				await migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
 				await query(url, "CREATE TABLE legacy (id integer PRIMARY KEY, api_token text)")
-				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
-					/^the database has objects but no migration history/,
-				)
+				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(UNTRACKED)
 			})
 		}, 60_000)
 
 		it("refuses a database with tables but no history, as apply does, and still writes nothing", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				await migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
 				await query(url, "CREATE TABLE legacy (id integer); INSERT INTO legacy VALUES (1)")
 				const refusal =
 					"the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline"
@@ -202,9 +202,9 @@ describe("migrate apply on Postgres: history it refuses", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses a file added before one already applied", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260102000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
+				await migrations({ "20260102000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
-				migrations({ "20260101000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
+				await migrations({ "20260101000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(
 					"20260101000000_late.sql is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
 				)
@@ -214,7 +214,7 @@ describe("migrate apply on Postgres: history it refuses", () => {
 
 		it("applies what it classified, not an edit made while it was asking", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url, { approve: editWhileAsking }))
 				expect(await tables(url)).toEqual(["a"])
 			})
@@ -226,13 +226,13 @@ describe("migrate apply on Postgres: locks", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("fails an ALTER that waits behind a reader after lockTimeout, instead of queueing every query", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
 				const reader = new pg.Client({ connectionString: url })
 				await reader.connect()
 				try {
 					await reader.query('BEGIN; SELECT * FROM "a"')
-					migrations({ "20260102000000_alter.sql": 'ALTER TABLE "a" ADD COLUMN "x" integer;\n' })
+					await migrations({ "20260102000000_alter.sql": 'ALTER TABLE "a" ADD COLUMN "x" integer;\n' })
 					const started = Date.now()
 					await expect(applyWithAtlas(command(url, { lockTimeout: "1s" }))).rejects.toThrow("lock timeout")
 					expect(Date.now() - started).toBeLessThan(15_000)
@@ -245,7 +245,7 @@ describe("migrate apply on Postgres: locks", () => {
 
 		it("says another apply is running when Atlas cannot take its lock", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				const other = new pg.Client({ connectionString: url })
 				await other.connect()
 				try {
@@ -267,7 +267,7 @@ describe("migrate baseline and status on Postgres", () => {
 		it("records the history of a database set up by hand, runs none of it, and then has nothing to apply", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(url, 'CREATE TABLE "a" ("id" integer)')
-				migrations({
+				await migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n',
 					"20260102000000_b.sql": "SELECT 1;\n",
 				})
@@ -280,7 +280,7 @@ describe("migrate baseline and status on Postgres", () => {
 					"the database already records 2 migrations",
 				)
 				const status = command(url)
-				statusWithAtlas(status)
+				await statusWithAtlas(status)
 				expect(status.out).toEqual(["Applied: 2 (up to 20260102000000)", "Pending: none"])
 			})
 		}, 60_000)
@@ -288,7 +288,7 @@ describe("migrate baseline and status on Postgres", () => {
 		it("records nothing on a database whose tables are not the ones the migrations leave", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(url, 'CREATE TABLE "a" ("id" integer, "extra" text)')
-				migrations({
+				await migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\nCREATE VIEW "v" AS (select 1 as x);\n',
 				})
 				await expect(baselineWithAtlas(command(url, { devUrl }))).rejects.toThrow(
@@ -301,22 +301,22 @@ describe("migrate baseline and status on Postgres", () => {
 		/* G1-a: Atlas's status skips the clean check on public, where its revisions table is missing; comb makes it */
 		it("refuses a public schema holding a table and no history in status, as apply does, and lists an empty one's files", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
+				await migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
 				const status = command(url)
-				statusWithAtlas(status)
+				await statusWithAtlas(status)
 				expect(status.out).toEqual(["Applied: 0", "Pending: 20260101000000_t.sql"])
 				await query(url, 'CREATE TABLE "legacy" ("id" integer)')
-				expect(() => statusWithAtlas(command(url))).toThrow(/^the database has objects but no migration history/)
+				await expect(statusWithAtlas(command(url))).rejects.toThrow(UNTRACKED)
 			})
 		}, 60_000)
 
 		it("refuses an applied file that was edited and rehashed since, in status and apply (M17)", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
-				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" bigint);\n' })
+				await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" bigint);\n' })
 				const refusal = /^20260101000000_a\.sql was applied, then edited/
-				expect(() => statusWithAtlas(command(url))).toThrow(refusal)
+				await expect(statusWithAtlas(command(url))).rejects.toThrow(refusal)
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 			})
 		}, 60_000)
@@ -336,7 +336,7 @@ describe("migrate baseline on Postgres: a history Atlas splits as it runs it", (
 					rmSync(dir, { force: true, recursive: true })
 					mkdirSync(dir)
 					await query(url, history.replace(/^-- atlas:delimiter GO\n\n/, "").replaceAll("\nGO\n", ";\n"))
-					migrations({ "20260101000000_a.sql": history })
+					await migrations({ "20260101000000_a.sql": history })
 					expect(await baselineWithAtlas(command(url, { devUrl }))).toEqual(["20260101000000_a.sql"])
 					expect(await revisions(url)).toEqual(["20260101000000"])
 				})
@@ -351,10 +351,10 @@ describe("migrate apply on Postgres: one history per schema", () => {
 		it("applies one directory to two schemas of a database, each recorded apart", async () => {
 			await withScratchDb(async (url) => {
 				await query(url, "CREATE SCHEMA tenant_a; CREATE SCHEMA tenant_b")
-				migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
+				await migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
 				expect(await applyWithAtlas(command(url, { schema: "tenant_a" }))).toEqual(["20260101000000_t.sql"])
 				const pending = command(url, { schema: "tenant_b" })
-				statusWithAtlas(pending)
+				await statusWithAtlas(pending)
 				expect(pending.out).toEqual(["Applied: 0", "Pending: 20260101000000_t.sql"])
 				expect(await applyWithAtlas(command(url, { schema: "tenant_b" }))).toEqual(["20260101000000_t.sql"])
 				const where = await query<{ schemaname: string }>(
@@ -377,7 +377,7 @@ describe("migrate apply on Postgres: one history per schema", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(devUrl, "CREATE SCHEMA tenant_a")
 				await query(url, 'CREATE SCHEMA tenant_a; CREATE TABLE tenant_a."t" ("id" integer)')
-				migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
+				await migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
 				const refusal =
 					/no shared history row matches this directory's files \(a database made by hand, or another directory's history\)[\s\S]*comb migrate baseline/
 				await expect(applyWithAtlas(command(url, { schema: "tenant_a" }))).rejects.toThrow(refusal)
@@ -398,7 +398,7 @@ describe("migrate apply on Postgres: files comb rewrites keep their directives",
 	describe("with Atlas v1.3.0", () => {
 		it("applies each rewritten txmode none file statement by statement, so CREATE INDEX CONCURRENTLY runs", async () => {
 			await withScratchDb(async (url) => {
-				migrations({
+				await migrations({
 					"20260101000000_a.sql":
 						'CREATE TYPE "s" AS ENUM (\'a\');\nCREATE TABLE "a" ("x" integer, "y" integer, "z" integer, "s" "s");\n',
 				})
@@ -412,7 +412,7 @@ describe("migrate apply on Postgres: files comb rewrites keep their directives",
 					`-- atlas:txmode none\n\nALTER TYPE "s" ADD VALUE 'b';\nCREATE INDEX CONCURRENTLY "a_y" ON "a" ("y");\n`,
 				)
 				for (const [name, sql] of split) writeFileSync(join(dir, name), sql)
-				migrations({})
+				await migrations({})
 				const applied = await applyWithAtlas(command(url, { approve: approveWithYes }))
 				expect(applied).toHaveLength(3)
 				const indexes = await query<{ indexname: string }>(
@@ -437,7 +437,7 @@ describe("migrate check on Postgres under a configured schema", () => {
 		it("refuses a write to a table whose trigger the history named with the schema", async () => {
 			await withDevAndTarget(async (dev, url) => {
 				await query(url, "CREATE SCHEMA app")
-				migrations({
+				await migrations({
 					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
 CREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;
 CREATE TABLE users (id int);
@@ -447,7 +447,7 @@ CREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION wipe();
 				expect(await applyWithAtlas(command(url, { approve: approveAll, schema: "app" }))).toEqual([
 					"20260101000000_t.sql",
 				])
-				migrations({ "20260102000000_seed.sql": "INSERT INTO users VALUES (1);\n" })
+				await migrations({ "20260102000000_seed.sql": "INSERT INTO users VALUES (1);\n" })
 				await expect(
 					applyWithAtlas({ ...command(url, { devUrl: dev, schema: "app" }), checkOnly: true }),
 				).rejects.toThrow(/20260102000000_seed\.sql is unsafe/)
@@ -461,9 +461,9 @@ describe("migrate check on Postgres: DDL in any spelling", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses a column dropped with no space after the quoted table name", async () => {
 			await withDevAndTarget(async (dev, url) => {
-				migrations({ "20260101000000_t.sql": "CREATE TABLE users (id int PRIMARY KEY, email text);\n" })
+				await migrations({ "20260101000000_t.sql": "CREATE TABLE users (id int PRIMARY KEY, email text);\n" })
 				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
-				migrations({ "20260102000000_drop.sql": 'ALTER TABLE "users"DROP COLUMN email;\n' })
+				await migrations({ "20260102000000_drop.sql": 'ALTER TABLE "users"DROP COLUMN email;\n' })
 				await expect(applyWithAtlas({ ...command(url, { devUrl: dev }), checkOnly: true })).rejects.toThrow(
 					/20260102000000_drop\.sql is unsafe/,
 				)
@@ -477,7 +477,7 @@ describe("migrate check on Postgres: a write through a view", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses an insert through a view over a table whose trigger the history made", async () => {
 			await withDevAndTarget(async (dev, url) => {
-				migrations({
+				await migrations({
 					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
 CREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;
 CREATE TABLE users (id int, email text);
@@ -486,7 +486,7 @@ CREATE VIEW v AS SELECT * FROM users;
 `,
 				})
 				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
-				migrations({ "20260102000000_seed.sql": "INSERT INTO v VALUES (1, 'admin@x');\n" })
+				await migrations({ "20260102000000_seed.sql": "INSERT INTO v VALUES (1, 'admin@x');\n" })
 				await expect(applyWithAtlas({ ...command(url, { devUrl: dev }), checkOnly: true })).rejects.toThrow(
 					/20260102000000_seed\.sql is unsafe/,
 				)

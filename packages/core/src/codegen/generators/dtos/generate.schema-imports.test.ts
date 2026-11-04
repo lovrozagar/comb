@@ -45,7 +45,7 @@ beforeAll(async () => {
 	}
 	const tablesPath = path.join(dir, "db.test.tables.ts")
 	fs.writeFileSync(tablesPath, TABLES)
-	generateDtos(testContext(analyze(tablesPath), { cwd: dir, tablesPath }), { output: path.join(dir, "dtos") })
+	generateDtos(testContext(await analyze(tablesPath), { cwd: dir, tablesPath }), { output: path.join(dir, "dtos") })
 	account = (await import(path.join(dir, "dtos", "account", "index.gen.ts"))) as Record<string, z.ZodType>
 }, 60_000)
 afterAll(() => fs.rmSync(dir, { force: true, recursive: true }))

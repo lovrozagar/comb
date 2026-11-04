@@ -21,7 +21,7 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 /** atlas: hash writes nothing; schema diff keeps the database's DDL it was handed and answers `stdout` */
 function atlas(stdout: string, code = 0, notice = ""): Run & { live: string[] } {
 	const live: string[] = []
-	const run: Run = (_cmd, args) => {
+	const run: Run = async (_cmd, args) => {
 		const from = args[args.indexOf("--from") + 1] as string
 		if (args[0] === "schema" && from.startsWith("file://")) live.push(readFileSync(from.replace("file://", ""), "utf8"))
 		if (args[0] !== "schema") return { code: 0, stderr: "", stdout: "" }
@@ -59,17 +59,19 @@ const target = (password: string) => ({
 })
 
 describe("refuseDrift: the Postgres database against its replayed history", () => {
-	it("finds a synced database synced whatever its password spells, and prints a difference scrubbed", () => {
+	it("finds a synced database synced whatever its password spells, and prints a difference scrubbed", async () => {
 		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
 		for (const password of ["synced", "are", "changes"]) {
 			const exec = atlas("Schemas are synced, no changes to be made.\n")
-			expect(() => refuseDrift({ exec, target: target(password) }, join(dir, "m"))).not.toThrow()
+			await expect(refuseDrift({ exec, target: target(password) }, join(dir, "m"))).resolves.toEqual([])
 		}
 		/* what Atlas says as it succeeds comes back, scrubbed, for baseline to warn with (plan 14's 5.4) */
 		const said = atlas("Schemas are synced, no changes to be made.\n", 0, "Skipped triggers on synced\n")
-		expect(refuseDrift({ exec: said, target: target("synced") }, join(dir, "m"))).toEqual(["Skipped triggers on ***"])
+		expect(await refuseDrift({ exec: said, target: target("synced") }, join(dir, "m"))).toEqual([
+			"Skipped triggers on ***",
+		])
 		const drifted = atlas('-- Modify "a" table: synced\nALTER TABLE "a" ADD COLUMN "x" int;\n')
-		expect(() => refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).toThrow(
+		await expect(refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).rejects.toThrow(
 			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',
 		)
 	})
@@ -77,16 +79,16 @@ describe("refuseDrift: the Postgres database against its replayed history", () =
 
 /* KC5 of r22b: the replayable history is a scratch of its own, gone when writing it fails as when the diff ends */
 /** atlas refusing to hash a directory, and answering anything else with nothing */
-const hashRefused: Run = (_cmd, args) =>
+const hashRefused: Run = async (_cmd, args) =>
 	args[1] === "hash" ? { code: 1, stderr: "hash refused", stdout: "" } : { code: 0, stderr: "", stdout: "" }
 
 describe("refuseDrift's replayable history", () => {
-	it("leaves nothing in the temp directory when hashing it fails", () => {
+	it("leaves nothing in the temp directory when hashing it fails", async () => {
 		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
 		const tmp = mkdtempSync(join(dir, "tmp-"))
 		vi.stubEnv("TMPDIR", tmp)
 		try {
-			expect(() => refuseDrift({ exec: hashRefused, target: target("p") }, join(dir, "m"))).toThrow(
+			await expect(refuseDrift({ exec: hashRefused, target: target("p") }, join(dir, "m"))).rejects.toThrow(
 				"atlas migrate hash failed: hash refused",
 			)
 			expect(readdirSync(tmp)).toEqual([])
@@ -296,7 +298,7 @@ describe("sqliteDrift on a libsql target", () => {
 		}
 		const conn = libsqlConnection()
 		const history: string[] = []
-		const run: Run = (_cmd, args) => {
+		const run: Run = async (_cmd, args) => {
 			const to = args[args.indexOf("--to") + 1] as string
 			if (args[0] === "schema")
 				for (const name of Object.keys(files)) history.push(readFileSync(join(to.replace("file://", ""), name), "utf8"))

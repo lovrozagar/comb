@@ -9,7 +9,7 @@ const BASELINE =
 /** Atlas answering every call with `answer`, recording the arguments and the URL it was given */
 function atlas(answer: RunResult) {
 	const calls: Array<{ args: readonly string[]; url: string | undefined }> = []
-	const exec: Run = (_cmd, args, options) => {
+	const exec: Run = async (_cmd, args, options) => {
 		calls.push({ args, url: options?.env?.["COMB_ATLAS_URL"] })
 		return answer
 	}
@@ -18,10 +18,10 @@ function atlas(answer: RunResult) {
 const inspected = (body: unknown): RunResult => ({ code: 0, stderr: "", stdout: JSON.stringify(body) })
 
 describe("refuseUnclean", () => {
-	it("passes a schema with no table, or one whose views and functions Atlas does not inspect", () => {
+	it("passes a schema with no table, or one whose views and functions Atlas does not inspect", async () => {
 		for (const body of [{}, { schemas: [{ name: "app" }] }, { schemas: [{ name: "app", tables: [] }] }]) {
 			const fake = atlas(inspected(body))
-			expect(() => refuseUnclean({ exec: fake.exec, target: TARGET })).not.toThrow()
+			await expect(refuseUnclean({ exec: fake.exec, target: TARGET })).resolves.toBeUndefined()
 			expect(fake.calls[0]?.args.slice(0, 6)).toEqual([
 				"schema",
 				"inspect",
@@ -34,31 +34,31 @@ describe("refuseUnclean", () => {
 		}
 	})
 
-	it("refuses a schema holding a table with apply's baseline message", () => {
+	it("refuses a schema holding a table with apply's baseline message", async () => {
 		const fake = atlas(inspected({ schemas: [{ name: "app", tables: [{ name: "legacy" }] }] }))
-		expect(() => refuseUnclean({ exec: fake.exec, target: TARGET })).toThrow(BASELINE)
+		await expect(refuseUnclean({ exec: fake.exec, target: TARGET })).rejects.toThrow(BASELINE)
 	})
 
 	/* M79: Atlas's inspect of a table with a primary key, read as Atlas wrote it */
-	it("refuses a schema whose table has a primary key and a token column with the baseline message, not a parse error", () => {
+	it("refuses a schema whose table has a primary key and a token column with the baseline message, not a parse error", async () => {
 		const table = { columns: [{ name: "api_token" }], name: "t", primary_key: { parts: [{ column: "id" }] } }
 		const fake = atlas(inspected({ schemas: [{ name: "app", tables: [table] }] }))
-		expect(() => refuseUnclean({ exec: fake.exec, target: TARGET })).toThrow(BASELINE)
+		await expect(refuseUnclean({ exec: fake.exec, target: TARGET })).rejects.toThrow(BASELINE)
 	})
 
 	/* M79: parsed as Atlas wrote it and never scrubbed, so a password that spells a key changes nothing it reads */
-	it("reads Atlas's JSON as written, so a password that spells a key changes nothing it reads", () => {
+	it("reads Atlas's JSON as written, so a password that spells a key changes nothing it reads", async () => {
 		const keyword = { ...TARGET, url: "postgres://app:tables@db/app" }
 		const table = atlas(inspected({ schemas: [{ name: "app", tables: [{ name: "tables" }] }] }))
-		expect(() => refuseUnclean({ exec: table.exec, target: keyword })).toThrow(BASELINE)
+		await expect(refuseUnclean({ exec: table.exec, target: keyword })).rejects.toThrow(BASELINE)
 		expect(() => readInspect("{ S3cret")).toThrow(/^unexpected output from atlas schema inspect$/)
 	})
 
-	it("says what Atlas said when the inspect fails, scrubbed of the password", () => {
+	it("says what Atlas said when the inspect fails, scrubbed of the password", async () => {
 		const fake = atlas({ code: 1, stderr: "Error: dial postgres://app:S3cret@db/app: refused", stdout: "" })
-		const thrown = (() => {
+		const thrown = await (async () => {
 			try {
-				refuseUnclean({ exec: fake.exec, target: TARGET })
+				await refuseUnclean({ exec: fake.exec, target: TARGET })
 			} catch (error) {
 				return (error as Error).message
 			}

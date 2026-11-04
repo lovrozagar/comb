@@ -36,7 +36,7 @@ export type CliDeps = {
     /** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
     locatePeer?: ((peer: string) => string) | undefined;
     /** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
-    readAtlasVersion?: (() => RunResult) | undefined;
+    readAtlasVersion?: (() => Promise<RunResult>) | undefined;
 };
 /** The io a command runs on, with the seams runCliWith was given */
 export type CliContext = CliIo & CliDeps;
@@ -127,15 +127,17 @@ export type RunOptions = {
     peer?: BinPeer | undefined;
     /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
     timeoutMs?: number | undefined;
+    /** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
+    killAfterMs?: number | undefined;
 };
-export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
-/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>;
+/** Runs `cmd` and reports how it ended; it never rejects for a failed command. Started while a signal stops comb, it waits with the rest. */
 export declare const run: Run;
 /**
  * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
  * holds, the one comb checked (K1 of r22), never a name looked up on PATH
  */
-export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
+export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 
 // migrate/core/pg-live-types.d.ts
 /** The shape of a Postgres baseline's catalog read (pg-live-objects.ts), apart so the CLI's io names it without its code. */

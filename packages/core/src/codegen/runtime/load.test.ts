@@ -31,7 +31,7 @@ function fakeRun(
 	{ result, stderr = "", timedOut = false }: { result?: unknown; stderr?: string; timedOut?: boolean } = {},
 ): Run & { calls: Array<[string, string[], RunOptions]> } {
 	const calls: Array<[string, string[], RunOptions]> = []
-	const run = ((cmd: string, args: readonly string[], options: RunOptions = {}) => {
+	const run = (async (cmd: string, args: readonly string[], options: RunOptions = {}) => {
 		calls.push([cmd, [...args], options])
 		const job = jobOf(args)
 		if (result !== undefined) fs.writeFileSync(job.args.at(-1) as string, JSON.stringify(result))
@@ -65,11 +65,11 @@ const tables = () => path.join(dir, "db.core.tables.ts")
 
 describe("loadSnapshot", () => {
 	/* F58: the child runs where comb runs, as the app and drizzle-kit do, never beside the tables file */
-	it("runs the child with PATH, HOME and NODE_OPTIONS only, a minute to finish, in comb's working directory", () => {
+	it("runs the child with PATH, HOME and NODE_OPTIONS only, a minute to finish, in comb's working directory", async () => {
 		vi.stubEnv("COMB_SECRET", "parent")
 		vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=512")
 		const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
-		expect(loadSnapshot(tables(), { run, runtime: "bun" })).toEqual({ tables: [] })
+		expect(await loadSnapshot(tables(), { run, runtime: "bun" })).toEqual({ tables: [] })
 		const [cmd, args, options] = run.calls[0] as [string, string[], RunOptions]
 		expect(cmd).toBe(process.execPath)
 		expect(Object.keys(options.exactEnv ?? {}).sort()).toEqual(["HOME", "NODE_OPTIONS", "PATH"])
@@ -78,56 +78,58 @@ describe("loadSnapshot", () => {
 		expect(jobOf(args)).toMatchObject({ cmd: process.execPath, timeoutMs: LOAD_TIMEOUT_MS })
 		expect(LOAD_TIMEOUT_MS).toBe(60_000)
 		const given = fakeRun(0, { result: { snapshot: { tables: [] } } })
-		loadSnapshot(tables(), { cwd: "/srv/app", run: given, runtime: "bun" })
+		await loadSnapshot(tables(), { cwd: "/srv/app", run: given, runtime: "bun" })
 		expect(given.calls[0]?.[2]).toMatchObject({ cwd: "/srv/app" })
 	})
 
-	it("leaves out a variable the parent does not have", () => {
+	it("leaves out a variable the parent does not have", async () => {
 		vi.stubEnv("NODE_OPTIONS", undefined)
 		const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
-		loadSnapshot(tables(), { run, runtime: "node" })
+		await loadSnapshot(tables(), { run, runtime: "node" })
 		expect(Object.keys(run.calls[0]?.[2].exactEnv ?? {})).not.toContain("NODE_OPTIONS")
 	})
 
-	it("names the file for a load past the timeout, an error the child reports, and a child that wrote nothing", () => {
+	it("names the file for a load past the timeout, an error the child reports, and a child that wrote nothing", async () => {
 		/* the supervisor's status file says so, whatever code it exits with; codegen's stopping it says so too */
-		expect(() => loadSnapshot(tables(), { run: fakeRun(124, { timedOut: true }) })).toThrow(
+		await expect(loadSnapshot(tables(), { run: fakeRun(124, { timedOut: true }) })).rejects.toThrow(
 			`comb timed out after 60 s loading ${tables()}`,
 		)
-		expect(() => loadSnapshot(tables(), { run: fakeRun(124) })).toThrow(`comb timed out after 60 s loading ${tables()}`)
-		expect(() => loadSnapshot(tables(), { run: fakeRun(0, { result: { error: "t.x: bad" } }) })).toThrow(
+		await expect(loadSnapshot(tables(), { run: fakeRun(124) })).rejects.toThrow(
+			`comb timed out after 60 s loading ${tables()}`,
+		)
+		await expect(loadSnapshot(tables(), { run: fakeRun(0, { result: { error: "t.x: bad" } }) })).rejects.toThrow(
 			`comb could not load ${tables()}: t.x: bad`,
 		)
-		expect(() => loadSnapshot(tables(), { run: fakeRun(1, { stderr: "boom\n" }) })).toThrow(
+		await expect(loadSnapshot(tables(), { run: fakeRun(1, { stderr: "boom\n" }) })).rejects.toThrow(
 			`comb could not load ${tables()}: boom`,
 		)
-		expect(() => loadSnapshot(tables(), { run: fakeRun(139) })).toThrow(
+		await expect(loadSnapshot(tables(), { run: fakeRun(139) })).rejects.toThrow(
 			`comb could not load ${tables()}: the loader exited 139`,
 		)
 	})
 
-	it("loads for real in a child on the runtime the tests run on, removing its scratch directory", () => {
+	it("loads for real in a child on the runtime the tests run on, removing its scratch directory", async () => {
 		fs.writeFileSync(
 			tables(),
 			`import { sqliteTable } from "drizzle-orm/sqlite-core"\nimport { c } from "@lovrozagar/comb/sqlite/columns"\nexport const note = sqliteTable("note", { id: c.id("not") })\n`,
 		)
 		const scratch: string[] = []
-		const run: Run = (cmd, args, options) => {
+		const run: Run = async (cmd, args, options) => {
 			scratch.push(path.dirname(jobOf(args).status))
 			return realRun(cmd, args, options)
 		}
-		expect(loadSnapshot(tables(), { run }).tables.map((table) => table.exportName)).toEqual(["note"])
+		expect((await loadSnapshot(tables(), { run })).tables.map((table) => table.exportName)).toEqual(["note"])
 		expect(scratch[0]?.startsWith(path.join(os.tmpdir(), "comb-codegen-"))).toBe(true)
 		expect(fs.existsSync(scratch[0] as string)).toBe(false)
 	})
 })
 
 describe("loadSnapshot on bun", () => {
-	it("runs the child the bun way when codegen runs on bun", () => {
+	it("runs the child the bun way when codegen runs on bun", async () => {
 		Object.defineProperty(process.versions, "bun", { configurable: true, value: "1.4.3" })
 		try {
 			const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
-			loadSnapshot(path.join(dir, "db.core.tables.ts"), { run })
+			await loadSnapshot(path.join(dir, "db.core.tables.ts"), { run })
 			const args = run.calls[0]?.[1] as string[]
 			expect(args.slice(0, 2)).toEqual(["--no-env-file", "-e"])
 			expect(jobOf(args).args.slice(0, 2)).toEqual(["--no-env-file", "-e"])
@@ -142,13 +144,13 @@ describe("loadSnapshot on bun", () => {
 describe("loadSnapshot on a module that holds the event loop open", () => {
 	/* told by what happens, not by a clock: a child that waited for the timer would run out the
 	   loader's timeout, which reads as a timeout, and a timer that fired would leave its file */
-	it("reads the snapshot without waiting for the module's timer", () => {
+	it("reads the snapshot without waiting for the module's timer", async () => {
 		const fired = path.join(dir, "timer-fired")
 		fs.writeFileSync(
 			tables(),
 			`import { writeFileSync } from "node:fs"\nsetInterval(() => writeFileSync(${JSON.stringify(fired)}, "x"), 600_000)\nexport {}\n`,
 		)
-		expect(loadSnapshot(tables(), { run: realRun, timeoutMs: 30_000 })).toEqual({ tables: [] })
+		expect(await loadSnapshot(tables(), { run: realRun, timeoutMs: 30_000 })).toEqual({ tables: [] })
 		expect(fs.existsSync(fired)).toBe(false)
 	}, 60_000)
 })
@@ -190,7 +192,7 @@ async function pidsOf(): Promise<{ grandchild: number; loader: number }> {
  */
 describe("loadSnapshot on a module stuck in a synchronous loop, with a process of its own", () => {
 	it("times out, naming the file and the time, and leaves neither the loader nor its grandchild", async () => {
-		expect(() => loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 10_000 })).toThrow(
+		await expect(loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 10_000 })).rejects.toThrow(
 			`comb timed out after 10 s loading ${tables()}`,
 		)
 		const { grandchild, loader } = await pidsOf()
@@ -218,14 +220,14 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 
 /* F44 of the 0.13.0 round: a seeder the tables module imports only on demand never runs at codegen */
 describe("loadSnapshot on a tables module that imports a seeder on demand", () => {
-	it("loads the tables module without running the seeder", () => {
+	it("loads the tables module without running the seeder", async () => {
 		const ran = path.join(dir, "seeded")
 		fs.writeFileSync(
 			path.join(dir, "seed.ts"),
 			`import fs from "node:fs"\nfs.writeFileSync(${JSON.stringify(ran)}, "ran")\nexport {}\n`,
 		)
 		fs.writeFileSync(tables(), `export async function seed() {\n\tawait import("./seed.ts")\n}\n`)
-		expect(loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
+		expect(await loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
 		expect(fs.existsSync(ran)).toBe(false)
 	})
 })
@@ -233,22 +235,22 @@ describe("loadSnapshot on a tables module that imports a seeder on demand", () =
 /* F54 of the 0.13.0 round: a tables module in a CommonJS package loads under node as node runs it */
 describe("loadSnapshot on a tables module of a CommonJS package", () => {
 	/* no module syntax, so node runs it as CommonJS, and bun runs it either way */
-	it("loads one that reads __dirname and requires, as node and bun both run it", () => {
+	it("loads one that reads __dirname and requires, as node and bun both run it", async () => {
 		fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "app" }))
 		fs.writeFileSync(path.join(dir, "seed.json"), '{ "ok": true }\n')
 		fs.writeFileSync(
 			tables(),
 			`const path = require("node:path")\nconst seed: { ok: boolean } = require(path.join(__dirname, "seed.json"))\nif (!seed.ok) throw new Error("no seed")\n`,
 		)
-		expect(loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
+		expect(await loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
 	})
 })
 
 /* D4-4 of the area D round-four review: README item 2's refusal of analyze rests on loadSnapshot's own check */
 describe("loadSnapshot inside a Bun single-file executable", () => {
-	it("refuses before it starts a child", () => {
+	it("refuses before it starts a child", async () => {
 		const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
-		expect(() => loadSnapshot(tables(), { moduleUrl: "file:///$bunfs/root/app-exe", run })).toThrow(
+		await expect(loadSnapshot(tables(), { moduleUrl: "file:///$bunfs/root/app-exe", run })).rejects.toThrow(
 			"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
 		)
 		expect(run.calls).toEqual([])

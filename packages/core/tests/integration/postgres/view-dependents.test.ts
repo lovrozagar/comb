@@ -54,16 +54,16 @@ async function exec(url: string, sql: string): Promise<void> {
 }
 
 /** The history: the table, the view, and the dependent, in one file */
-function history(dependent: string): string {
+async function history(dependent: string): Promise<string> {
 	const sql = `${TABLE}${VIEW}${dependent}`
 	writeFileSync(join(dir, "20260101000000_init.sql"), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 	return sql
 }
 
 describe("migrate diff over a history with a dependent of a view (P4 of r19)", () => {
 	it.each(CASES)("finds the target in sync: %s", async (_, dependent) => {
-		history(dependent)
+		await history(dependent)
 		const target = dependent.includes("snap")
 			? `${TABLE}${VIEW}CREATE TABLE snap (id int PRIMARY KEY, row v);`
 			: `${TABLE}${VIEW}`
@@ -84,7 +84,7 @@ describe("migrate diff over a history with a dependent of a view (P4 of r19)", (
 
 describe("a Postgres baseline of a history with a dependent of a view (P4 of r19)", () => {
 	it.each(CASES)("baselines a target the files built: %s", async (_, dependent) => {
-		const sql = history(dependent)
+		const sql = await history(dependent)
 		const refused = await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
 				await exec(url, sql)

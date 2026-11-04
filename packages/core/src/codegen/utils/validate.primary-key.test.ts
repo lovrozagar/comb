@@ -6,7 +6,7 @@ import { analyze } from "../analyzer.ts"
 import { validateTables as validateAnalysis } from "./validate.ts"
 
 /** The validation of the tables file `file`, read at runtime as codegen reads it */
-const validateTables = (file: string) => validateAnalysis(analyze(file))
+const validateTables = async (file: string) => validateAnalysis(await analyze(file))
 
 describe("validateTables: primary keys the helpers declare", () => {
 	let dir: string
@@ -36,12 +36,12 @@ ${columns}
 	it.each([
 		["c.serialId()", "\tid: c.serialId(),"],
 		["c.id(prefix)", '\tid: c.id("tsk"),'],
-	])("sees the primary key %s declares", (_name, columns) => {
-		expect(validate(columns).warnings.filter((w) => w.includes("primary key"))).toEqual([])
+	])("sees the primary key %s declares", async (_name, columns) => {
+		expect((await validate(columns)).warnings.filter((w) => w.includes("primary key"))).toEqual([])
 	})
 
-	it("still warns when there is none", () => {
-		expect(validate('\tname: c.text("name"),').warnings.some((w) => w.includes("no primary key"))).toBe(true)
+	it("still warns when there is none", async () => {
+		expect((await validate('\tname: c.text("name"),')).warnings.some((w) => w.includes("no primary key"))).toBe(true)
 	})
 })
 
@@ -63,10 +63,12 @@ describe("validateTables: keys, tenants and tables it cannot read", () => {
 		return validateTables(file)
 	}
 
-	it("warns that a primary key under another property cannot be cursor-paginated, unless it is composite", () => {
-		const natural = validate(`export const country = sqliteTable("country", { code: c.text("code").primaryKey() })`)
+	it("warns that a primary key under another property cannot be cursor-paginated, unless it is composite", async () => {
+		const natural = await validate(
+			`export const country = sqliteTable("country", { code: c.text("code").primaryKey() })`,
+		)
 		expect(natural.warnings.join("\n")).toContain('country: primary key is declared as "code"')
-		const composite = validate(
+		const composite = await validate(
 			`export const m = sqliteTable("m", { a: c.text("a"), b: c.text("b") }, (t) => [primaryKey({ columns: [t.a, t.b] })])\nimport { primaryKey } from "drizzle-orm/sqlite-core"`,
 		)
 		expect(composite.warnings).toEqual([
@@ -74,8 +76,8 @@ describe("validateTables: keys, tenants and tables it cannot read", () => {
 		])
 	})
 
-	it("rejects two tenant columns on one table", () => {
-		const result = validate(`export const t = sqliteTable("t", {
+	it("rejects two tenant columns on one table", async () => {
+		const result = await validate(`export const t = sqliteTable("t", {
 	id: c.id("ttt"),
 	org_id: c.ref("org_id", { tenant: true }),
 	team_id: c.ref("team_id", { tenant: true }),
@@ -85,25 +87,25 @@ describe("validateTables: keys, tenants and tables it cannot read", () => {
 		])
 	})
 
-	it("refuses a table whose schema the generated DTOs could not import, as the module exports it nowhere", () => {
-		expect(() =>
+	it("refuses a table whose schema the generated DTOs could not import, as the module exports it nowhere", async () => {
+		await expect(
 			validate(`import * as z from "zod"
 const hidden = z.object({})
 export const t = sqliteTable("t", { id: c.id("ttt"), prefs: c.json("prefs", hidden) })`),
-		).toThrow("t.prefs: no module of the project exports the schema its c.json is given")
+		).rejects.toThrow("t.prefs: no module of the project exports the schema its c.json is given")
 	})
 
-	it("refuses a module that declares one name twice, which does not load", () => {
-		expect(() =>
+	it("refuses a module that declares one name twice, which does not load", async () => {
+		await expect(
 			validate(
 				`export const t = sqliteTable("a", { id: c.id("aaa") })\nexport const t = sqliteTable("b", { id: c.id("bbb") })`,
 			),
-		).toThrow("comb could not load")
+		).rejects.toThrow("comb could not load")
 	})
 })
 
 describe("validateTables: composite keys (D2)", () => {
-	it("warns that a table with a composite primary key publishes no entity stamp", () => {
+	it("warns that a table with a composite primary key publishes no entity stamp", async () => {
 		const dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-validate-composite-"))
 		try {
 			const file = path.join(dir, "db.test.tables.ts")
@@ -111,7 +113,7 @@ describe("validateTables: composite keys (D2)", () => {
 				file,
 				`import { sqliteTable } from "drizzle-orm/sqlite-core"\nimport { c } from "@lovrozagar/comb/sqlite/columns"\nexport const m = sqliteTable("m", { a: c.text("a"), b: c.text("b") }, (t) => [primaryKey({ columns: [t.a, t.b] })])\nimport { primaryKey } from "drizzle-orm/sqlite-core"`,
 			)
-			expect(validateTables(file).warnings).toEqual([
+			expect((await validateTables(file)).warnings).toEqual([
 				"m: composite primary key, so no entity stamp is published (docs/meta-contract.md §6.4)",
 			])
 		} finally {

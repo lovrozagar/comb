@@ -117,7 +117,7 @@ async function proveOnD1(
 		const child = new URL("./d1-engine-child.mjs", import.meta.url).href
 		const shim = join(dir, "proof.mjs")
 		writeFileSync(shim, SHIM)
-		const ran = exec(bin.runtime, [shim, child, input, output], { peer: bin.peer })
+		const ran = await exec(bin.runtime, [shim, child, input, output], { peer: bin.peer })
 		if (!existsSync(output))
 			throw new Error(
 				`check could not prove the pending files on D1's engine: the proof on ${bin.runtime} ended with code ${ran.code} and no answer: ${ran.stderr.trim() || "it printed nothing"}`,

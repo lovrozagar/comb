@@ -20,7 +20,7 @@ type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefi
 /** A runner that records each call and answers from `script`, in order. */
 function fakeRun(...script: Array<RunResult | ((call: Call) => RunResult)>): Run & { calls: Call[] } {
 	const calls: Call[] = []
-	const fake = (cmd: string, args: readonly string[], options?: RunOptions) => {
+	const fake = async (cmd: string, args: readonly string[], options?: RunOptions) => {
 		const call = { args, cmd, options }
 		calls.push(call)
 		const next = script.shift()
@@ -41,23 +41,23 @@ const fileArg = (args: readonly string[], flag: string) => {
 const diffWith = (result: RunResult) =>
 	generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run: fakeRun(result), toSchema: "" })
 describe("atlas availability", () => {
-	it("checkAtlasInstalled is true when `atlas version` exits 0", () => {
+	it("checkAtlasInstalled is true when `atlas version` exits 0", async () => {
 		const run = fakeRun(ok("atlas version v1.3.0"))
-		expect(checkAtlasInstalled(run)).toBe(true)
+		expect(await checkAtlasInstalled(run)).toBe(true)
 		expect(run.calls.map((c) => [c.cmd, ...c.args])).toEqual([["atlas", "version"]])
 	})
 
-	it("checkAtlasInstalled is false when atlas is missing or fails", () => {
-		expect(checkAtlasInstalled(fakeRun(fail("atlas: command not found", 127)))).toBe(false)
-		expect(checkAtlasInstalled(fakeRun(fail("boom")))).toBe(false)
+	it("checkAtlasInstalled is false when atlas is missing or fails", async () => {
+		expect(await checkAtlasInstalled(fakeRun(fail("atlas: command not found", 127)))).toBe(false)
+		expect(await checkAtlasInstalled(fakeRun(fail("boom")))).toBe(false)
 	})
 
-	it("getAtlasVersion reads the version, or null", () => {
-		expect(getAtlasVersion(fakeRun(ok("atlas version v1.3.0-6539f2704b5d\nhttps://github.com/ariga/atlas")))).toBe(
-			"v1.3.0",
-		)
-		expect(getAtlasVersion(fakeRun(ok("no version here")))).toBeNull()
-		expect(getAtlasVersion(fakeRun(fail("atlas: command not found", 127)))).toBeNull()
+	it("getAtlasVersion reads the version, or null", async () => {
+		expect(
+			await getAtlasVersion(fakeRun(ok("atlas version v1.3.0-6539f2704b5d\nhttps://github.com/ariga/atlas"))),
+		).toBe("v1.3.0")
+		expect(await getAtlasVersion(fakeRun(ok("no version here")))).toBeNull()
+		expect(await getAtlasVersion(fakeRun(fail("atlas: command not found", 127)))).toBeNull()
 	})
 })
 
@@ -139,11 +139,11 @@ describe("generateSchemaDiff on Postgres", () => {
 })
 
 describe("exportDrizzleSchema", () => {
-	it("runs drizzle-kit export in cwd and strips PRAGMAs and boolean defaults for SQLite", () => {
+	it("runs drizzle-kit export in cwd and strips PRAGMAs and boolean defaults for SQLite", async () => {
 		const run = fakeRun(
 			ok("PRAGMA foreign_keys=OFF;\nCREATE TABLE t (a integer DEFAULT true, b integer DEFAULT false);"),
 		)
-		expect(exportWith(KIT, { cwd: "/work", dialect: "sqlite", run })).toBe(
+		expect(await exportWith(KIT, { cwd: "/work", dialect: "sqlite", run })).toBe(
 			"CREATE TABLE t (a integer DEFAULT 1, b integer DEFAULT 0);",
 		)
 		expect(run.calls).toEqual([
@@ -152,30 +152,30 @@ describe("exportDrizzleSchema", () => {
 	})
 
 	/* K1 of r22: the drizzle-kit the project at cwd holds, its bin as its package.json names it, on the runtime running comb (AD5) */
-	it("runs the drizzle-kit the project at cwd holds, and refuses a cwd that holds none", () => {
+	it("runs the drizzle-kit the project at cwd holds, and refuses a cwd that holds none", async () => {
 		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
-		expect(exportDrizzleSchema({ cwd: import.meta.dirname, dialect: "sqlite", run })).toBe(
+		expect(await exportDrizzleSchema({ cwd: import.meta.dirname, dialect: "sqlite", run })).toBe(
 			"CREATE TABLE t (a integer);",
 		)
 		expect(run.calls[0]?.cmd).toBe(process.execPath)
 		expect(run.calls[0]?.args[0]).toMatch(/\/drizzle-kit\/bin\.cjs$/)
-		expect(() => exportDrizzleSchema({ cwd: tmpdir(), dialect: "sqlite", run })).toThrow(
+		await expect(exportDrizzleSchema({ cwd: tmpdir(), dialect: "sqlite", run })).rejects.toThrow(
 			`comb needs drizzle-kit (${OPTIONAL_PEER_RANGES["drizzle-kit"]}) to export the drizzle schema for comb migrate diff`,
 		)
 	})
 
-	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
+	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", async () => {
 		const run = fakeRun(ok("CREATE TABLE `a` (\n\t`id` text PRIMARY KEY\n);\n"))
-		expect(exportWith(KIT, { cwd: "/w", dialect: "sqlite", run })).toBe(
+		expect(await exportWith(KIT, { cwd: "/w", dialect: "sqlite", run })).toBe(
 			"CREATE TABLE `a` (\n\t`id` text NOT NULL PRIMARY KEY\n);\n",
 		)
 	})
 
-	it("returns Postgres output as is and throws stderr on failure", () => {
-		expect(exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
+	it("returns Postgres output as is and throws stderr on failure", async () => {
+		expect(await exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
 			"PRAGMA x;\nDEFAULT true",
 		)
-		expect(() => exportWith(KIT, { cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
+		await expect(exportWith(KIT, { cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).rejects.toThrow(
 			new Error("drizzle-kit export failed: no config"),
 		)
 	})
@@ -183,41 +183,41 @@ describe("exportDrizzleSchema", () => {
 
 describe("exportDrizzleSchema's drizzle config", () => {
 	/* D2-14 of the area D round-two review: drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
-	it("refuses a JSON drizzle config when comb runs on Node, before drizzle-kit runs, and exports it on Bun", () => {
+	it("refuses a JSON drizzle config when comb runs on Node, before drizzle-kit runs, and exports it on Bun", async () => {
 		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
 		const options = { configPath: "/w/drizzle.config.json", cwd: import.meta.dirname, dialect: "sqlite" as const, run }
-		onBun(undefined, () =>
-			expect(() => exportDrizzleSchema(options)).toThrow(
+		await onBun(undefined, () =>
+			expect(exportDrizzleSchema(options)).rejects.toThrow(
 				new Error(
 					"/w/drizzle.config.json is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun",
 				),
 			),
 		)
 		expect(run.calls).toEqual([])
-		expect(onBun("1.3.0", () => exportDrizzleSchema(options))).toBe("CREATE TABLE t (a integer);")
+		expect(await onBun("1.3.0", () => exportDrizzleSchema(options))).toBe("CREATE TABLE t (a integer);")
 		expect(run.calls[0]?.args.slice(1)).toEqual(["export", "--config", "/w/drizzle.config.json"])
 	})
 
 	/* D3-2 of the area D round-three review: with no configPath, drizzle-kit looks up drizzle.config.ts, .js, then .json in cwd */
-	it("refuses the JSON config drizzle-kit's own lookup finds when comb runs on Node, and exports it on Bun", () => {
+	it("refuses the JSON config drizzle-kit's own lookup finds when comb runs on Node, and exports it on Bun", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "comb-dk-lookup-"))
 		try {
 			writeFileSync(join(cwd, "drizzle.config.json"), "{}")
 			const run = fakeRun(ok("CREATE TABLE t (a integer);"), ok("CREATE TABLE t (a integer);"))
 			const options = { cwd, dialect: "sqlite" as const, run }
-			onBun(undefined, () =>
-				expect(() => exportWith(KIT, options)).toThrow(
+			await onBun(undefined, () =>
+				expect(exportWith(KIT, options)).rejects.toThrow(
 					new Error(
 						`${join(cwd, "drizzle.config.json")} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
 					),
 				),
 			)
 			expect(run.calls).toEqual([])
-			expect(onBun("1.3.0", () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
+			expect(await onBun("1.3.0", () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
 			expect(run.calls[0]?.args.slice(1)).toEqual(["export"])
 			/* a drizzle.config.ts beside it is the one drizzle-kit loads */
 			writeFileSync(join(cwd, "drizzle.config.ts"), "export default {}")
-			expect(onBun(undefined, () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
+			expect(await onBun(undefined, () => exportWith(KIT, options))).toBe("CREATE TABLE t (a integer);")
 		} finally {
 			rmSync(cwd, { force: true, recursive: true })
 		}
@@ -229,32 +229,32 @@ const pg = (stdout: string, schema?: string) =>
 	exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok(stdout)), schema })
 
 describe("exportDrizzleSchema on Postgres", () => {
-	it("passes the database's drizzle config to drizzle-kit", () => {
+	it("passes the database's drizzle config to drizzle-kit", async () => {
 		const run = fakeRun(ok(""))
-		exportWith(KIT, { configPath: "/w/drizzle.pg.ts", cwd: "/w", dialect: "postgres", run })
+		await exportWith(KIT, { configPath: "/w/drizzle.pg.ts", cwd: "/w", dialect: "postgres", run })
 		expect(run.calls[0]?.args).toEqual(["/kit/bin.cjs", "export", "--config", "/w/drizzle.pg.ts"])
 	})
 
-	it("drops the CREATE SCHEMA of the schema comb migrates, which Atlas's scoped run already has", () => {
-		expect(pg('CREATE SCHEMA "app";\nCREATE TABLE "app"."post" ("id" integer);\n', "app")).toBe(
+	it("drops the CREATE SCHEMA of the schema comb migrates, which Atlas's scoped run already has", async () => {
+		expect(await pg('CREATE SCHEMA "app";\nCREATE TABLE "app"."post" ("id" integer);\n', "app")).toBe(
 			'CREATE TABLE "app"."post" ("id" integer);\n',
 		)
 	})
 
-	it("refuses an object in another schema, naming it", () => {
-		expect(() => pg('CREATE SCHEMA "auth";\nCREATE TABLE "auth"."users" ("id" integer);\n')).toThrow(
+	it("refuses an object in another schema, naming it", async () => {
+		await expect(pg('CREATE SCHEMA "auth";\nCREATE TABLE "auth"."users" ("id" integer);\n')).rejects.toThrow(
 			'the drizzle schema creates objects outside schema "public" (CREATE SCHEMA "auth"); comb migrates one schema per database',
 		)
-		expect(() => pg('CREATE SEQUENCE "public"."counter" START WITH 1;\n', "app")).toThrow(
+		await expect(pg('CREATE SEQUENCE "public"."counter" START WITH 1;\n', "app")).rejects.toThrow(
 			'outside schema "app" (CREATE SEQUENCE "public"."counter" START WITH 1)',
 		)
-		expect(pg('CREATE SEQUENCE "public"."counter" START WITH 1;\nCREATE TABLE "post" ("id" integer);\n')).toContain(
-			"counter",
-		)
-		expect(() => pg('CREATE TABLE "post" ("u" uuid REFERENCES "auth"."users"("id"));\n')).toThrow(
+		expect(
+			await pg('CREATE SEQUENCE "public"."counter" START WITH 1;\nCREATE TABLE "post" ("id" integer);\n'),
+		).toContain("counter")
+		await expect(pg('CREATE TABLE "post" ("u" uuid REFERENCES "auth"."users"("id"));\n')).rejects.toThrow(
 			'outside schema "public"',
 		)
 		const view = `CREATE VIEW "published" AS (select "id" from "post" where "post"."status" = 'published');\n`
-		expect(pg(view)).toBe(view)
+		expect(await pg(view)).toBe(view)
 	})
 })

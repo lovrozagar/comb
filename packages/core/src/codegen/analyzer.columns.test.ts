@@ -16,7 +16,7 @@ describe("analyzer: column facts the helpers hide", () => {
 		fs.rmSync(dir, { force: true, recursive: true })
 	})
 
-	function fieldsOf(columns: string): FieldMeta[] {
+	async function fieldsOf(columns: string): Promise<FieldMeta[]> {
 		const file = path.join(dir, "db.test.tables.ts")
 		fs.writeFileSync(
 			file,
@@ -27,16 +27,16 @@ ${columns}
 })
 `,
 		)
-		return analyze(file).tables[0]?.fields ?? []
+		return (await analyze(file)).tables[0]?.fields ?? []
 	}
 
-	it("c.serialId() is the primary key, and so not null", () => {
-		const [id] = fieldsOf(`\tid: c.serialId(),`)
+	it("c.serialId() is the primary key, and so not null", async () => {
+		const [id] = await fieldsOf(`\tid: c.serialId(),`)
 		expect(id).toMatchObject({ isNotNull: true, isPrimaryKey: true, name: "id", sqlName: "id" })
 	})
 
-	it("c.id(prefix) is the primary key", () => {
-		const [id] = fieldsOf(`\tid: c.id("tsk"),`)
+	it("c.id(prefix) is the primary key", async () => {
+		const [id] = await fieldsOf(`\tid: c.id("tsk"),`)
 		expect(id).toMatchObject({ isNotNull: true, isPrimaryKey: true })
 	})
 })

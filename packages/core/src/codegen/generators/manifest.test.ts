@@ -49,51 +49,52 @@ function useTmpDir(prefix: string): () => string {
 /** A temp directory per test, and readers that analyze a schema written into it. */
 function manifestFixture() {
 	const tmpDir = useTmpDir("comb-manifest-")
-	const analyzed = (source = SCHEMA) => {
+	const analyzed = async (source = SCHEMA) => {
 		const fp = path.join(tmpDir(), "db.test.tables.ts")
 		fs.writeFileSync(fp, PRELUDE + source)
-		return analyze(fp)
+		return await analyze(fp)
 	}
-	const manifestOf = (source = SCHEMA) => {
-		const analysis = analyzed(source)
+	const manifestOf = async (source = SCHEMA) => {
+		const analysis = await analyzed(source)
 		return buildManifest(analysis.tables, analysis.dbName, "sqlite")
 	}
-	const entity = (name: string, source = SCHEMA) => manifestOf(source).entities.find((e) => e.name === name)!
+	const entity = async (name: string, source = SCHEMA) =>
+		(await manifestOf(source)).entities.find((e) => e.name === name)!
 	return { analyzed, entity, manifestOf, tmpDir }
 }
 
 describe("entity manifest — entities and identity", () => {
 	const { analyzed, entity, manifestOf } = manifestFixture()
 
-	it("carries a version and the database name", () => {
-		const manifest = manifestOf()
+	it("carries a version and the database name", async () => {
+		const manifest = await manifestOf()
 		expect(manifest.v).toBe(MANIFEST_VERSION)
 		expect(manifest.database).toBe("test")
 	})
 
-	it("sorts entities by name, so declaration order does not churn the file", () => {
-		const names = manifestOf().entities.map((e) => e.name)
+	it("sorts entities by name, so declaration order does not churn the file", async () => {
+		const names = (await manifestOf()).entities.map((e) => e.name)
 		expect(names).toEqual([...names].sort())
 		expect(names).toEqual(["author", "org", "post", "post_tag"])
 	})
 
-	it("keeps declaration order between entities sharing a name", () => {
-		const [first] = analyzed().tables
+	it("keeps declaration order between entities sharing a name", async () => {
+		const [first] = (await analyzed()).tables
 		const names = buildManifest([first!, { ...first!, varName: "twin" }], "test", "sqlite").entities.map(
 			(e) => e.varName,
 		)
 		expect(names).toEqual([first!.varName, "twin"])
 	})
 
-	it("names the identity and the id prefix", () => {
-		const post = entity("post")
+	it("names the identity and the id prefix", async () => {
+		const post = await entity("post")
 		expect(post.identity).toBe("id")
 		expect(post.idPrefix).toBe("pst")
 		expect(post.varName).toBe("post")
 	})
 
-	it("reports a composite primary key as having no single identity", () => {
-		const join = entity("post_tag")
+	it("reports a composite primary key as having no single identity", async () => {
+		const join = await entity("post_tag")
 		expect(join.compositePrimaryKey).toBe(true)
 		expect(join.identity).toBeNull()
 	})
@@ -102,8 +103,8 @@ describe("entity manifest — entities and identity", () => {
 describe("entity manifest — columns", () => {
 	const { entity } = manifestFixture()
 
-	it("lists every column with the helper that declared it", () => {
-		const post = entity("post")
+	it("lists every column with the helper that declared it", async () => {
+		const post = await entity("post")
 		const byName = Object.fromEntries(post.columns.map((c) => [c.name, c]))
 
 		expect(Object.keys(byName).sort()).toEqual([
@@ -122,23 +123,23 @@ describe("entity manifest — columns", () => {
 		expect(byName["title"]!.primaryKey).toBe(false)
 	})
 
-	it("carries declared bounds and enum values", () => {
-		const byName = Object.fromEntries(entity("post").columns.map((c) => [c.name, c]))
+	it("carries declared bounds and enum values", async () => {
+		const byName = Object.fromEntries((await entity("post")).columns.map((c) => [c.name, c]))
 		expect(byName["title"]!.max).toBe(200)
 		expect(byName["title"]!.min).toBe(2)
 		expect(byName["status"]!.enumValues).toEqual(["draft", "published"])
 		expect(byName["title"]!.enumValues).toBeNull()
 	})
 
-	it("marks private columns", () => {
-		const byName = Object.fromEntries(entity("post").columns.map((c) => [c.name, c]))
+	it("marks private columns", async () => {
+		const byName = Object.fromEntries((await entity("post")).columns.map((c) => [c.name, c]))
 		expect(byName["secret"]!.private).toBe(true)
 		expect(byName["title"]!.private).toBe(false)
 	})
 
-	it("reports the declared tenant column", () => {
-		expect(entity("post").tenantColumn).toBe("org_id")
-		expect(entity("author").tenantColumn).toBeNull()
+	it("reports the declared tenant column", async () => {
+		expect((await entity("post")).tenantColumn).toBe("org_id")
+		expect((await entity("author")).tenantColumn).toBeNull()
 	})
 })
 
@@ -146,10 +147,11 @@ describe("entity manifest — columns", () => {
 describe("entity manifest — a text column's kind and transforms", () => {
 	const { entity } = manifestFixture()
 
-	it("publishes each format and the rewrites the DTO publishes, in order", () => {
+	it("publishes each format and the rewrites the DTO publishes, in order", async () => {
 		const body =
 			'email: c.text("email", { email: true }), site: c.text("site", { url: true }), pic: c.text("pic", { imageUri: true }), pass: c.text("pass", { password: true }), who: c.text("who", { name: true, trim: true }), tag: c.text("tag", { lowercase: true, trim: true }), n: c.integer("n")'
-		const columns = entity("item", `export const item = createTable("item", { id: c.id("itm"), ${body} })`).columns
+		const columns = (await entity("item", `export const item = createTable("item", { id: c.id("itm"), ${body} })`))
+			.columns
 		const facts = columns
 			.filter(({ name }) => name !== "id")
 			.map(({ name, textKind, transform }) => [name, textKind, transform])
@@ -168,12 +170,12 @@ describe("entity manifest — a text column's kind and transforms", () => {
 describe("entity manifest — agreement with the schema stamp", () => {
 	const { analyzed, entity } = manifestFixture()
 
-	it("agrees with the schema stamp on generated, immutable, softDelete and tenantColumn", () => {
+	it("agrees with the schema stamp on generated, immutable, softDelete and tenantColumn", async () => {
 		/* The manifest is a projection of the same derivation, not a second one. */
-		const analysis = analyzed()
+		const analysis = await analyzed()
 		const table = analysis.tables.find((t) => t.sqlName === "post")!
 		const meta = deriveEntityMeta(table)!
-		const post = entity("post")
+		const post = await entity("post")
 
 		expect(post.softDelete).toBe(meta.softDelete)
 		expect(post.tenantColumn).toBe(meta.tenantColumn)
@@ -184,11 +186,11 @@ describe("entity manifest — agreement with the schema stamp", () => {
 		expect(immutable.sort()).toEqual([...meta.immutable].sort())
 	})
 
-	it("agrees with the schema stamp on unique indexes both ways", () => {
-		const analysis = analyzed()
+	it("agrees with the schema stamp on unique indexes both ways", async () => {
+		const analysis = await analyzed()
 		const table = analysis.tables.find((t) => t.sqlName === "post")!
 		const meta = deriveEntityMeta(table)!
-		const post = entity("post")
+		const post = await entity("post")
 
 		expect(post.uniqueIndexes).toEqual(meta.uniqueIndexes)
 		for (const idx of meta.uniqueIndexes) {
@@ -200,35 +202,35 @@ describe("entity manifest — agreement with the schema stamp", () => {
 	})
 
 	/* C7 of r17: the manifest is a projection of the stamp, partial unique indexes included */
-	it("agrees with the schema stamp on partial unique indexes, a private one left out by both", () => {
+	it("agrees with the schema stamp on partial unique indexes, a private one left out by both", async () => {
 		const source = SCHEMA.replace(
 			`uniqueIndex("idx_post_title").on(t.title),`,
 			`uniqueIndex("idx_post_title").on(t.title),\n\tuniqueIndex("idx_post_title_live").on(t.title).where(sql\`\${t.deleted_at} IS NULL\`),\n\tuniqueIndex("idx_post_secret_live").on(t.secret).where(sql\`\${t.deleted_at} IS NULL\`),`,
 		)
-		const table = analyzed(source).tables.find((t) => t.sqlName === "post")!
+		const table = (await analyzed(source)).tables.find((t) => t.sqlName === "post")!
 		const meta = deriveEntityMeta(table)!
 		expect(meta.partialUniqueIndexes?.map((index) => index.name)).toEqual(["idx_post_title_live"])
-		expect(entity("post", source).partialUniqueIndexes).toEqual(meta.partialUniqueIndexes)
+		expect((await entity("post", source)).partialUniqueIndexes).toEqual(meta.partialUniqueIndexes)
 	})
 
-	it("leaves out a unique index over a private column, as the stamp does", () => {
+	it("leaves out a unique index over a private column, as the stamp does", async () => {
 		const source = SCHEMA.replace(
 			`uniqueIndex("idx_post_title").on(t.title),`,
 			`uniqueIndex("idx_post_title").on(t.title),\n\tuniqueIndex("idx_post_secret").on(t.secret),`,
 		)
-		const table = analyzed(source).tables.find((t) => t.sqlName === "post")!
+		const table = (await analyzed(source)).tables.find((t) => t.sqlName === "post")!
 		expect(table.uniqueIndexes.map((u) => u.name)).toContain("idx_post_secret")
 
-		expect(entity("post", source).uniqueIndexes).toEqual(deriveEntityMeta(table)!.uniqueIndexes)
-		expect(entity("post", source).uniqueIndexes.map((u) => u.name)).toEqual(["idx_post_title"])
+		expect((await entity("post", source)).uniqueIndexes).toEqual(deriveEntityMeta(table)!.uniqueIndexes)
+		expect((await entity("post", source)).uniqueIndexes.map((u) => u.name)).toEqual(["idx_post_title"])
 	})
 })
 
 describe("entity manifest — machines and relations", () => {
 	const { entity } = manifestFixture()
 
-	it("carries the full machine on the declaring column, including transitions", () => {
-		const post = entity(
+	it("carries the full machine on the declaring column, including transitions", async () => {
+		const post = await entity(
 			"job",
 			`
 export const job = createTable("job", {
@@ -250,8 +252,8 @@ export const job = createTable("job", {
 		expect(post.columns.find((c) => c.name === "id")!.states).toBeNull()
 	})
 
-	it("reports a machine without terminal states as an empty terminal list", () => {
-		const job = entity(
+	it("reports a machine without terminal states as an empty terminal list", async () => {
+		const job = await entity(
 			"job",
 			`export const job = createTable("job", { id: c.id("job"), status: c.enum("status", ["a", "b"], { initial: "a" }) })`,
 		)
@@ -262,16 +264,16 @@ export const job = createTable("job", {
 		})
 	})
 
-	it("reports a reference without referential actions as null actions", () => {
+	it("reports a reference without referential actions as null actions", async () => {
 		const source = `export const org = createTable("org", { id: c.id("org") })
 export const team = createTable("team", { id: c.id("tem"), org_id: c.ref("org_id").references(() => org.id) })`
-		expect(entity("team", source).relations).toEqual([
+		expect((await entity("team", source)).relations).toEqual([
 			{ column: "org_id", onDelete: null, onUpdate: null, refColumn: "id", table: "org" },
 		])
 	})
 
-	it("lists relations with their referential actions", () => {
-		const relations = entity("post").relations
+	it("lists relations with their referential actions", async () => {
+		const relations = (await entity("post")).relations
 		expect(relations).toEqual([
 			{ column: "org_id", onDelete: "cascade", onUpdate: null, refColumn: "id", table: "org" },
 			{ column: "author_id", onDelete: "set null", onUpdate: null, refColumn: "id", table: "author" },
@@ -283,12 +285,12 @@ describe("entity manifest — a composite foreign key", () => {
 	const { entity } = manifestFixture()
 
 	/* 4.20: a composite key is one key, each column paired by position, not independent pairs */
-	it("states a composite foreign key as one key on each of its columns' relations", () => {
+	it("states a composite foreign key as one key on each of its columns' relations", async () => {
 		const source = `import { foreignKey } from "drizzle-orm/sqlite-core"
 export const member = createTable("member", { org_id: c.text("org_id").notNull(), user_id: c.text("user_id").notNull() }, (t) => [primaryKey({ columns: [t.org_id, t.user_id] })])
 export const grant = createTable("grant", { id: c.id("grt"), org_id: c.text("org_id").notNull(), user_id: c.text("user_id").notNull() }, (t) => [foreignKey({ columns: [t.org_id, t.user_id], foreignColumns: [member.org_id, member.user_id] })])`
 		const key = { columns: ["org_id", "user_id"], refColumns: ["org_id", "user_id"] }
-		expect(entity("grant", source).relations).toEqual([
+		expect((await entity("grant", source)).relations).toEqual([
 			{ column: "org_id", key, onDelete: null, onUpdate: null, refColumn: "org_id", table: "member" },
 			{ column: "user_id", key, onDelete: null, onUpdate: null, refColumn: "user_id", table: "member" },
 		])
@@ -298,14 +300,14 @@ export const grant = createTable("grant", { id: c.id("grt"), org_id: c.text("org
 describe("entity manifest — constraints and JSON", () => {
 	const { entity, manifestOf } = manifestFixture()
 
-	it("carries unique indexes and check constraints", () => {
-		const post = entity("post")
+	it("carries unique indexes and check constraints", async () => {
+		const post = await entity("post")
 		expect(post.uniqueIndexes).toEqual([{ columns: ["title"], name: "idx_post_title" }])
 		expect(post.checkConstraints.map((c) => c.name)).toEqual(["post_status_enum"])
 	})
 
-	it("is JSON round-trippable — no undefined, no Map, no Set", () => {
-		const manifest = manifestOf()
+	it("is JSON round-trippable — no undefined, no Map, no Set", async () => {
+		const manifest = await manifestOf()
 		expect(JSON.parse(JSON.stringify(manifest))).toEqual(manifest)
 	})
 })
@@ -314,35 +316,35 @@ describe("entity manifest — written output", () => {
 	const { analyzed, tmpDir } = manifestFixture()
 	const outPath = () => path.join(tmpDir(), "db.test.manifest.gen.json")
 
-	function write(source = SCHEMA) {
-		const analysis = analyzed(source)
+	async function write(source = SCHEMA) {
+		const analysis = await analyzed(source)
 		generateManifest(testContext(analysis, { cwd: tmpDir() }), { output: outPath() })
 		return JSON.parse(fs.readFileSync(outPath(), "utf-8")) as Record<string, unknown>
 	}
 
-	it("writes valid JSON with a checksum header field", () => {
-		const written = write()
+	it("writes valid JSON with a checksum header field", async () => {
+		const written = await write()
 		expect(typeof written["_generated"]).toBe("string")
 		expect(written["_generated"]).toContain("comb checksum:")
 		expect(written["v"]).toBe(MANIFEST_VERSION)
 	})
 
-	it("is readable without parsing TypeScript", () => {
-		const written = write() as unknown as { entities: { name: string }[] }
+	it("is readable without parsing TypeScript", async () => {
+		const written = (await write()) as unknown as { entities: { name: string }[] }
 		expect(written.entities.map((e) => e.name)).toContain("post")
 	})
 
-	it("regenerates byte-identically for an unchanged schema", () => {
-		write()
+	it("regenerates byte-identically for an unchanged schema", async () => {
+		await write()
 		const first = fs.readFileSync(outPath(), "utf-8")
-		write()
+		await write()
 		expect(fs.readFileSync(outPath(), "utf-8")).toBe(first)
 	})
 
-	it("changes when the schema changes", () => {
-		write()
+	it("changes when the schema changes", async () => {
+		await write()
 		const before = fs.readFileSync(outPath(), "utf-8")
-		write(`${SCHEMA}\nexport const tag = createTable("tag", { id: c.id("tag") })`)
+		await write(`${SCHEMA}\nexport const tag = createTable("tag", { id: c.id("tag") })`)
 		expect(fs.readFileSync(outPath(), "utf-8")).not.toBe(before)
 	})
 })

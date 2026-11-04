@@ -66,7 +66,7 @@ function fake(answers: {
 	set?: RunResult
 	status: RunResult
 }): Run {
-	return (_cmd, args) => {
+	return async (_cmd, args) => {
 		if (args[1] === "hash") return hashed(args)
 		if (args[0] === "schema") return (args[1] === "inspect" ? answers.inspect : answers.schemaDiff) ?? failing
 		if (args[1] === "status") return answers.status

@@ -87,7 +87,7 @@ type LoadOptions = {
 }
 
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
-function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
+async function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Promise<Snapshot> {
 	const { moduleUrl = import.meta.url } = options
 	/* the child would rerun the app itself, as process.execPath is the app (D3-4 of the area D round-three review) */
 	refuseCompiled(
@@ -106,7 +106,7 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 		const status = path.join(dir, "status.json")
 		const timeoutMs = options.timeoutMs ?? LOAD_TIMEOUT_MS
 		const child = { args: childArgs(runtime, [path.resolve(tablesPath), result]), cmd: process.execPath }
-		const ran = (options.run ?? defaultRun)(
+		const ran = await (options.run ?? defaultRun)(
 			process.execPath,
 			supervisorArgs(runtime, { ...child, status, timeoutMs }),
 			{

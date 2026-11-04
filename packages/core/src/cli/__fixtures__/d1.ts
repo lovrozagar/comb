@@ -69,7 +69,7 @@ type AtlasAnswers = { schemaDiff?: RunResult | undefined }
 
 /** atlas: `migrate hash` writes the fake sum; `schema diff` answers `answers.schemaDiff`, synced by default */
 export function fakeAtlas(answers: AtlasAnswers = {}): Run {
-	return (_cmd, args) => {
+	return async (_cmd, args) => {
 		if (args[1] === "hash") {
 			writeSum((args[args.indexOf("--dir") + 1] as string).replace("file://", ""))
 			return ok()
@@ -118,7 +118,7 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 		}
 		return ok()
 	}
-	const run: Run = (spawned, argv, spawnOptions) => {
+	const run: Run = async (spawned, argv, spawnOptions) => {
 		if (isProof(argv, spawnOptions)) return spawn(spawned, argv, spawnOptions)
 		const [cmd, args] = asCalled(spawned, argv, spawnOptions?.peer)
 		calls.push([cmd, ...args])

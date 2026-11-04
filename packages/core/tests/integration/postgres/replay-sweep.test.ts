@@ -37,9 +37,9 @@ const UNSAFE = "-- comb:allow-unsafe: the test's history\n"
 const pause = pauses()
 
 /** The files, named in order and hashed, in `at` */
-function write(files: readonly string[], at = dir): void {
+async function write(files: readonly string[], at = dir): Promise<void> {
 	files.forEach((sql, i) => writeFileSync(join(at, `20260101${String(i).padStart(6, "0")}_f${i}.sql`), sql))
-	hashDir(run, at)
+	await hashDir(run, at)
 }
 
 /** A history that makes `made` and then waits, at most a minute, until the test lets `resume` go */
@@ -148,7 +148,7 @@ async function killedHard(
 	url: string,
 	{ made, resume }: { made: string; resume: string },
 ): Promise<string> {
-	write(paused(made, resume))
+	await write(paused(made, resume))
 	const child = childCheck(dev, url)
 	await untilRole(made)
 	await child.kill("SIGKILL")
@@ -170,7 +170,7 @@ describe("a check killed mid-replay", () => {
 			try {
 				await withScratchDb((dev) =>
 					withScratchDb(async (url) => {
-						write(paused(made, resume))
+						await write(paused(made, resume))
 						const child = childCheck(dev, url)
 						await untilRole(made)
 						await child.kill(signal)
@@ -213,7 +213,7 @@ describe("a check killed by SIGKILL mid-replay", () => {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
 					const left = await killedHard(dev, url, { made, resume })
-					write([`${UNSAFE}CREATE ROLE ${made};\n`])
+					await write([`${UNSAFE}CREATE ROLE ${made};\n`])
 					await withScratchDb((target) => applyWithAtlas(options(dev, target)))
 					expect(await holds(left)).toBe(false)
 				}),
@@ -273,7 +273,7 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 			try {
 				await withScratchDb((dev) =>
 					withScratchDb(async (url) => {
-						write([
+						await write([
 							`${UNSAFE}CREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nGRANT SELECT ON t TO ${made};\n`,
 							`${UNSAFE}${SLEEP};\n`,
 						])
@@ -284,7 +284,7 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 						await untilAwake()
 						/* the apply's own history alone: the sleep file stays out of it */
 						for (const name of readdirSync(dir)) rmSync(join(dir, name))
-						write([`${UNSAFE}CREATE ROLE ${made};\n`])
+						await write([`${UNSAFE}CREATE ROLE ${made};\n`])
 						expect(await sleeping()).toEqual([])
 						const started = Date.now()
 						await withScratchDb((target) => applyWithAtlas(options(dev, target)))
@@ -313,7 +313,7 @@ describe("an apply whose devUrl does not answer (PR7 of r22b)", () => {
 		await new Promise<void>((done) => silent.listen(0, "127.0.0.1", done))
 		const { port } = silent.address() as AddressInfo
 		try {
-			write([`${UNSAFE}CREATE TABLE t (id int PRIMARY KEY);\n`])
+			await write([`${UNSAFE}CREATE TABLE t (id int PRIMARY KEY);\n`])
 			const out: string[] = []
 			await withScratchDb((url) =>
 				applyWithAtlas(options(`postgres://nobody:x@127.0.0.1:${port}/dev?sslmode=disable`, url, out)),
@@ -342,7 +342,7 @@ describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () =
 			/* the tag last, as it makes the role a sweep's, and then the database */
 			await query(pgUrl(), `COMMENT ON ROLE ${made} IS 'comb_replay 1_1'`)
 			await release(left)
-			write([`${UNSAFE}CREATE ROLE ${made};\n`])
+			await write([`${UNSAFE}CREATE ROLE ${made};\n`])
 			await withScratchDb((dev) => withScratchDb((target) => applyWithAtlas(options(dev, target))))
 			/* the role there now is apply's own, made as the file says: the sweep dropped the replay's tagged one first */
 			const tag = `SELECT shobj_description(oid, 'pg_authid') AS tag FROM pg_roles WHERE rolname = '${made}'`
@@ -362,13 +362,13 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 		try {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write(paused(made, resume))
+					await write(paused(made, resume))
 					const long = check(dev, url)
 					await untilRole(made)
 					const live = await replayDatabases(made)
 					const other = mkdtempSync(join(tmpdir(), "comb-pg-replay-sweep-b-"))
 					try {
-						write(["CREATE TABLE u (id int PRIMARY KEY);\n"], other)
+						await write(["CREATE TABLE u (id int PRIMARY KEY);\n"], other)
 						await applyWithAtlas({ ...options(dev, url), checkOnly: true, dir: other })
 					} finally {
 						rmSync(other, { force: true, recursive: true })
@@ -397,7 +397,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 			await release(stale)
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
+					await write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
 					expect((await check(dev, url)).refused).toBeUndefined()
 					expect(await holds(stale)).toBe(true)
 					await session.end()
@@ -424,15 +424,15 @@ describe("two live replays under one role (P4 of r22)", () => {
 		try {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write(paused(a, resumeA))
-					write(paused(b, resumeB), dirB)
-					write(["CREATE TABLE u (id int PRIMARY KEY);\n"], dirC)
+					await write(paused(a, resumeA))
+					await write(paused(b, resumeB), dirB)
+					await write(["CREATE TABLE u (id int PRIMARY KEY);\n"], dirC)
 					/* A pauses mid-replay; B's sweep runs beside it, then B pauses; C's sweep runs beside both */
 					const first = check(dev, url)
 					await untilRole(a)
 					const second = check(dev, url, dirB)
 					await untilRole(b)
-					expect(await (await check(dev, url, dirC)).refused).toBeUndefined()
+					expect((await check(dev, url, dirC)).refused).toBeUndefined()
 					const live = [...(await replayDatabases(a)), ...(await replayDatabases(b))]
 					expect(live).toHaveLength(2)
 					expect(await Promise.all(live.map(holds))).toEqual([true, true])
@@ -456,7 +456,7 @@ describe("a history's role the replay makes", () => {
 		try {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write(paused(ops, resume, `CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb';`))
+					await write(paused(ops, resume, `CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb';`))
 					const running = check(dev, url)
 					await untilRole(ops)
 					const login = new pg.Client({

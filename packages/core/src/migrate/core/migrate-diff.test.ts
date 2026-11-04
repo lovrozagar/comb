@@ -36,7 +36,7 @@ type FakeAtlas = Run & { calls: string[][]; envs: Array<Readonly<Record<string, 
 function fakeAtlas(onDiff: (call: DiffCall) => RunResult = () => ok(), hashResult?: () => RunResult): FakeAtlas {
 	const calls: string[][] = []
 	const envs: FakeAtlas["envs"] = []
-	const fake: Run = (_cmd, args, runOptions) => {
+	const fake: Run = async (_cmd, args, runOptions) => {
 		calls.push([...args])
 		envs.push(runOptions?.env)
 		const dir = dirOf(args, "--dir")

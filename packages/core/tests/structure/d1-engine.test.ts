@@ -59,7 +59,7 @@ describe("a D1 file is proven on D1's own engine (SD1 of r22b; sibling: S1's pin
 			const { code, dir, text } = await checked(file)
 			expect(code, text).toBe(1)
 			expect(text).toMatch(error)
-			expect(d1Column(dir, "SELECT name FROM d1_migrations")).toEqual(["0000_seed.sql"])
+			expect(await d1Column(dir, "SELECT name FROM d1_migrations")).toEqual(["0000_seed.sql"])
 		},
 		180_000,
 	)

@@ -17,18 +17,18 @@ function useTmpDir(prefix: string): () => string {
 }
 
 /** Write `content` as the tables file in `dir` and analyze it. */
-function analyzeIn(dir: string, content: string): ReturnType<typeof analyze> {
+async function analyzeIn(dir: string, content: string): Promise<ReturnType<typeof analyze>> {
 	const fp = path.join(dir, "db.test.tables.ts")
 	fs.writeFileSync(fp, content)
-	return analyze(fp)
+	return await analyze(fp)
 }
 
 describe("generateRows — row types", () => {
 	const tmpDir = useTmpDir("comb-gen-rows-")
-	const writeTablesAndAnalyze = (content: string) => analyzeIn(tmpDir(), content)
+	const writeTablesAndAnalyze = async (content: string) => await analyzeIn(tmpDir(), content)
 
-	it("generates row types for each table", () => {
-		const result = writeTablesAndAnalyze(`
+	it("generates row types for each table", async () => {
+		const result = await writeTablesAndAnalyze(`
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id(), name: c.text("name") })
@@ -61,10 +61,10 @@ export const post = createTable("post", { id: c.id(), title: c.text("title") })
 
 describe("generateRows — the tables import", () => {
 	const tmpDir = useTmpDir("comb-gen-rows-")
-	const writeTablesAndAnalyze = (content: string) => analyzeIn(tmpDir(), content)
+	const writeTablesAndAnalyze = async (content: string) => await analyzeIn(tmpDir(), content)
 
-	it("generates correct import path", () => {
-		const result = writeTablesAndAnalyze(`
+	it("generates correct import path", async () => {
+		const result = await writeTablesAndAnalyze(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const item = createTable("item", { id: c.id() })
@@ -77,8 +77,8 @@ export const item = createTable("item", { id: c.id() })
 		expect(content).toContain('from "./db.test.tables"')
 	})
 
-	it("keeps an import path that already leaves the output directory", () => {
-		const result = writeTablesAndAnalyze(`
+	it("keeps an import path that already leaves the output directory", async () => {
+		const result = await writeTablesAndAnalyze(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 export const item = createTable("item", { id: text("id").primaryKey() })
 `)

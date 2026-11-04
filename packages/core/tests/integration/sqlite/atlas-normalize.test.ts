@@ -54,8 +54,13 @@ afterEach(() => {
 
 const exported = () =>
 	exportDrizzleSchema({ configPath: join(work, "drizzle.config.ts"), cwd: core, dialect: "sqlite" })
-const diff = (name: string) =>
-	generateIncrementalMigration({ dialect: "sqlite", migrationName: name, migrationsDir: dir, targetSchema: exported() })
+const diff = async (name: string) =>
+	generateIncrementalMigration({
+		dialect: "sqlite",
+		migrationName: name,
+		migrationsDir: dir,
+		targetSchema: await exported(),
+	})
 
 describe("the normalized drizzle-kit SQLite export on Atlas v1.3.0", () => {
 	it("diffs as synced against a history whose key columns are NOT NULL", async () => {

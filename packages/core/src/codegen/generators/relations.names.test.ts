@@ -25,27 +25,27 @@ import { c } from "@lovrozagar/comb/sqlite/columns"
 export const currency = sqliteTable("currency", { code: text("code").primaryKey() })
 `
 
-function relationsOf(tables: string): string {
+async function relationsOf(tables: string): Promise<string> {
 	const file = path.join(dir, "db.test.tables.ts")
 	fs.writeFileSync(file, `${HEAD}${tables}`)
 	const output = path.join(dir, "relations.gen.ts")
-	generateRelations(testContext(analyze(file), { cwd: dir, tablesPath: file }), { output })
+	generateRelations(testContext(await analyze(file), { cwd: dir, tablesPath: file }), { output })
 	return fs.readFileSync(output, "utf8")
 }
 
 describe("generateRelations: a key that names its relation (F57)", () => {
-	it("names the fix in the collision: rename the column, or give the key its relation", () => {
-		expect(() =>
+	it("names the fix in the collision: rename the column, or give the key its relation", async () => {
+		await expect(
 			relationsOf(
 				'export const price = sqliteTable("price", { id: text("id").primaryKey(), currency: c.ref("currency").references(() => currency.code) })',
 			),
-		).toThrow(
+		).rejects.toThrow(
 			'price: the relation currency of price.currency takes the name of the column price.currency; rename the column, or give the key { relation: "…" }',
 		)
 	})
 
-	it("names the relation, and its way back, by the key's relation", () => {
-		const content = relationsOf(`export const price = sqliteTable("price", {
+	it("names the relation, and its way back, by the key's relation", async () => {
+		const content = await relationsOf(`export const price = sqliteTable("price", {
 	id: text("id").primaryKey(),
 	currency: c.ref("currency", { relation: "currencyOf" }).references(() => currency.code),
 	parent: c.ref("parent", { relation: "parentPrice" }).references((): AnySQLiteColumn => price.id),
@@ -55,17 +55,19 @@ describe("generateRelations: a key that names its relation (F57)", () => {
 		expect(content).toContain("parentPrice: r.one.price({\n\t\t\tfrom: r.price.parent,")
 	})
 
-	it("refuses a relation on a column that references nothing, and one a column already holds", () => {
-		expect(() =>
+	it("refuses a relation on a column that references nothing, and one a column already holds", async () => {
+		await expect(
 			relationsOf(
 				'export const price = sqliteTable("price", { id: text("id").primaryKey(), note: c.text("note", { relation: "noteOf" }) })',
 			),
-		).toThrow("db.test.tables.ts: price.note: relation names the relation of a key, and note references nothing")
-		expect(() =>
+		).rejects.toThrow(
+			"db.test.tables.ts: price.note: relation names the relation of a key, and note references nothing",
+		)
+		await expect(
 			relationsOf(
 				'export const price = sqliteTable("price", { id: text("id").primaryKey(), currency: c.ref("currency", { relation: "id" }).references(() => currency.code) })',
 			),
-		).toThrow("price: the relation id of price.currency takes the name of the column price.id")
+		).rejects.toThrow("price: the relation id of price.currency takes the name of the column price.id")
 	})
 })
 
@@ -79,9 +81,9 @@ export const blog_comment = sqliteTable("blog_comment", {
 
 /* F62: a key's role is compared with its target's export name camelCased, so a snake_case export names its relations as a camelCase one does */
 describe("generateRelations: a snake_case export's relations (F62)", () => {
-	it("names them as a camelCase export's, where 0.13 named them blogCommentsByBlogPost and invitedByBlogPost", () => {
-		const snake = relationsOf(blogKeys("blog_post"))
-		const camel = relationsOf(blogKeys("blogPost"))
+	it("names them as a camelCase export's, where 0.13 named them blogCommentsByBlogPost and invitedByBlogPost", async () => {
+		const snake = await relationsOf(blogKeys("blog_post"))
+		const camel = await relationsOf(blogKeys("blogPost"))
 		for (const content of [snake, camel]) {
 			expect(content).toContain("blogPost: r.one.")
 			expect(content).toContain("invitedBy: r.one.")

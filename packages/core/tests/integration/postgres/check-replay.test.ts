@@ -87,12 +87,12 @@ describe("check of a pending retype over a history the target has applied", () =
 	it("replays the applied history before the pending file, and refuses the retype a view blocks", async () => {
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
+				await files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
 				rmSync(join(dir(), "20260102000000_two.sql"))
-				hashDir(run, dir())
+				await hashDir(run, dir())
 				const out: string[] = []
 				await applyWithAtlas(options({ devUrl: dev, url }, out))
-				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
+				await files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
 				await expect(applyWithAtlas({ ...options({ devUrl: dev, url }, out), checkOnly: true })).rejects.toThrow(
 					/20260102000000_two\.sql: devUrl refused .* cannot alter type of a column used by a view or rule/,
 				)
@@ -137,10 +137,10 @@ describe("check's replay of a statement only a file of its own can run", () => {
 const nameOf = (i: number) => `20260101${String(i).padStart(6, "0")}_f${i}.sql`
 
 /** Every file of `history` then `pending`, named in order and hashed; the history's files approved */
-function writeAll(history: readonly string[], pending: string): void {
+async function writeAll(history: readonly string[], pending: string): Promise<void> {
 	history.forEach((sql, i) => writeFileSync(join(dir(), nameOf(i)), `-- comb:allow-unsafe: the test's history\n${sql}`))
 	writeFileSync(join(dir(), nameOf(history.length)), pending)
-	hashDir(run, dir())
+	await hashDir(run, dir())
 }
 
 /** A check of every file in the directory against an empty target on `devUrl`: why it refused, or undefined */
@@ -162,7 +162,7 @@ const tablesOf = (f: number) =>
 /* P1 of r20: Atlas applies each file in its own transaction, so check's replay does too, in a database of its own */
 describe("check replays file by file, as Atlas applies", () => {
 	it("passes a history whose relations outgrow one transaction's lock table", async () => {
-		writeAll(
+		await writeAll(
 			Array.from({ length: 40 }, (_, f) => tablesOf(f)),
 			"CREATE TABLE after_all (id int PRIMARY KEY);\n",
 		)
@@ -170,7 +170,7 @@ describe("check replays file by file, as Atlas applies", () => {
 	}, 300_000)
 
 	it("passes a change to a table whose seed rows left deferred trigger events in an earlier file", async () => {
-		writeAll(
+		await writeAll(
 			[
 				"CREATE TABLE kind (id int PRIMARY KEY, name text);\nCREATE TABLE item (id int PRIMARY KEY, kind_id int REFERENCES kind (id) DEFERRABLE INITIALLY DEFERRED);\nINSERT INTO kind VALUES (1, 'a');\nINSERT INTO item VALUES (1, 1);\n",
 			],
@@ -185,7 +185,7 @@ describe("check on a devUrl whose database holds objects of its own", () => {
 	it("refuses a view of a function only dev holds, as apply refuses it on the target", async () => {
 		const refused = await withScratchDb(async (dev) => {
 			await exec(dev, "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1';")
-			writeAll(
+			await writeAll(
 				["CREATE TABLE t (id int PRIMARY KEY);\n"],
 				"-- comb:allow-unsafe: the test's view\nCREATE VIEW v AS SELECT f() AS x;\n",
 			)
@@ -197,7 +197,7 @@ describe("check on a devUrl whose database holds objects of its own", () => {
 	it("passes a history that makes a table dev already holds", async () => {
 		const refused = await withScratchDb(async (dev) => {
 			await exec(dev, "CREATE TABLE t (id int);")
-			writeAll(["CREATE TABLE t (id int PRIMARY KEY);\n"], "ALTER TABLE t ADD COLUMN v text;\n")
+			await writeAll(["CREATE TABLE t (id int PRIMARY KEY);\n"], "ALTER TABLE t ADD COLUMN v text;\n")
 			return checkAll(dev)
 		})
 		expect(refused).toBeUndefined()
@@ -309,7 +309,7 @@ describe("check of a pending CREATE ROLE of a role the target's server already h
 	it("refuses it, naming the file apply would stop at, once another database on the server applied it", async () => {
 		await withScratchDb((other) =>
 			withScratchDb(async (url) => {
-				files(T, make)
+				await files(T, make)
 				await applyWithAtlas(options({ devUrl: devUrl(), url: other }, []))
 				const check = applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
 				await expect(check).rejects.toThrow(`role "${role}" already exists; apply would stop at 20260102000000_two.sql`)
@@ -322,11 +322,11 @@ describe("check of a pending CREATE ROLE of a role the target's server already h
 
 	it("passes a pending file using a role the target's own history made, which the replay reuses", async () => {
 		await withScratchDb(async (url) => {
-			files(make, "")
+			await files(make, "")
 			rmSync(join(dir(), "20260102000000_two.sql"))
-			hashDir(run, dir())
+			await hashDir(run, dir())
 			await applyWithAtlas(options({ devUrl: devUrl(), url }, []))
-			files(make, `CREATE TABLE s (id int PRIMARY KEY);\nGRANT SELECT ON s TO ${role};\n`)
+			await files(make, `CREATE TABLE s (id int PRIMARY KEY);\nGRANT SELECT ON s TO ${role};\n`)
 			await applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
 			expect(await roleOf(role)).not.toEqual([])
 		})

@@ -59,7 +59,7 @@ describe("proveOnD1 inside a Bun single-file executable", () => {
 	/* D4-5 of the area D round-four review: the child is handed a module the executable embeds, which node cannot read */
 	it("refuses inside a Bun single-file executable, saying why, and starts no child", async () => {
 		const calls: string[] = []
-		const exec: Run = (cmd) => {
+		const exec: Run = async (cmd) => {
 			calls.push(cmd)
 			return { code: 0, stderr: "", stdout: "" }
 		}
@@ -83,7 +83,7 @@ describe("proveOnD1 inside a Bun single-file executable", () => {
 describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runtime (SD1 of r22)", () => {
 	it("passes files D1 runs, the child started on node through the runner", async () => {
 		const runtimes: string[] = []
-		const exec: Run = (cmd, args, options) => {
+		const exec: Run = async (cmd, args, options) => {
 			runtimes.push(`${cmd} ${options?.peer}`)
 			return run(cmd, args, options)
 		}
@@ -110,7 +110,9 @@ describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runt
 		],
 		["a child that answers nothing", { code: 0, stderr: "", stdout: "" }, "0 and no answer: it printed nothing"],
 	])("refuses with how %s ended, naming its runtime", async (_, result, said) => {
-		const failure = (await proven([{ name: "1_a.sql", sql: "CREATE TABLE a (x);" }], { exec: () => result })) as Error
+		const failure = (await proven([{ name: "1_a.sql", sql: "CREATE TABLE a (x);" }], {
+			exec: async () => result,
+		})) as Error
 		expect(failure.message).toBe(
 			`check could not prove the pending files on D1's engine: the proof on node ended with code ${said}`,
 		)

@@ -52,7 +52,7 @@ beforeAll(async () => {
 	const tablesPath = path.join(WORK_DIR, "db.blog.tables.ts")
 	fs.writeFileSync(tablesPath, TABLES)
 
-	const analysis = analyze(tablesPath)
+	const analysis = await analyze(tablesPath)
 	articleUniqueIndexes = analysis.tables.find((t) => t.sqlName === "article")!.uniqueIndexes
 	generateDtos(testContext(analysis, { cwd: WORK_DIR, tablesPath: tablesPath }), {
 		output: path.join(WORK_DIR, "dtos"),

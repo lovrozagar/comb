@@ -22,12 +22,12 @@ export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiff
    ATLAS AVAILABILITY CHECK
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function checkAtlasInstalled(exec: Run = run): boolean {
-	return exec("atlas", ["version"]).code === 0
+export async function checkAtlasInstalled(exec: Run = run): Promise<boolean> {
+	return (await exec("atlas", ["version"])).code === 0
 }
 
-export function getAtlasVersion(exec: Run = run): string | null {
-	const result = exec("atlas", ["version"])
+export async function getAtlasVersion(exec: Run = run): Promise<string | null> {
+	const result = await exec("atlas", ["version"])
 	if (result.code !== 0) return null
 	return result.stdout.match(/v[\d.]+/)?.[0] ?? null
 }
@@ -78,9 +78,9 @@ export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<Sc
 		const args = ["schema", "diff", "--from", `file://${fromFile}`, "--to", `file://${toFile}`]
 		const result =
 			target === undefined || dialect === "sqlite"
-				? exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
-				: withAtlasEnv(target, { dev: true }, (env) => {
-						const ran = exec("atlas", [...args, ...env.args], { env: env.env })
+				? await exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
+				: await withAtlasEnv(target, { dev: true }, async (env) => {
+						const ran = await exec("atlas", [...args, ...env.args], { env: env.env })
 						return { ...ran, stderr: explainAtlasFailure(ran.stderr, env.scrub, { devOnly: true }) }
 					})
 
@@ -155,7 +155,7 @@ function scopeExport(sql: string, schema: string): string {
  * drizzle-kit's export of the schema, normalized for the dialect: on Postgres, scoped to the
  * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
  */
-export function exportDrizzleSchema(options: DrizzleExportOptions): string {
+export async function exportDrizzleSchema(options: DrizzleExportOptions): Promise<string> {
 	return exportWith(projectBin(DIFF, options.cwd), options)
 }
 
@@ -169,7 +169,7 @@ function drizzleConfigOf(configPath: string | undefined, cwd: string): string | 
 }
 
 /** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
-export function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string {
+export async function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): Promise<string> {
 	const { configPath, cwd, dialect, run: exec = run } = options
 
 	/* drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config (D2-14 of the area D round-two review) */
@@ -179,7 +179,7 @@ export function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions
 			`${loads} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
 		)
 	const config = configPath === undefined ? [] : ["--config", configPath]
-	const result = runPeer(exec, drizzleKit)(["export", ...config], { cwd })
+	const result = await runPeer(exec, drizzleKit)(["export", ...config], { cwd })
 
 	if (result.code !== 0) {
 		throw new Error(`drizzle-kit export failed: ${result.stderr.trim()}`)

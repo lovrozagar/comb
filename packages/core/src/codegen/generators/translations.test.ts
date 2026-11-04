@@ -33,10 +33,10 @@ afterEach(() => {
 })
 
 /** Translations from a tables file holding `body`, under the file prefix the CLI uses */
-function fromTables(body = TABLES): TestContext {
+async function fromTables(body = TABLES): Promise<TestContext> {
 	const tablesFile = path.join(tmpDir, "db.test.tables.ts")
 	fs.writeFileSync(tablesFile, body)
-	const ctx = testContext(analyze(tablesFile), { cwd: tmpDir })
+	const ctx = testContext(await analyze(tablesFile), { cwd: tmpDir })
 	generateTranslations(ctx, { baseDir: tmpDir, filePrefix: "db.test" })
 	return ctx
 }
@@ -49,8 +49,8 @@ import { check, sqliteTable as createTable, text, uniqueIndex } from "drizzle-or
 `
 
 describe("generateTranslations", () => {
-	it("writes the error keys file and an en-US translation for every key the constraint map declares", () => {
-		const ctx = fromTables()
+	it("writes the error keys file and an en-US translation for every key the constraint map declares", async () => {
+		const ctx = await fromTables()
 
 		const keys = read("db.test.error-keys.gen.ts")
 		expect(keys).toContain("TEST_DB_ERROR_KEYS")
@@ -64,10 +64,10 @@ describe("generateTranslations", () => {
 		expect(ctx.logged).toEqual(["Generated error translations for test database", "Error keys: 4"])
 	})
 
-	it("declares exactly the keys the constraints generator writes", () => {
-		fromTables()
+	it("declares exactly the keys the constraints generator writes", async () => {
+		await fromTables()
 		const constraintsPath = path.join(tmpDir, "db.test.constraints.gen.ts")
-		generateConstraints(testContext(analyze(path.join(tmpDir, "db.test.tables.ts")), { cwd: tmpDir }), {
+		generateConstraints(testContext(await analyze(path.join(tmpDir, "db.test.tables.ts")), { cwd: tmpDir }), {
 			output: constraintsPath,
 		})
 		const inMap = [...read("db.test.constraints.gen.ts").matchAll(/errorKey: "([^"]+)"/g)].map((m) => m[1]).sort()
@@ -75,16 +75,16 @@ describe("generateTranslations", () => {
 		expect(inKeys).toEqual(inMap)
 	})
 
-	it("names a multi-word unique column in full, as its constraint's cause does", () => {
-		fromTables(`${HEAD}export const doc = createTable("doc", { id: text("id").primaryKey(), created_by: text("created_by") }, (t) => [
+	it("names a multi-word unique column in full, as its constraint's cause does", async () => {
+		await fromTables(`${HEAD}export const doc = createTable("doc", { id: text("id").primaryKey(), created_by: text("created_by") }, (t) => [
 	uniqueIndex("doc_created_by_unique").on(t.created_by),
 ])
 `)
 		expect(english("db.test")).toContain('doc_created_by_duplicate: "A record with this created by already exists"')
 	})
 
-	it("names a size CHECK by its cause, and quotes keys that are not identifiers", () => {
-		fromTables(`${HEAD}export const auditLog = createTable("audit-log", { body: text("body") }, () => [
+	it("names a size CHECK by its cause, and quotes keys that are not identifiers", async () => {
+		await fromTables(`${HEAD}export const auditLog = createTable("audit-log", { body: text("body") }, () => [
 	check("body_size", sql\`length(body) <= 2048\`),
 ])
 `)
@@ -93,16 +93,16 @@ describe("generateTranslations", () => {
 		expect(read("db.test.error-keys.gen.ts")).toContain('"audit-log_body_size_failed": "audit-log_body_size_failed"')
 	})
 
-	it("warns and writes nothing when no constraint declares an error key", () => {
-		const ctx = fromTables(`${HEAD}export const note = createTable("note", { body: text("body") })\n`)
+	it("warns and writes nothing when no constraint declares an error key", async () => {
+		const ctx = await fromTables(`${HEAD}export const note = createTable("note", { body: text("body") })\n`)
 		expect(ctx.warned).toEqual(["Warning: no constraint declares an error key; translations skipped"])
 		expect(fs.existsSync(path.join(tmpDir, "db.test.error-keys.gen.ts"))).toBe(false)
 	})
 })
 
 describe("generateTranslations — composite uniques", () => {
-	it("names a composite unique's columns together, never as an ID (C3)", () => {
-		fromTables(`${HEAD}export const account = createTable("account", { id: text("id").primaryKey(), provider: text("provider"), account_id: text("account_id") }, (t) => [
+	it("names a composite unique's columns together, never as an ID (C3)", async () => {
+		await fromTables(`${HEAD}export const account = createTable("account", { id: text("id").primaryKey(), provider: text("provider"), account_id: text("account_id") }, (t) => [
 	uniqueIndex("account_provider_account").on(t.provider, t.account_id),
 ])
 `)
@@ -114,8 +114,8 @@ describe("generateTranslations — composite uniques", () => {
 
 /* the 0.12 review's F34: a 400 no retry fixes was told to try again */
 describe("generateTranslations: a CHECK and an enum key (F34)", () => {
-	it("says what the value broke, never to try again", () => {
-		fromTables(`import { sql } from "drizzle-orm"
+	it("says what the value broke, never to try again", async () => {
+		await fromTables(`import { sql } from "drizzle-orm"
 import { check, sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const seat = sqliteTable("seat", { id: c.id("set"), kind: c.enum("kind", ["a", "b"]), n: c.integer("n"), note: c.text("note") }, (t) => [
@@ -134,8 +134,8 @@ export const seat = sqliteTable("seat", { id: c.id("set"), kind: c.enum("kind", 
 
 /* G2 of plan 14: the table-level keys F66 gives a private column's constraints, in English */
 describe("generateTranslations: a private column's keys (F66)", () => {
-	it("says each kind's generic cause, never another's", () => {
-		fromTables(`import { sql } from "drizzle-orm"
+	it("says each kind's generic cause, never another's", async () => {
+		await fromTables(`import { sql } from "drizzle-orm"
 import { check, sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = sqliteTable("user", { id: c.id("usr") })

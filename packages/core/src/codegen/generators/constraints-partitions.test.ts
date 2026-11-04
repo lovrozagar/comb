@@ -12,12 +12,12 @@ afterEach(() => {
 })
 
 /** The tables of `source`, analyzed */
-function tablesOf(source: string) {
+async function tablesOf(source: string) {
 	const dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-partitions-"))
 	made.push(dir)
 	const file = path.join(dir, "db.test.tables.ts")
 	fs.writeFileSync(file, source)
-	return analyze(file).tables
+	return (await analyze(file)).tables
 }
 
 const SQLITE = `import { sqliteTable, text } from "drizzle-orm/sqlite-core"
@@ -31,19 +31,19 @@ export const ledger = app.table("ledger", { id: text("id").primaryKey() })
 `
 
 describe("partitionsOf", () => {
-	it("keys each partition as the map keys a table, once, and takes none as nothing to check", () => {
-		const tables = tablesOf(AUDIT)
+	it("keys each partition as the map keys a table, once, and takes none as nothing to check", async () => {
+		const tables = await tablesOf(AUDIT)
 		expect(partitionsOf(tables, "postgres", { "app.ledger": ["l", "l"], audit: ["l"] })).toEqual(
 			new Map([
 				["app.ledger", ["app.l"]],
 				["audit", ["l"]],
 			]),
 		)
-		expect(partitionsOf(tablesOf(`${SQLITE}${USER}`), "sqlite", {})).toEqual(new Map())
+		expect(partitionsOf(await tablesOf(`${SQLITE}${USER}`), "sqlite", {})).toEqual(new Map())
 	})
 
-	it("refuses a parent no table is, a partition named twice or as a table, one in another schema, and SQLite", () => {
-		const tables = tablesOf(AUDIT)
+	it("refuses a parent no table is, a partition named twice or as a table, one in another schema, and SQLite", async () => {
+		const tables = await tablesOf(AUDIT)
 		expect(() => partitionsOf(tables, "postgres", { audits: ["audit_2026"] })).toThrow(
 			'partitions: "audits" is no table of this database; key each partitioned table as its constraint map does',
 		)
@@ -56,7 +56,8 @@ describe("partitionsOf", () => {
 		expect(() => partitionsOf(tables, "postgres", { audit: ["other.audit_2026"] })).toThrow(
 			'partitions: "audit" lists "other.audit_2026"; name a partition without a schema, as it lives in its parent\'s',
 		)
-		expect(() => partitionsOf(tablesOf(`${SQLITE}${USER}`), "sqlite", { user: ["user_1"] })).toThrow(
+		const sqlite = await tablesOf(`${SQLITE}${USER}`)
+		expect(() => partitionsOf(sqlite, "sqlite", { user: ["user_1"] })).toThrow(
 			"partitions: SQLite has no partitioned tables; list partitions on a Postgres database only",
 		)
 	})

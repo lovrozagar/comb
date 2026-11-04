@@ -63,10 +63,10 @@ async function target() {
 	const fake = fakeD1({ dir: migrations })
 	const state: { lose: Lose } = { lose: () => false }
 	const run = Object.assign(
-		asWrangler((cmd, args, options) => {
+		asWrangler(async (cmd, args, options) => {
 			const lose = cmd === "wrangler" && state.lose(args)
 			if (lose === false) return fake(cmd, [...args], options)
-			if (typeof lose === "string") fake(cmd, cut(args, lose), options)
+			if (typeof lose === "string") await fake(cmd, cut(args, lose), options)
 			return RESET
 		}),
 		{ calls: fake.calls, db: fake.db },
@@ -125,7 +125,7 @@ describe("a pre-recorded hash never outlives a lost apply (S1); sibling: a lost 
 		await expect(t.apply()).rejects.toThrow(/ECONNRESET/)
 		t.lose(() => false)
 		t.file("0002_t2.sql", "CREATE TABLE t2 (id INTEGER, fixed INTEGER);")
-		expect(t.wranglerApply().code).toBe(0)
+		expect((await t.wranglerApply()).code).toBe(0)
 		const status = await t.lines((print) => statusD1(t.d1, t.read, print))
 		expect(status).toEqual([
 			"Applied: 0001_t1.sql, 0002_t2.sql",

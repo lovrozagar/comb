@@ -37,9 +37,9 @@ type Ran = RunResult & { said: string; scrub(text: string): string }
  * as written, its stderr too, and never scrubbed (M79), since a secret that spells a key, a name or
  * a word Atlas prints would change what comb reads; a caller scrubs a value only where it prints it.
  */
-function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Ran {
-	return withAtlasEnv(options.target, { revisions: options.revisions, url: true }, (env) => {
-		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
+function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Promise<Ran> {
+	return withAtlasEnv(options.target, { revisions: options.revisions, url: true }, async (env) => {
+		const ran = await (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
 		return { ...ran, said: explainAtlasFailure(ran.stderr, env.scrub).trim(), scrub: env.scrub }
@@ -63,12 +63,12 @@ const NO_HISTORY: AtlasStatus = { applied: [], available: [], current: "", error
  * history reads as having none recorded: Atlas refuses its status once a refused apply left an
  * empty history table, and that database is the one baseline and adoption are for.
  */
-function atlasStatus(
+async function atlasStatus(
 	options: AtlasCommand,
 	copy: string,
 	{ notClean = false }: { notClean?: boolean | undefined } = {},
-): AtlasStatus {
-	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
+): Promise<AtlasStatus> {
+	const ran = await atlas(options, copy, ["status", "--format", STATUS_FORMAT])
 	if (ran.code !== 0 && notClean && /connected database is not clean/.test(ran.stderr)) return NO_HISTORY
 	if (ran.code !== 0)
 		throw new Error(`atlas migrate status: ${ran.said || `exit ${ran.code}: ${ran.scrub(ran.stdout).trim()}`}`)

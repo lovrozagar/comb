@@ -25,9 +25,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** `files` written into the migrations directory, hashed */
-function migrations(files: Record<string, string>): void {
+async function migrations(files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** Every file approved, as `--yes` approves a cautious one */
@@ -46,11 +46,14 @@ const HALF = "-- atlas:txmode none\n\nCREATE TABLE h1 (id int);\nCREATE TABLE h1
 describe("a late file added before a file Atlas ran halfway, on Atlas v1.3.0", () => {
 	it("is named as the late file, and the unchanged half-run file is not blamed", async () => {
 		await withScratchDb(async (url) => {
-			migrations({ "20260101000010_a.sql": "CREATE TABLE a (id int PRIMARY KEY);\n", "20260101000020_half.sql": HALF })
+			await migrations({
+				"20260101000010_a.sql": "CREATE TABLE a (id int PRIMARY KEY);\n",
+				"20260101000020_half.sql": HALF,
+			})
 			await expect(applyWithAtlas(command(url))).rejects.toThrow("20260101000020_half.sql failed at")
-			migrations({ "20260101000015_late.sql": "CREATE TABLE late (id int);\n" })
+			await migrations({ "20260101000015_late.sql": "CREATE TABLE late (id int);\n" })
 			const late = "20260101000015_late.sql is older than a migration already applied"
-			expect(() => statusWithAtlas(command(url))).toThrow(late)
+			await expect(statusWithAtlas(command(url))).rejects.toThrow(late)
 			await expect(applyWithAtlas(command(url))).rejects.toThrow(late)
 		})
 	}, 60_000)

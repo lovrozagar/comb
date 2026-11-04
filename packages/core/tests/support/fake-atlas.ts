@@ -78,7 +78,7 @@ function fakeAtlas(answers: Answers): Fake {
 	const replayed: string[] = []
 	let applied = false
 	const taken: string[] = []
-	const run: Run = (_cmd, args, runOptions) => {
+	const run: Run = async (_cmd, args, runOptions) => {
 		calls.push({ args: [...args], env: runOptions?.env })
 		if (args[1] === "hash") {
 			const dir = (args[args.indexOf("--dir") + 1] as string).replace("file://", "")

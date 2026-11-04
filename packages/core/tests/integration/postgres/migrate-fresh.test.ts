@@ -32,7 +32,7 @@ describe("migrate status and check on Postgres, before the first migration", () 
 		it("read the directory init made as an empty history", async () => {
 			await withScratchDb(async (url) => {
 				const status = command(url)
-				expect(statusWithAtlas(status)).toEqual({ applied: [], pending: [] })
+				expect(await statusWithAtlas(status)).toEqual({ applied: [], pending: [] })
 				expect(await applyWithAtlas({ ...command(url), checkOnly: true })).toEqual([])
 			})
 		}, 60_000)

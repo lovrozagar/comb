@@ -250,11 +250,11 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliC
  * Every peer `command` on `provider` needs, Atlas's version read through `io` among them, refused
  * before the command connects, fetches, spawns or asks Atlas anything (K1 of r21, PA5 of r22)
  */
-export function needPeers(
+export async function needPeers(
 	io: CliContext,
 	command: Command,
 	{ fts, provider }: { fts?: boolean | undefined; provider: Provider },
-): Peers {
+): Promise<Peers> {
 	const atlas = io.readAtlasVersion ?? (() => (io.run ?? runProcess)("atlas", ["version"]))
 	return requirePeers(command, provider, { atlas, cwd: io.cwd, fts, locate: io.locatePeer })
 }
@@ -271,7 +271,7 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 	})
 	/* every peer the command needs, before it connects, fetches, spawns or asks Atlas anything (K1 of r21); a
 	   project without comb.migrate.config.ts names a D1 binding */
-	const peers = needPeers(io, mode, { provider: resolved?.provider.type ?? "d1" })
+	const peers = await needPeers(io, mode, { provider: resolved?.provider.type ?? "d1" })
 	if (resolved?.provider.type === "postgres") {
 		const { migratePostgres } = await import("./migrate-atlas.ts")
 		return migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })

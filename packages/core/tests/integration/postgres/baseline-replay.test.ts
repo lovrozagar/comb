@@ -40,7 +40,7 @@ async function exec(url: string, sql: string): Promise<void> {
 /** Baseline the database at `url` against `files`, in order; why it refused, or undefined */
 async function baseline(url: string, devUrl: string, files: readonly string[]): Promise<string | undefined> {
 	files.forEach((sql, i) => writeFileSync(join(dir, `2026010100000${i}_f.sql`), sql))
-	hashDir(run, dir)
+	await hashDir(run, dir)
 	const target = { devUrl, lockTimeout: "5s", schema: "public", url }
 	try {
 		await baselineWithAtlas({ dir, print: () => undefined, target })

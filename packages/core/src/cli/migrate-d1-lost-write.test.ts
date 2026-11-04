@@ -60,7 +60,7 @@ const longName = (i: number) =>
  */
 function losing(d1: FakeD1, at: number): FakeD1 {
 	let writes = 0
-	const run: Run = asWrangler((cmd, args, options) => {
+	const run: Run = asWrangler(async (cmd, args, options) => {
 		const write = cmd === "wrangler" && args.some((arg) => arg.startsWith("--command=")) && !args.includes("--json")
 		if (write && ++writes === at) return { code: 1, stderr: "fetch failed: ECONNRESET", stdout: "" }
 		return d1(cmd, args, options)
@@ -163,7 +163,7 @@ describe("migrate apply on D1 after a lost read-back", () => {
 			const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 			d1.db.exec(LIVE_NOT_JSON)
 			let ran = false
-			const blind: Run = asWrangler((cmd, args, options) => {
+			const blind: Run = asWrangler(async (cmd, args, options) => {
 				if (args[1] === "migrations") ran = true
 				else if (ran && args.includes("--json")) return { code: 1, stderr: "fetch failed: ECONNRESET", stdout: "" }
 				return d1(cmd, args, options)

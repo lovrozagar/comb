@@ -146,7 +146,7 @@ describe("the last version a database records (P20)", () => {
 			"the database already records 1 migration (up to 1); baseline marks a database that has none",
 		)
 		const run = options(fakeAtlas({ status: placed }))
-		statusWithAtlas(run)
+		await statusWithAtlas(run)
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
 	})
 })

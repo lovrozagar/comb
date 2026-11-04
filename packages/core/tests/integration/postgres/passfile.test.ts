@@ -74,7 +74,7 @@ describe("a passfile read by comb and by Atlas", () => {
 		writeFileSync(file, `${lines.join("\n")}\n`)
 		chmodSync(file, 0o600)
 		const url = urlOf(host, query, file)
-		const atlas = run("atlas", ["schema", "inspect", "-u", url, "--format", "{{ len .Realm.Schemas }}"])
+		const atlas = await run("atlas", ["schema", "inspect", "-u", url, "--format", "{{ len .Realm.Schemas }}"])
 		const comb = await readLiveObjects({ schema: "public", url }).then(
 			() => "connects",
 			(error: Error) => `fails: ${error.message}`,

@@ -143,8 +143,8 @@ function resolvePeer(need: Need, resolve: () => string): string {
  * manager's shim with no version set does, keeps its code and the first line it said on stderr
  * (AD11 of the area D review).
  */
-function atlasProblem(read: () => RunResult): Problem | undefined {
-	const said = read()
+async function atlasProblem(read: () => Promise<RunResult>): Promise<Problem | undefined> {
+	const said = await read()
 	if (said.code === 127) return ATLAS
 	if (said.code !== 0) {
 		const first = said.stderr.split("\n").find((line) => line.trim() !== "")
@@ -186,7 +186,7 @@ function projectBin(need: BinNeed, cwd: string): ProjectBin {
 
 /** Where requirePeers looks: `atlas` reads `atlas version`, `locate` finds an npm peer's entry, `fts` says a SQLite diff declares FTS */
 type Finders = {
-	atlas: () => RunResult
+	atlas: () => Promise<RunResult>
 	cwd: string
 	fts?: boolean | undefined
 	locate?: ((peer: OptionalPeer) => string) | undefined
@@ -198,14 +198,18 @@ type Finders = {
  * finds a peer's entry: by default a bin peer in the project from `cwd` up, any other as comb's
  * own imports resolve it. Atlas is read once, by `atlas`, where the command runs it.
  */
-function requirePeers(command: Command, provider: Provider, { atlas, cwd, fts = false, locate }: Finders): Peers {
+async function requirePeers(
+	command: Command,
+	provider: Provider,
+	{ atlas, cwd, fts = false, locate }: Finders,
+): Promise<Peers> {
 	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
 	const peers: { [P in BinPeer]?: ProjectBin | undefined } = {}
 	let cause: unknown
 	for (const need of needsOf(command, provider, fts)) {
 		if (need.peer === "atlas") {
-			const problem = atlasProblem(atlas)
+			const problem = await atlasProblem(atlas)
 			if (problem !== undefined) problems.push(problem)
 			continue
 		}

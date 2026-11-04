@@ -16,10 +16,10 @@ afterEach(() => {
 
 /** A bun-sqlite project with 0001 applied, and 0002 written, pending */
 async function applied(): Promise<ScopeProject> {
-	const made = scopeProject("bun-sqlite", TABLE)
+	const made = await scopeProject("bun-sqlite", TABLE)
 	projects.push(made)
 	expect((await migrate(made.dir, "apply")).code).toBe(0)
-	made.write(ADD)
+	await made.write(ADD)
 	return made
 }
 

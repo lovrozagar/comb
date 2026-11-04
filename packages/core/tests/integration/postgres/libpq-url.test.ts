@@ -76,7 +76,7 @@ describe("comb on a URL in each libpq spelling, as Atlas reads it", () => {
 			withScratchDb(async (url) => {
 				await exec(url, FUNCTION)
 				writeFileSync(join(dir, "20260101000000_init.sql"), FUNCTION)
-				hashDir(run, dir)
+				await hashDir(run, dir)
 				const out: string[] = []
 				const target = { devUrl: spellings(dev).port, lockTimeout: "5s", schema: "public", url: spellings(url).port }
 				await baselineWithAtlas({ dir, print: (line: string) => out.push(line), target })

@@ -28,9 +28,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** The files, named in order and hashed */
-function write(files: readonly string[]): void {
+async function write(files: readonly string[]): Promise<void> {
 	files.forEach((sql, i) => writeFileSync(join(dir, `2026010${i + 1}000000_f${i}.sql`), sql))
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** The options of a run against `url`, approving every file, with a 5 s lockTimeout */
@@ -68,7 +68,7 @@ const SETS: ReadonlyArray<[string, string, string]> = [
 
 /** What `read` reads after an apply of a first file, with `set` or without, and then `later` */
 async function written(set: string, later: string, read: string): Promise<unknown> {
-	write([`CREATE TABLE base (x int);\n${set}\n`, `${later}\n`])
+	await write([`CREATE TABLE base (x int);\n${set}\n`, `${later}\n`])
 	return withScratchDb((dev) =>
 		withScratchDb(async (url) => {
 			await applyWithAtlas(options(dev, url))
@@ -90,9 +90,9 @@ describe("a session SET in one file never reaches the next (PA1; sibling: r21 S1
 	it("stops the file after one that sets lock_timeout = 0 at the configured lockTimeout", async () => {
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				write(["CREATE TABLE t (x int);\n"])
+				await write(["CREATE TABLE t (x int);\n"])
 				await applyWithAtlas(options(dev, url))
-				write(["CREATE TABLE t (x int);\n", "SET lock_timeout = 0;\n", "ALTER TABLE t ADD COLUMN y int;\n"])
+				await write(["CREATE TABLE t (x int);\n", "SET lock_timeout = 0;\n", "ALTER TABLE t ADD COLUMN y int;\n"])
 				/* a reader holds t until Postgres ends it 20 s on, past the 5 s lockTimeout: Atlas runs
 				   synchronously, so no timer of the test's could let it go */
 				const reader = new pg.Client({ connectionString: url })
@@ -113,7 +113,7 @@ describe("a session SET in one file never reaches the next (PA1; sibling: r21 S1
 	}, 60_000)
 
 	it("checks a file after one that sets statement_timeout as apply runs it, on a session of its own", async () => {
-		write([
+		await write([
 			"SET statement_timeout = 50;\n",
 			"-- comb:allow-unsafe: the test sleeps past the earlier timeout\nSELECT pg_sleep(0.3);\n",
 		])
@@ -130,7 +130,7 @@ const UNSAFE = "-- comb:allow-unsafe: the test reads the session\n"
 
 /** The amount of each Atlas apply an apply of `files` runs, the dry run left out, and what `read` reads after */
 async function amounts(files: readonly string[], read?: string): Promise<[string[], unknown]> {
-	write(files)
+	await write(files)
 	const seen: string[] = []
 	const exec: typeof run = (cmd, args, given) => {
 		if (args[1] === "apply" && !args.includes("--dry-run")) seen.push(String(args[args.indexOf("--format") + 2]))
@@ -180,13 +180,13 @@ describe("a target holding code of its own gives each file a call (PA1; sibling:
 		}
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				write([first])
+				await write([first])
 				await applyWithAtlas(options(dev, url))
 				await query(
 					url,
 					"CREATE FUNCTION lift() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM set_config('lock_timeout', '0', false); RETURN NEW; END $$; CREATE TRIGGER lift BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION lift();",
 				)
-				write([first, ...later])
+				await write([first, ...later])
 				await applyWithAtlas({ ...options(dev, url), exec })
 				expect([seen, (await query(url, "SELECT v FROM d"))[0]?.["v"]]).toEqual([["1", "1"], "5s"])
 			}),

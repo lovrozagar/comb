@@ -38,8 +38,8 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 /** wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22) */
 type Wrangler = { exec: Run; wrangler: ProjectBin }
 
-function runWrangler({ exec, wrangler }: Wrangler, args: string[]): string {
-	const { code, stderr, stdout } = runPeer(exec, wrangler)(args)
+async function runWrangler({ exec, wrangler }: Wrangler, args: string[]): Promise<string> {
+	const { code, stderr, stdout } = await runPeer(exec, wrangler)(args)
 	if (code !== 0) {
 		throw new Error(`wrangler failed (exit ${code}): ${stderr.trim() || stdout.trim()}`)
 	}
@@ -131,7 +131,7 @@ function createD1Connection(databaseName: string, flags: readonly string[], spaw
 				terminated(params && params.length > 0 ? inlineParams(text, params) : text),
 			)
 			for (const command of commands(sql))
-				runWrangler(spawn, ["d1", "execute", databaseName, ...flags, `--command=${command}`])
+				await runWrangler(spawn, ["d1", "execute", databaseName, ...flags, `--command=${command}`])
 		},
 
 		close(): Promise<void> {
@@ -143,7 +143,14 @@ function createD1Connection(databaseName: string, flags: readonly string[], spaw
 
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql
-			const stdout = runWrangler(spawn, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
+			const stdout = await runWrangler(spawn, [
+				"d1",
+				"execute",
+				databaseName,
+				...flags,
+				"--json",
+				`--command=${finalSql}`,
+			])
 			return asQueryResult(readResults(stdout))
 		},
 	}
@@ -153,13 +160,13 @@ function createD1Connection(databaseName: string, flags: readonly string[], spaw
  * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
  * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
  */
-function executeAll(
+async function executeAll(
 	exec: Run,
 	{ flags, name, wrangler }: { flags: readonly string[]; name: string; wrangler: ProjectBin },
 	statements: readonly string[],
-): Array<Array<Record<string, unknown>>> {
+): Promise<Array<Array<Record<string, unknown>>>> {
 	const args = ["d1", "execute", name, ...flags, "--json", `--command=${statements.join(";\n")}`]
-	const stdout = runWrangler({ exec, wrangler }, args)
+	const stdout = await runWrangler({ exec, wrangler }, args)
 	const results = readAllResults(stdout)
 	if (results.length !== statements.length)
 		throw new Error(`wrangler answered ${results.length} results for ${statements.length} statements`)

@@ -78,7 +78,7 @@ describe("comb migrate diff: its migrations dir", () => {
 			const run = fakeAtlas(() => undefined)
 			const base = makeIo(dir, run)
 			let versionReads = 0
-			const readAtlasVersion = base.readAtlasVersion as () => RunResult
+			const readAtlasVersion = base.readAtlasVersion as () => Promise<RunResult>
 			const io = {
 				...base,
 				readAtlasVersion: () => {

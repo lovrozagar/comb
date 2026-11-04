@@ -57,7 +57,7 @@ type Answers = { apply?: RunResult; inspect?: RunResult; own?: RunResult; shared
 /** Atlas answering by the history its config pins, every call kept */
 function fakeAtlas(answers: Answers): Run & { calls: string[][] } {
 	const calls: string[][] = []
-	const exec: Run = (_cmd, args) => {
+	const exec: Run = async (_cmd, args) => {
 		calls.push([...args])
 		if (args[1] === "hash") return hashed(args)
 		if (args[0] === "schema")
@@ -146,7 +146,7 @@ describe("public's history beside another schema's 0.12 rows it cannot read (M78
 		}
 		const listed = fakeAtlas({ inspect: { code: 2, stderr: "", stdout: "" }, shared: withApps() })
 		const lines: string[] = []
-		expect(() => statusWithAtlas({ dir, exec: listed, print: (line) => lines.push(line), target })).toThrow(
+		await expect(statusWithAtlas({ dir, exec: listed, print: (line) => lines.push(line), target })).rejects.toThrow(
 			"atlas schema inspect: exit 2",
 		)
 	})

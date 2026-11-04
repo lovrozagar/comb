@@ -33,9 +33,9 @@ const USERS = 'CREATE TABLE "users" ("id" integer PRIMARY KEY);\nINSERT INTO "us
 const BACKFILL = 'INSERT INTO "users" VALUES (3);\n'
 
 /** The migrations directory holding `files`, hashed */
-function migrations(files: Record<string, string>): void {
+async function migrations(files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** What comb 0.12 did: Atlas applies the directory to `schema`, its history in the shared atlas_schema_revisions */
@@ -98,9 +98,9 @@ async function migratedUnder012(
 	ran: Record<string, string> = { "20260101000000_users.sql": USERS },
 ): Promise<unknown[]> {
 	await query(url, "CREATE SCHEMA app")
-	migrations(ran)
+	await migrations(ran)
 	applyAs012(url, "app")
-	migrations({ "20260102000000_backfill.sql": BACKFILL })
+	await migrations({ "20260102000000_backfill.sql": BACKFILL })
 	return shared(url)
 }
 
@@ -118,7 +118,7 @@ describe("migrate on Postgres: a schema migrated under 0.12's shared history (M7
 			await withDevAndTarget(async (devUrl, url) => {
 				const before = await migratedUnder012(url)
 				const status = command(url, devUrl)
-				expect(statusWithAtlas(status).pending).toEqual(["20260102000000_backfill.sql"])
+				expect((await statusWithAtlas(status)).pending).toEqual(["20260102000000_backfill.sql"])
 				expect(status.out).toContain(ADOPTS)
 				const check = command(url, devUrl)
 				expect(await applyWithAtlas({ ...check, checkOnly: true })).toEqual(["20260102000000_backfill.sql"])
@@ -193,12 +193,12 @@ describe("migrate on Postgres: what adopting 0.12's shared history refuses and k
 		it("refuses a file 0.12 ran that changed since, and one 0.12 skipped before a file it ran, naming it", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const before = await migratedUnder012(url)
-				migrations({ "20260101000000_users.sql": USERS.replace("(1), (2)", "(1)") })
+				await migrations({ "20260101000000_users.sql": USERS.replace("(1), (2)", "(1)") })
 				const changed =
 					"20260101000000_users.sql is not the file 0.12 ran: its hash is not the one the shared history recorded; restore it, and apply adopts it"
-				expect(() => statusWithAtlas(command(url, devUrl))).toThrow(changed)
+				await expect(statusWithAtlas(command(url, devUrl))).rejects.toThrow(changed)
 				await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(changed)
-				migrations({ "20260101000000_users.sql": USERS, "20251231000000_first.sql": "SELECT 1;\n" })
+				await migrations({ "20260101000000_users.sql": USERS, "20251231000000_first.sql": "SELECT 1;\n" })
 				const skipped =
 					"0.12's shared history records 20260101000000_users.sql but not 20251231000000_first.sql, which comes before it, so comb cannot tell what ran; record it by hand"
 				await expect(applyWithAtlas({ ...command(url, devUrl), checkOnly: true })).rejects.toThrow(skipped)
@@ -210,14 +210,14 @@ describe("migrate on Postgres: what adopting 0.12's shared history refuses and k
 		it("refuses a file 0.12 ran halfway, outside a transaction", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(url, "CREATE SCHEMA app")
-				migrations({
+				await migrations({
 					"20260101000000_half.sql":
 						'-- atlas:txmode none\n\nCREATE TABLE "h" ("id" integer);\nINSERT INTO "nope" VALUES (1);\n',
 				})
 				expect(() => applyAs012(url, "app")).toThrow()
 				const before = await shared(url)
 				const half = "20260101000000_half.sql ran halfway under 0.12; finish or revert it by hand"
-				expect(() => statusWithAtlas(command(url, devUrl))).toThrow(half)
+				await expect(statusWithAtlas(command(url, devUrl))).rejects.toThrow(half)
 				await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(half)
 				expect(await shared(url)).toEqual(before)
 			})
@@ -228,17 +228,17 @@ describe("migrate on Postgres: what adopting 0.12's shared history refuses and k
 				const mine = dir
 				dir = mkdtempSync(join(tmpdir(), "comb-pg-adopt-public-"))
 				try {
-					migrations({ "20260101000000_p.sql": 'CREATE TABLE "p" ("id" integer);\n' })
+					await migrations({ "20260101000000_p.sql": 'CREATE TABLE "p" ("id" integer);\n' })
 					applyAs012(url, "public")
 				} finally {
 					rmSync(dir, { force: true, recursive: true })
 					dir = mine
 				}
 				await query(url, "CREATE SCHEMA app")
-				migrations({ "20260105000000_users.sql": USERS })
+				await migrations({ "20260105000000_users.sql": USERS })
 				applyAs012(url, "app")
 				const before = await shared(url)
-				migrations({ "20260106000000_backfill.sql": BACKFILL })
+				await migrations({ "20260106000000_backfill.sql": BACKFILL })
 				expect(await applyWithAtlas(command(url, devUrl))).toEqual(["20260106000000_backfill.sql"])
 				expect(await own(url)).toEqual(["20260105000000", "20260106000000"])
 				expect(await shared(url)).toEqual(before)
@@ -252,7 +252,7 @@ describe("migrate on Postgres: an empty schema sharing public's directory and it
 	describe("with Atlas v1.3.0", () => {
 		it("refuses to adopt in apply and baseline, recording nothing, and check and status say it awaits proof", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
-				migrations({ "20260101000000_users.sql": USERS })
+				await migrations({ "20260101000000_users.sql": USERS })
 				applyAs012(url, "public")
 				await query(url, "CREATE SCHEMA app")
 				const refusal =
@@ -264,7 +264,7 @@ describe("migrate on Postgres: an empty schema sharing public's directory and it
 					[],
 				)
 				const status = command(url, devUrl)
-				statusWithAtlas(status)
+				await statusWithAtlas(status)
 				expect(status.out).toContain(PENDING_PROOF)
 				const check = command(url, devUrl)
 				await applyWithAtlas({ ...check, checkOnly: true })

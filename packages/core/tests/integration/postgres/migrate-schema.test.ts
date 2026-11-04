@@ -30,9 +30,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** The migrations directory holding `files`, atlas.sum written */
-function migrations(files: Record<string, string>): void {
+async function migrations(files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** comb's approval, never asking: the files here are safe */
@@ -52,7 +52,7 @@ describe("migrate on Postgres: a target schema that does not exist yet (P15)", (
 		it("explains the one CREATE SCHEMA the target needs before its first apply", async () => {
 			await withScratchDb(async (devUrl) => {
 				await withScratchDb(async (url) => {
-					migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+					await migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 					await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(
 						"schema app does not exist on the target; create it once (CREATE SCHEMA app) before the first apply",
 					)
@@ -88,7 +88,7 @@ describe("migrate on Postgres: schema app on an empty dev database (P12)", () =>
 	describe("with Atlas v1.3.0", () => {
 		it("diffs, creating the schema on the dev database", async () => {
 			await withScratchDb(async (devUrl) => {
-				migrations({ "20260101000000_users.sql": USERS })
+				await migrations({ "20260101000000_users.sql": USERS })
 				const diffed = await generateIncrementalMigration({
 					dialect: "postgres",
 					migrationName: "posts",
@@ -107,7 +107,7 @@ describe("migrate on Postgres: schema app on an empty dev database (P12)", () =>
 			await withScratchDb(async (devUrl) => {
 				await withScratchDb(async (url) => {
 					await query(url, `CREATE SCHEMA app; SET search_path = app; ${USERS}`)
-					migrations({ "20260101000000_users.sql": USERS })
+					await migrations({ "20260101000000_users.sql": USERS })
 					const baseline = { ...command(url, devUrl), readLive: noObjects }
 					expect(await baselineWithAtlas(baseline)).toEqual(["20260101000000_users.sql"])
 				})

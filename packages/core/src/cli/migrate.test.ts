@@ -109,7 +109,7 @@ describe("comb migrate diff", () => {
 	/* KC6 of r22: a missing Atlas is refused as a peer, by the one version read, with no probe of diff's own */
 	it("reads Atlas's version through the injected runner, and refuses a missing one as a peer before diffing", async () => {
 		const calls: string[][] = []
-		const run: Run = (cmd, args) => {
+		const run: Run = async (cmd, args) => {
 			calls.push([cmd, ...args])
 			return { code: 127, stderr: "atlas: command not found", stdout: "" }
 		}
@@ -300,7 +300,7 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 		const atlas = fakeAtlas((replayed) =>
 			writeFileSync(join(replayed, "1_init.sql"), 'CREATE TABLE "post" ("id" integer);\n'),
 		)
-		const run: Run = (cmd, args, options) => (envs.push(options?.env), atlas(cmd, args, options))
+		const run: Run = async (cmd, args, options) => (envs.push(options?.env), await atlas(cmd, args, options))
 		const io = makeIo(dir, run)
 		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
@@ -415,7 +415,7 @@ describe("comb migrate diff: a drizzle.config.json", () => {
 			const run = fakeAtlas(() => undefined)
 			const base = makeIo(dir, run)
 			let versionReads = 0
-			const readAtlasVersion = base.readAtlasVersion as () => RunResult
+			const readAtlasVersion = base.readAtlasVersion as () => Promise<RunResult>
 			const io = {
 				...base,
 				readAtlasVersion: () => {

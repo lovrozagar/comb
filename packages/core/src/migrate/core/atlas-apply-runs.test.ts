@@ -8,11 +8,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { fakeAtlas, file, ok, status } from "../../../tests/support/fake-atlas.ts"
+import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 import { applyRuns } from "./atlas-apply-runs.ts"
 import type { AtlasStatus } from "./atlas-history.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { NO_SERVER_CODE, type ServerCode, UNREAD } from "./pg-server-code.ts"
 import { pgRead } from "./pg-split.ts"
+import type { RunResult } from "./process.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -58,65 +60,112 @@ function applied(atlas: ReturnType<typeof fakeAtlas>, server: ServerCode = NO_SE
 }
 
 describe("applyRuns", () => {
-	it("applies each run of files that may share a session in one call, the status read again between", () => {
+	it("applies each run of files that may share a session in one call, the status read again between", async () => {
 		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING })
 		const { amounts, out, run } = applied(atlas)
-		expect(run()).toEqual(NAMES)
+		expect(await run()).toEqual(NAMES)
 		expect([amounts(), out]).toEqual([["2", "1"], NAMES.map((name) => `Apply: ${name}`)])
 		expect(atlas.calls.filter((call) => call.args[1] === "status")).toHaveLength(1)
 	})
 
-	it("gives each file a call of its own beside a server comb cannot read", () => {
+	it("gives each file a call of its own beside a server comb cannot read", async () => {
 		const { amounts, run } = applied(fakeAtlas({ apply: report(...NAMES), status: PENDING }), UNREAD)
-		expect([run(), amounts()]).toEqual([NAMES, ["1", "1", "1"]])
+		expect([await run(), amounts()]).toEqual([NAMES, ["1", "1", "1"]])
 	})
 
-	it("refuses a call that ran other files than the run it was given", () => {
+	it("refuses a call that ran other files than the run it was given", async () => {
 		const { run } = applied(fakeAtlas({ apply: report("1_a.sql"), status: PENDING }))
-		expect(run).toThrow("atlas migrate apply 2 ran 1_a.sql, not the approved 1_a.sql, 2_b.sql")
+		await expect(run()).rejects.toThrow("atlas migrate apply 2 ran 1_a.sql, not the approved 1_a.sql, 2_b.sql")
 	})
 
-	it("stops once another apply ran the rest", () => {
+	it("stops once another apply ran the rest", async () => {
 		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING, statusAfterApply: status({ status: "OK" }) })
 		const { amounts, run } = applied(atlas)
-		expect([run(), amounts()]).toEqual([["1_a.sql", "2_b.sql"], ["2"]])
+		expect([await run(), amounts()]).toEqual([["1_a.sql", "2_b.sql"], ["2"]])
 	})
 })
 
 describe("applyRuns, a call that ran nothing", () => {
-	it("refuses it while files are still pending, naming them", () => {
+	it("refuses it while files are still pending, naming them", async () => {
 		const { run } = applied(
 			fakeAtlas({ apply: ok(JSON.stringify({ applied: null, error: "", target: "" })), status: PENDING }),
 		)
-		expect(run).toThrow(
+		await expect(run()).rejects.toThrow(
 			"atlas migrate apply ran nothing and reported no error, yet still pending: 1_a.sql, 2_b.sql, 3_c.sql",
 		)
 	})
 
-	it("says there was nothing to apply when another apply ran every file", () => {
+	it("says there was nothing to apply when another apply ran every file", async () => {
 		const atlas = fakeAtlas({
 			apply: ok(JSON.stringify({ applied: null, error: "", target: "" })),
 			status: PENDING,
 			statusAfterApply: status({ status: "OK" }),
 		})
 		const { out, run } = applied(atlas)
-		expect([run(), out]).toEqual([[], ["No migrations to apply"]])
+		expect([await run(), out]).toEqual([[], ["No migrations to apply"]])
 	})
 
-	it("returns what it applied, silently, when it was a later call and another apply ran the rest", () => {
+	it("returns what it applied, silently, when it was a later call and another apply ran the rest", async () => {
 		const atlas = fakeAtlas({ apply: report("1_a.sql", "2_b.sql"), status: PENDING })
 		let reads = 0
 		const raced = Object.assign(
-			(cmd: string, args: readonly string[], runOptions?: Parameters<typeof atlas>[2]) =>
+			async (cmd: string, args: readonly string[], runOptions?: Parameters<typeof atlas>[2]) =>
 				/* the status after the call that ran nothing: another apply ran 3_c.sql */
 				args[1] === "status" && ++reads === 2 ? status({ status: "OK" }) : atlas(cmd, args, runOptions),
 			{ calls: atlas.calls, replayed: atlas.replayed },
 		)
 		const { amounts, out, run } = applied(raced)
-		expect([run(), amounts(), out]).toEqual([
+		expect([await run(), amounts(), out]).toEqual([
 			["1_a.sql", "2_b.sql"],
 			["2", "1"],
 			["Apply: 1_a.sql", "Apply: 2_b.sql"],
+		])
+	})
+})
+
+/** `atlas`, with SIGTERM to comb once its first apply call answered, and `after` for each status read past it */
+function signalledAfterFirstCall(atlas: ReturnType<typeof fakeAtlas>, after?: RunResult) {
+	let signalled = false
+	return Object.assign(
+		async (cmd: string, args: readonly string[], runOptions?: Parameters<typeof atlas>[2]) => {
+			if (signalled && after !== undefined && args[1] === "status") return after
+			const answer = await atlas(cmd, args, runOptions)
+			if (args[1] === "apply" && !signalled) {
+				signalled = true
+				await deliver("SIGTERM")
+			}
+			return answer
+		},
+		{ calls: atlas.calls, replayed: atlas.replayed },
+	)
+}
+
+describe("applyRuns stopped by a signal (PA4 of r22)", () => {
+	const kill = stubKill()
+
+	/** What the stop printed once it asked for its end, and the ends it asked for */
+	async function stoppedLines(after?: RunResult) {
+		const { out, run } = applied(
+			signalledAfterFirstCall(fakeAtlas({ apply: report(...NAMES), status: PENDING }), after),
+		)
+		await run().catch(() => undefined)
+		await until(() => kill.calls().length > 0, "the end the stop asks for")
+		return [out.filter((line) => line.startsWith("Stopped by ")), kill.calls()]
+	}
+
+	it.each([
+		["the first call's files", undefined, "applied 1_a.sql, 2_b.sql; not applied 3_c.sql"],
+		["none", PENDING, "applied none; not applied 1_a.sql, 2_b.sql, 3_c.sql"],
+		["every file", status({ status: "OK" }), "applied 1_a.sql, 2_b.sql, 3_c.sql; not applied none"],
+	])("says once which approved files the history records, %s here, then ends by the signal", async (_, after, said) => {
+		expect(await stoppedLines(after)).toEqual([[`Stopped by SIGTERM: ${said}`], [[process.pid, "SIGTERM"]]])
+	})
+
+	it("says it could not read what was applied when the history read fails, and still ends by the signal", async () => {
+		const [lines, ends] = await stoppedLines({ code: 1, stderr: "connection refused", stdout: "" })
+		expect([lines, ends]).toEqual([
+			[expect.stringMatching(/^Stopped by SIGTERM: comb could not read what was applied: .*connection refused/)],
+			[[process.pid, "SIGTERM"]],
 		])
 	})
 })

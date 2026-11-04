@@ -22,18 +22,18 @@ afterEach(() => {
 })
 
 /** Generate relations for tables declared after a `user` table; returns the file and the logged lines */
-function generate(tables: string, file = "db.test.tables.ts"): { content: string; logged: string[] } {
+async function generate(tables: string, file = "db.test.tables.ts"): Promise<{ content: string; logged: string[] }> {
 	const tablesPath = path.join(tmpDir, file)
 	fs.writeFileSync(tablesPath, `${HEAD}${tables}\n`)
-	const ctx = testContext(analyze(tablesPath), { cwd: tmpDir, tablesPath })
+	const ctx = testContext(await analyze(tablesPath), { cwd: tmpDir, tablesPath })
 	const output = path.join(tmpDir, "relations.gen.ts")
 	generateRelations(ctx, { output })
 	return { content: fs.readFileSync(output, "utf-8"), logged: ctx.logged }
 }
 
 describe("generateRelations", () => {
-	it("writes r.one on the FK's table and r.many on the referenced one, sorted by name", () => {
-		const { content } = generate(`export const post = createTable("post", {
+	it("writes r.one on the FK's table and r.many on the referenced one, sorted by name", async () => {
+		const { content } = await generate(`export const post = createTable("post", {
 	id: c.id(),
 	user_id: c.ref("user_id").references(() => user.id).notNull(),
 })`)
@@ -57,8 +57,8 @@ export const relations = defineRelations(schema, (r) => ({
 `)
 	})
 
-	it("imports the tables file by its own name and logs what it counted", () => {
-		const { content, logged } = generate(
+	it("imports the tables file by its own name and logs what it counted", async () => {
+		const { content, logged } = await generate(
 			`export const post = createTable("post", { id: c.id(), user_id: c.ref("user_id").references(() => user.id) })
 export const tag = createTable("tag", { id: c.id() })`,
 			"db.test.tables.gen.ts",
@@ -71,16 +71,16 @@ export const tag = createTable("tag", { id: c.id() })`,
 })
 
 describe("generateRelations — relation names", () => {
-	it("names r.one by the prefix before the referenced table", () => {
-		const { content } = generate(`export const invite = createTable("invite", {
+	it("names r.one by the prefix before the referenced table", async () => {
+		const { content } = await generate(`export const invite = createTable("invite", {
 	id: c.id(),
 	invited_by_user_id: c.ref("invited_by_user_id").references(() => user.id),
 })`)
 		expect(content).toContain("invitedBy: r.one.user")
 	})
 
-	it("falls back to the column without _id when it does not name the table", () => {
-		const { content } = generate(`export const doc = createTable("doc", {
+	it("falls back to the column without _id when it does not name the table", async () => {
+		const { content } = await generate(`export const doc = createTable("doc", {
 	id: c.id(),
 	owner_id: c.ref("owner_id").references(() => user.id),
 	_user_id: c.ref("_user_id").references(() => user.id),
@@ -89,8 +89,8 @@ describe("generateRelations — relation names", () => {
 		expect(content).toContain("User: r.one.user")
 	})
 
-	it("disambiguates several r.many from one table by their columns", () => {
-		const { content } = generate(`export const transfer = createTable("transfer", {
+	it("disambiguates several r.many from one table by their columns", async () => {
+		const { content } = await generate(`export const transfer = createTable("transfer", {
 	id: c.id(),
 	sender_user_id: c.ref("sender_user_id").references(() => user.id),
 	receiver_user_id: c.ref("receiver_user_id").references(() => user.id),
@@ -102,23 +102,23 @@ describe("generateRelations — relation names", () => {
 })
 
 describe("generateRelations without a relation (F10)", () => {
-	it("takes no r it would not use, which noUnusedParameters refuses", () => {
-		const { content } = generate("")
+	it("takes no r it would not use, which noUnusedParameters refuses", async () => {
+		const { content } = await generate("")
 		expect(content).toContain("export const relations = defineRelations(schema, () => ({}))")
 		expect(content).not.toContain("(r)")
 	})
 })
 
 describe("generateRelations — a key to a table outside the file", () => {
-	it("refuses it, naming the module that exports the table, as the relations import every table from the tables file", () => {
+	it("refuses it, naming the module that exports the table, as the relations import every table from the tables file", async () => {
 		fs.writeFileSync(
 			path.join(tmpDir, "elsewhere.ts"),
 			`${HEAD}export const account = createTable("account", { id: c.id() })\n`,
 		)
-		expect(() =>
+		await expect(
 			generate(`import { account } from "./elsewhere.ts"
 export const post = createTable("post", { id: c.id(), accountId: c.ref("account_id").references(() => account.id) })`),
-		).toThrow(
+		).rejects.toThrow(
 			/post\.accountId references the table account \(account in .*elsewhere\.ts\), which the tables file does not export; export it there/,
 		)
 	})
@@ -134,8 +134,8 @@ describe("generateRelations on a composite foreign key", () => {
 export const member = createTable("member", { orgId: c.text("org_id"), userId: c.text("user_id"), role: c.text("role") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] })])
 `
 
-	it("joins on both columns, and gives the way back as many() when the key is not unique on its table", () => {
-		const { content } = generate(
+	it("joins on both columns, and gives the way back as many() when the key is not unique on its table", async () => {
+		const { content } = await generate(
 			`${MEMBER}export const grant = createTable("grant", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
 		)
 		expect(content).toContain(
@@ -148,8 +148,8 @@ export const member = createTable("member", { orgId: c.text("org_id"), userId: c
 		expect(content.match(/r\.one\.member\(/g)).toHaveLength(1)
 	})
 
-	it("gives the way back as one() when the key's columns are unique on its table", () => {
-		const { content } = generate(
+	it("gives the way back as one() when the key's columns are unique on its table", async () => {
+		const { content } = await generate(
 			`${MEMBER}export const badge = createTable("badge", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [unique("badge_member").on(t.orgId, t.userId), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
 		)
 		expect(content).toContain(
@@ -157,15 +157,15 @@ export const member = createTable("member", { orgId: c.text("org_id"), userId: c
 		)
 	})
 
-	it("gives the way back as one() when the key's columns are its table's composite primary key", () => {
-		const { content } = generate(
+	it("gives the way back as one() when the key's columns are its table's composite primary key", async () => {
+		const { content } = await generate(
 			`${MEMBER}export const seat = createTable("seat", { orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] }), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
 		)
 		expect(content).toContain("seat: r.one.seat({\n\t\t\tfrom: [r.member.orgId, r.member.userId],")
 	})
 
-	it("gives the way back as many() when only part of the key is unique on its table", () => {
-		const { content } = generate(
+	it("gives the way back as many() when only part of the key is unique on its table", async () => {
+		const { content } = await generate(
 			`${MEMBER}export const pass = createTable("pass", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [unique("pass_org").on(t.orgId), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
 		)
 		expect(content).toContain("passes: r.many.pass({\n\t\t\tfrom: [r.member.orgId, r.member.userId],")

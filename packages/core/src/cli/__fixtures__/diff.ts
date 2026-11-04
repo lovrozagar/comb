@@ -19,7 +19,7 @@ export const dirArg = (args: readonly string[]) => (args[args.indexOf("--dir") +
  */
 export function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & { calls: string[][] } {
 	const calls: string[][] = []
-	const run: Run = (cmd, args) => {
+	const run: Run = async (cmd, args) => {
 		calls.push([cmd, ...args])
 		if (cmd === process.execPath) return ok("CREATE TABLE post (id TEXT PRIMARY KEY);")
 		if (args[0] === "version") return ok("atlas version v1.3.0")

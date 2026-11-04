@@ -22,9 +22,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** The migrations directory holding `files`, hashed */
-function migrations(files: Record<string, string>): void {
+async function migrations(files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** comb's approval, never asking: every file here is safe */
@@ -69,16 +69,16 @@ describe("migrate status, check and apply on Postgres: an applied file gone, or 
 				await withScratchDb(async (url) => {
 					rmSync(dir, { force: true, recursive: true })
 					mkdirSync(dir)
-					migrations(seed)
+					await migrations(seed)
 					await applyWithAtlas(command(url))
 					for (const [name, sql] of Object.entries(change)) {
 						if (sql === null) rmSync(join(dir, name))
 						else writeFileSync(join(dir, name), sql)
 					}
-					hashDir(run, dir)
+					await hashDir(run, dir)
 					const gone = `${version} was applied, and its file is gone or renamed`
 					const status = command(url)
-					statusWithAtlas(status)
+					await statusWithAtlas(status)
 					expect(status.out).toContain(gone)
 					await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(gone)
 					await expect(applyWithAtlas(command(url))).rejects.toThrow(gone)
@@ -105,12 +105,12 @@ describe("migrate status, check and apply on Postgres: an applied file renamed u
 				await withScratchDb(async (url) => {
 					rmSync(dir, { force: true, recursive: true })
 					mkdirSync(dir)
-					migrations(files)
+					await migrations(files)
 					await applyWithAtlas(command(url))
 					rmSync(join(dir, from))
-					migrations({ [to]: files[from] })
+					await migrations({ [to]: files[from] })
 					const refusal = `${from.slice(0, 14)} was applied as ${from} and is now ${to}; restore its name`
-					expect(() => statusWithAtlas(command(url))).toThrow(refusal)
+					await expect(statusWithAtlas(command(url))).rejects.toThrow(refusal)
 					await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(refusal)
 					await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 				})
@@ -119,11 +119,13 @@ describe("migrate status, check and apply on Postgres: an applied file renamed u
 
 		it("refuses an applied file named by its version alone that was edited since (M76)", async () => {
 			await withScratchDb(async (url) => {
-				migrations({ "20260101000000.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+				await migrations({ "20260101000000.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
-				migrations({ "20260101000000.sql": 'CREATE TABLE "a" ("id" integer, "tier" integer NOT NULL DEFAULT 0);\n' })
+				await migrations({
+					"20260101000000.sql": 'CREATE TABLE "a" ("id" integer, "tier" integer NOT NULL DEFAULT 0);\n',
+				})
 				const refusal = /^20260101000000\.sql was applied, then edited/
-				expect(() => statusWithAtlas(command(url))).toThrow(refusal)
+				await expect(statusWithAtlas(command(url))).rejects.toThrow(refusal)
 				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(refusal)
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 			})

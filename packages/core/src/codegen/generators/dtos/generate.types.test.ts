@@ -27,7 +27,7 @@ afterEach(() => {
 	fs.rmSync(tmpDir, { force: true, recursive: true })
 })
 
-function generateFor(tsType: string, extra = ""): string {
+async function generateFor(tsType: string, extra = ""): Promise<string> {
 	const fp = path.join(tmpDir, "db.test.tables.ts")
 	fs.writeFileSync(
 		fp,
@@ -38,7 +38,7 @@ export const doc = createTable("doc", {
 })
 `,
 	)
-	const analysis = analyze(fp)
+	const analysis = await analyze(fp)
 	const outDir = path.join(tmpDir, "dtos")
 	generateDtos(testContext(analysis, { cwd: tmpDir, tablesPath: fp }), { output: outDir })
 	/* Repeated schemas are hoisted into the shared module, so a column's zod
@@ -49,7 +49,7 @@ export const doc = createTable("doc", {
 	].join("\n")
 }
 
-function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}): TestContext {
+async function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}): Promise<TestContext> {
 	const fp = path.join(tmpDir, "db.test.tables.ts")
 	fs.writeFileSync(
 		fp,
@@ -58,7 +58,7 @@ export const post = createTable("post", { id: c.id(), title: c.text("title") })
 export const author = createTable("author", { id: c.id(), name: c.text("name") })
 `,
 	)
-	const ctx = testContext(analyze(fp), { cwd: tmpDir, tablesPath: fp })
+	const ctx = testContext(await analyze(fp), { cwd: tmpDir, tablesPath: fp })
 	generateDtos(ctx, { output: path.join(tmpDir, "dtos"), ...opts })
 	return ctx
 }
@@ -71,29 +71,29 @@ function exportsOf(): Record<string, string> {
 }
 
 describe("generateDtos — $type handling", () => {
-	it("types the column by its helper: $type is a type, which the loaded module never holds", () => {
-		const content = generateFor("z.infer<typeof settingsSchema>")
+	it("types the column by its helper: $type is a type, which the loaded module never holds", async () => {
+		const content = await generateFor("z.infer<typeof settingsSchema>")
 		expect(content).not.toContain("settingsSchema")
 		expect(content).toMatch(/_str|z\.string\(\)/)
 	})
 
-	it("falls back to the column helper's own schema for a structural type", () => {
+	it("falls back to the column helper's own schema for a structural type", async () => {
 		/* Only a named schema is adopted; a structural type is described by the
 		   column helper (here c.text), so the generated field stays a string. */
-		const content = generateFor("{ a: string }")
+		const content = await generateFor("{ a: string }")
 		expect(content).not.toContain("z.object({ a:")
 		expect(content).toMatch(/_str|z\.string\(\)/)
 	})
 
-	it("is unfazed by angle brackets inside a type argument", () => {
-		expect(() => generateFor("Record<string, number>")).not.toThrow()
+	it("is unfazed by angle brackets inside a type argument", async () => {
+		await expect(generateFor("Record<string, number>")).resolves.toEqual(expect.any(String))
 	})
 
-	it("is unfazed by a string literal containing a closing angle bracket", () => {
-		expect(() => generateFor(`"a>b"`)).not.toThrow()
+	it("is unfazed by a string literal containing a closing angle bracket", async () => {
+		await expect(generateFor(`"a>b"`)).resolves.toEqual(expect.any(String))
 	})
 
-	it("tolerates a malformed, unclosed type argument", () => {
+	it("tolerates a malformed, unclosed type argument", async () => {
 		const fp = path.join(tmpDir, "db.test.tables.ts")
 		fs.writeFileSync(
 			fp,
@@ -101,7 +101,7 @@ describe("generateDtos — $type handling", () => {
 export const doc = createTable("doc", { id: c.id(), data: c.text("data") })
 `,
 		)
-		const analysis = analyze(fp)
+		const analysis = await analyze(fp)
 		expect(() =>
 			generateDtos(testContext(analysis, { cwd: tmpDir, tablesPath: fp }), { output: path.join(tmpDir, "dtos") }),
 		).not.toThrow()
@@ -109,41 +109,41 @@ export const doc = createTable("doc", { id: c.id(), data: c.text("data") })
 })
 
 describe("generateDtos — package.json exports", () => {
-	it("leaves package.json untouched unless asked", () => {
+	it("leaves package.json untouched unless asked", async () => {
 		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: { ".": "./x.ts" }, name: "app" }))
-		generate()
+		await generate()
 		expect(exportsOf()).toEqual({ ".": "./x.ts" })
 	})
 
-	it("warns rather than throwing when there is no package.json", () => {
-		const { warned } = generate({ updatePackageJson: true })
+	it("warns rather than throwing when there is no package.json", async () => {
+		const { warned } = await generate({ updatePackageJson: true })
 		expect(warned.some((line) => line.includes("package.json not found"))).toBe(true)
 	})
 
-	it("registers one export per entity plus the shared module", () => {
+	it("registers one export per entity plus the shared module", async () => {
 		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: {}, name: "app" }))
-		generate({ updatePackageJson: true })
+		await generate({ updatePackageJson: true })
 
 		const exports = exportsOf()
 		expect(Object.keys(exports).some((k) => k.includes("post"))).toBe(true)
 		expect(Object.keys(exports).some((k) => k.includes("author"))).toBe(true)
 	})
 
-	it("preserves exports it does not own", () => {
+	it("preserves exports it does not own", async () => {
 		fs.writeFileSync(
 			path.join(tmpDir, "package.json"),
 			JSON.stringify({ exports: { ".": "./index.ts", "./custom": "./custom.ts" }, name: "app" }),
 		)
-		generate({ updatePackageJson: true })
+		await generate({ updatePackageJson: true })
 
 		const exports = exportsOf()
 		expect(exports["."]).toBe("./index.ts")
 		expect(exports["./custom"]).toBe("./custom.ts")
 	})
 
-	it("uses the file prefix in the generated file names", () => {
+	it("uses the file prefix in the generated file names", async () => {
 		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: {}, name: "app" }))
-		generate({ filePrefix: "app.db-test", updatePackageJson: true })
+		await generate({ filePrefix: "app.db-test", updatePackageJson: true })
 
 		expect(fs.existsSync(path.join(tmpDir, "dtos", "post", "app.db-test.post.gen.ts"))).toBe(true)
 		expect(Object.values(exportsOf()).some((v) => v.includes("app.db-test"))).toBe(true)

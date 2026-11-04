@@ -40,8 +40,8 @@ describe("comb migrate on D1 through wrangler, --local", () => {
 		const apply = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], apply), apply.errors.join("\n")).toBe(0)
 		expect(apply.outputs).toContain("\nDone: 1 applied")
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
-		expect(column(dir, "SELECT name FROM sqlite_master WHERE name = '__drizzle_migrations'")).toEqual([])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+		expect(await column(dir, "SELECT name FROM sqlite_master WHERE name = '__drizzle_migrations'")).toEqual([])
 		const status = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(0)
 		expect(status.outputs).toEqual(["Applied: 20260101000000_init.sql", "Pending: none"])
@@ -53,14 +53,14 @@ describe("comb migrate on D1 through wrangler, --local", () => {
 	it("applies none of a file that fails partway, records nothing, and applies it once fixed", async () => {
 		const dir = project({ "20260101000000_bad.sql": READS_LIVE_JSON })
 		/* the live row the file fails on, which the proof and D1's engine do not hold */
-		column(dir, LIVE_NOT_JSON)
+		await column(dir, LIVE_NOT_JSON)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(1)
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual([])
-		expect(column(dir, "SELECT name FROM sqlite_master WHERE name = 'got'")).toEqual([])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual([])
+		expect(await column(dir, "SELECT name FROM sqlite_master WHERE name = 'got'")).toEqual([])
 		write(dir, { "20260101000000_bad.sql": "CREATE TABLE got (v TEXT);" })
 		const fixed = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], fixed), fixed.errors.join("\n")).toBe(0)
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_bad.sql"])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_bad.sql"])
 	}, 120_000)
 })
 
@@ -69,7 +69,7 @@ describe("comb migrate on D1 through wrangler, --local: history and the live sch
 		const dir = project(INIT)
 		const hash = generateMigrationHash(INIT["20260101000000_init.sql"])
 		const setup = `CREATE TABLE post (id TEXT PRIMARY KEY); CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL); INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('${hash}', 1)`
-		expect(wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${setup}`]).code).toBe(0)
+		expect((await wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${setup}`])).code).toBe(0)
 		write(dir, { "20260102000000_tag.sql": "CREATE TABLE tag (id TEXT);" })
 		const refused = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], refused)).toBe(1)
@@ -78,7 +78,7 @@ describe("comb migrate on D1 through wrangler, --local: history and the live sch
 		const apply = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], apply), apply.errors.join("\n")).toBe(0)
 		expect(apply.outputs).toEqual(["Apply: 20260102000000_tag.sql", "\nDone: 1 applied"])
-		expect(column(dir, "SELECT name FROM d1_migrations ORDER BY id")).toEqual([
+		expect(await column(dir, "SELECT name FROM d1_migrations ORDER BY id")).toEqual([
 			"20260101000000_init.sql",
 			"20260102000000_tag.sql",
 		])
@@ -91,7 +91,7 @@ describe("comb migrate on D1 through wrangler, --local: history and the live sch
 		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(0)
 		const outside =
 			"CREATE TABLE extra (u integer REFERENCES u(id) ON DELETE CASCADE); INSERT INTO u VALUES (1); INSERT INTO extra VALUES (1)"
-		expect(wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${outside}`]).code).toBe(0)
+		expect((await wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${outside}`])).code).toBe(0)
 		const rebuild = guardRebuilds(
 			"CREATE TABLE `new_u` (`id` integer NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_u` (`id`) SELECT `id` FROM `u`;\nDROP TABLE `u`;\nALTER TABLE `new_u` RENAME TO `u`;\n",
 			extractSchema(init),
@@ -103,8 +103,8 @@ describe("comb migrate on D1 through wrangler, --local: history and the live sch
 		expect(refused.errors[0]).toMatch(
 			/^20260102000000_rebuild\.sql rebuilds u, which the database's table extra references/,
 		)
-		expect(column(dir, "SELECT count(*) FROM extra")).toEqual([1])
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+		expect(await column(dir, "SELECT count(*) FROM extra")).toEqual([1])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
 	}, 120_000)
 })
 
@@ -132,7 +132,7 @@ describe("comb migrate check and status on D1 --local, the local database missin
 		["the binding alone", {}],
 	])(
 		"names the file wrangler keeps a local database in, by %s",
-		(_label, ids) => {
+		async (_label, ids) => {
 			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-d1-local-"))
 			dirs.push(dir)
 			const entry = { binding: "CORE", database_name: "core", ...ids }
@@ -141,7 +141,7 @@ describe("comb migrate check and status on D1 --local, the local database missin
 				JSON.stringify({ compatibility_date: "2026-10-01", d1_databases: [entry], name: "probe" }),
 			)
 			expect(fs.existsSync(localD1Path(dir, entry))).toBe(false)
-			expect(wrangler(dir)("wrangler", ["d1", "execute", "CORE", "--local", "--command=SELECT 1"]).code).toBe(0)
+			expect((await wrangler(dir)("wrangler", ["d1", "execute", "CORE", "--local", "--command=SELECT 1"])).code).toBe(0)
 			expect(fs.existsSync(localD1Path(dir, entry))).toBe(true)
 		},
 		120_000,
@@ -169,7 +169,7 @@ describe("comb migrate on D1 --local never runs a file that reaches outside its 
 		const read = createClient({ url: `file:${live}` })
 		expect((await read.execute("SELECT id FROM users ORDER BY id")).rows.map((row) => row[0])).toEqual([1, 2])
 		read.close()
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
 	}, 120_000)
 })
 
@@ -185,13 +185,15 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 
 	it("a failed apply, the file fixed and applied by wrangler alone end in the warning --hashes clears", async () => {
 		const dir = project({ "20260101000000_bad.sql": READS_LIVE_JSON })
-		column(dir, LIVE_NOT_JSON)
+		await column(dir, LIVE_NOT_JSON)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(1)
 		/* wrangler ran nothing, so comb holds no hash for the file, only its emptied intent table */
-		expect(tables(dir)).toEqual(["_comb_migration_hash_intents", "d1_migrations"])
-		expect(column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
+		expect(await tables(dir)).toEqual(["_comb_migration_hash_intents", "d1_migrations"])
+		expect(await column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
 		write(dir, { "20260101000000_bad.sql": "CREATE TABLE got (v TEXT);" })
-		expect(wrangler(dir)("wrangler", ["d1", "migrations", "apply", "core", "--local"], { input: "" }).code).toBe(0)
+		expect(
+			(await wrangler(dir)("wrangler", ["d1", "migrations", "apply", "core", "--local"], { input: "" })).code,
+		).toBe(0)
 		const status = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], status), status.errors.join("\n")).toBe(0)
 		expect([...status.outputs, ...status.errors]).toContain(
@@ -203,7 +205,7 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 		const clean = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], clean)).toBe(0)
 		expect(clean.outputs).toEqual(["Applied: 20260101000000_bad.sql", "Pending: none"])
-		expect(column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_bad.sql"])
+		expect(await column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_bad.sql"])
 	}, 180_000)
 
 	/* miniflare's local D1 takes one writer: of two applies that overlap, the one that loses fails on
@@ -218,9 +220,9 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 		}
 		const rerun = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], rerun), rerun.errors.join("\n")).toBe(0)
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
-		expect(column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_init.sql"])
-		expect(column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+		expect(await column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_init.sql"])
+		expect(await column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
 		const status = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(0)
 		expect(status.outputs).toEqual(["Applied: 20260101000000_init.sql", "Pending: none"])
@@ -238,6 +240,6 @@ describe("comb migrate check on D1 --local proves each file as wrangler runs it,
 		expect(await runCli(["migrate", "check", "core", "--local", "--yes"], check)).toBe(1)
 		expect(check.errors.join("\n")).toContain("CHECK constraint failed")
 		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], io(dir))).toBe(1)
-		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["0000_keep.sql"])
+		expect(await column(dir, "SELECT name FROM d1_migrations")).toEqual(["0000_keep.sql"])
 	}, 120_000)
 })

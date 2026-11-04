@@ -12,9 +12,17 @@ import { runCli } from "../../cli/index.ts"
 import { run } from "../core/process.ts"
 
 /** A project whose one database, core, is an empty SQLite file on `provider`, with migrations in ./m */
-export type ScopeProject = { db: string; dir: string; remove(): void; write(files: Record<string, string>): void }
+export type ScopeProject = {
+	db: string
+	dir: string
+	remove(): void
+	write(files: Record<string, string>): Promise<void>
+}
 
-export function scopeProject(provider: "bun-sqlite" | "libsql", files: Record<string, string>): ScopeProject {
+export async function scopeProject(
+	provider: "bun-sqlite" | "libsql",
+	files: Record<string, string>,
+): Promise<ScopeProject> {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-pragma-scope-"))
 	const [db, m] = [path.join(dir, "core.db"), path.join(dir, "m")]
 	fs.mkdirSync(m)
@@ -25,11 +33,11 @@ export function scopeProject(provider: "bun-sqlite" | "libsql", files: Record<st
 		path.join(dir, "comb.migrate.config.ts"),
 		`export default { databases: { core: { migrationsDir: "./m", name: "core", provider: ${JSON.stringify(config)} } } }\n`,
 	)
-	const write = (more: Record<string, string>) => {
+	const write = async (more: Record<string, string>) => {
 		for (const [name, sql] of Object.entries(more)) fs.writeFileSync(path.join(m, name), sql)
-		run("atlas", ["migrate", "hash", "--dir", `file://${m}`])
+		await run("atlas", ["migrate", "hash", "--dir", `file://${m}`])
 	}
-	write(files)
+	await write(files)
 	return { db, dir, remove: () => fs.rmSync(dir, { force: true, recursive: true }), write }
 }
 

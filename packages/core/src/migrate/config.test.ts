@@ -190,7 +190,9 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 	it.each(PROVIDERS)("resolves and creates $type with its dialect", (provider) => {
 		const resolved = resolveDatabaseConfig({ migrationsDir: "m", name: "core", provider })
 		expect(resolved).toEqual({ drizzleConfigPath: undefined, migrationsDir: "m", name: "core", provider })
-		expect(createProvider(provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe("sqlite")
+		expect(createProvider(provider, { run: async () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe(
+			"sqlite",
+		)
 	})
 
 	it("refuses an environment with no provider anywhere", () => {

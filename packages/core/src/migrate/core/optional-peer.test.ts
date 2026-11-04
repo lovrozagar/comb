@@ -47,7 +47,7 @@ const only =
 /** What `atlas version` says, as comb's tested Atlas and any build of it says it */
 const says =
 	(stdout: string, code = 0) =>
-	(): RunResult => ({ code, stderr: code === 127 ? "atlas: command not found" : "", stdout })
+	async (): Promise<RunResult> => ({ code, stderr: code === 127 ? "atlas: command not found" : "", stdout })
 
 /** The Atlas comb is tested against, on PATH */
 const tested = says("atlas version v1.3.0\nhttps://github.com/ariga/atlas/releases/tag/v1.3.0\n")
@@ -68,12 +68,12 @@ describe("missingPeer", () => {
 	})
 
 	/* K3 of r22: comb finds a bin peer in the project and never on PATH, so the refusal sends no one there */
-	it("gives a peer comb spawns the range and the install alone, as the --json refusal carries it (K3)", () => {
+	it("gives a peer comb spawns the range and the install alone, as the --json refusal carries it (K3)", async () => {
 		const refusal = missingPeer({ peer: "drizzle-kit", why: "export the schema" })
 		expect(refusal).toBe(
 			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the schema; install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
 		)
-		expect(() => requirePeers("status", "d1", { atlas: tested, cwd: ROOT, locate: only() })).toThrow(
+		await expect(requirePeers("status", "d1", { atlas: tested, cwd: ROOT, locate: only() })).rejects.toThrow(
 			new MissingPeerError(
 				`comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; install "wrangler@>=4.147.0 <5"`,
 			),
@@ -200,40 +200,40 @@ describe("resolvePeer", () => {
 })
 
 describe("requirePeers, on what a command needs", () => {
-	it("names every peer it needs that is missing in one refusal, with one install", () => {
-		expect(() => requirePeers("baseline", "postgres", { atlas: tested, cwd: ROOT, locate: only() })).toThrow(
+	it("names every peer it needs that is missing in one refusal, with one install", async () => {
+		await expect(requirePeers("baseline", "postgres", { atlas: tested, cwd: ROOT, locate: only() })).rejects.toThrow(
 			new MissingPeerError(
 				`comb needs libpg-query (>=17.7.4 <18) to read Postgres migrations, and postgres (>=3.4.9 <4) to read what Atlas OSS leaves out of a baseline's compare; install "libpg-query@>=17.7.4 <18" "postgres@>=3.4.9 <4"`,
 			),
 		)
-		expect(() =>
+		await expect(
 			requirePeers("baseline", "postgres", { atlas: tested, cwd: ROOT, locate: only("libpg-query") }),
-		).toThrow(
+		).rejects.toThrow(
 			`comb needs postgres (>=3.4.9 <4) to read what Atlas OSS leaves out of a baseline's compare; install "postgres@>=3.4.9 <4"`,
 		)
 	})
 
-	it("passes a command whose peers are all in range, and one that needs none", () => {
+	it("passes a command whose peers are all in range, and one that needs none", async () => {
 		const both = only("libpg-query", "postgres")
-		expect(() => requirePeers("baseline", "postgres", { atlas: tested, cwd: ROOT, locate: both })).not.toThrow()
-		expect(() => requirePeers("status", "postgres", { atlas: tested, cwd: ROOT, locate: only() })).not.toThrow()
-		expect(() => requirePeers("check", "bun-sqlite", { atlas: tested, cwd: ROOT, locate: only() })).not.toThrow()
+		await expect(requirePeers("baseline", "postgres", { atlas: tested, cwd: ROOT, locate: both })).resolves.toEqual({})
+		await expect(requirePeers("status", "postgres", { atlas: tested, cwd: ROOT, locate: only() })).resolves.toEqual({})
+		await expect(requirePeers("check", "bun-sqlite", { atlas: tested, cwd: ROOT, locate: only() })).resolves.toEqual({})
 	})
 
-	it("leaves out a peer the command runs without: check's replay on Postgres", () => {
-		expect(() =>
+	it("leaves out a peer the command runs without: check's replay on Postgres", async () => {
+		await expect(
 			requirePeers("check", "postgres", { atlas: tested, cwd: ROOT, locate: only("libpg-query") }),
-		).not.toThrow()
+		).resolves.toEqual({})
 		expect(PEERS.postgres.check?.some((need) => need.peer === "postgres" && need.optional === true)).toBe(true)
 	})
 
-	it("refuses a peer outside its range, and keeps a missing one's resolver error as the cause", () => {
-		expect(() => requirePeers("apply", "turso", { atlas: tested, cwd: ROOT, locate: atOld })).toThrow(
+	it("refuses a peer outside its range, and keeps a missing one's resolver error as the cause", async () => {
+		await expect(requirePeers("apply", "turso", { atlas: tested, cwd: ROOT, locate: atOld })).rejects.toThrow(
 			`comb needs @libsql/client (>=0.17.4 <0.18, found 0.18.0) to open a libsql or Turso database; install "@libsql/client@>=0.17.4 <0.18"`,
 		)
-		const missing = (() => {
+		const missing = await (async () => {
 			try {
-				requirePeers("status", "d1", { atlas: tested, cwd: ROOT, locate: only() })
+				await requirePeers("status", "d1", { atlas: tested, cwd: ROOT, locate: only() })
 			} catch (error) {
 				return error
 			}
@@ -241,8 +241,8 @@ describe("requirePeers, on what a command needs", () => {
 		expect(missing).toMatchObject({ cause: notFound("wrangler"), name: "MissingPeerError" })
 	})
 
-	it("passes on a failure that is no missing peer", () => {
-		expect(() => requirePeers("diff", "libsql", { atlas: tested, cwd: ROOT, locate: denied })).toThrow("EACCES")
+	it("passes on a failure that is no missing peer", async () => {
+		await expect(requirePeers("diff", "libsql", { atlas: tested, cwd: ROOT, locate: denied })).rejects.toThrow("EACCES")
 	})
 })
 
@@ -269,22 +269,22 @@ describe("requirePeers, finding a peer comb spawns (K1; sibling: drizzle-kit's r
 	const src = join(app, "src")
 	mkdirSync(src, { recursive: true })
 
-	it("resolves wrangler from cwd up, the nearest package, its bin as its package.json names it, on node", () => {
-		expect(requirePeers("status", "d1", { atlas: tested, cwd: src })).toEqual({
+	it("resolves wrangler from cwd up, the nearest package, its bin as its package.json names it, on node", async () => {
+		expect(await requirePeers("status", "d1", { atlas: tested, cwd: src })).toEqual({
 			wrangler: { bin: join(appWrangler, "../cli/run.js"), manifest: appWrangler, peer: "wrangler", runtime: "node" },
 		})
 	})
 
-	it("refuses the wrangler cwd reaches, naming the version comb would run", () => {
-		expect(() => requirePeers("check", "d1", { atlas: tested, cwd: root })).toThrow(
+	it("refuses the wrangler cwd reaches, naming the version comb would run", async () => {
+		await expect(requirePeers("check", "d1", { atlas: tested, cwd: root })).rejects.toThrow(
 			`comb needs wrangler (>=4.147.0 <5, found 3.99.0) to migrate a D1 database; install "wrangler@>=4.147.0 <5"`,
 		)
 		expect(rootWrangler).toContain(root)
 	})
 
 	/* AD5 of the area D review: 0.20.1's `bun drizzle-kit` followed the bin's node shebang, so drizzle-kit keeps comb's own runtime */
-	it("resolves drizzle-kit the same way, its bin a string, on the runtime running comb", () => {
-		expect(requirePeers("diff", "d1", { atlas: tested, cwd: src })).toEqual({
+	it("resolves drizzle-kit the same way, its bin a string, on the runtime running comb", async () => {
+		expect(await requirePeers("diff", "d1", { atlas: tested, cwd: src })).toEqual({
 			"drizzle-kit": {
 				bin: join(rootKit, "../bin.cjs"),
 				manifest: rootKit,
@@ -292,24 +292,24 @@ describe("requirePeers, finding a peer comb spawns (K1; sibling: drizzle-kit's r
 				runtime: process.execPath,
 			},
 		})
-		expect(() => requirePeers("diff", "d1", { atlas: tested, cwd: tmpdir() })).toThrow(
+		await expect(requirePeers("diff", "d1", { atlas: tested, cwd: tmpdir() })).rejects.toThrow(
 			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
 		)
 	})
 
-	it("finds a bin peer from the entry a locator gives, and refuses a package that names no bin for it", () => {
+	it("finds a bin peer from the entry a locator gives, and refuses a package that names no bin for it", async () => {
 		const entry = join(appWrangler, "../index.js")
-		expect(requirePeers("status", "d1", { atlas: tested, cwd: tmpdir(), locate: () => entry }).wrangler?.manifest).toBe(
-			appWrangler,
-		)
+		expect(
+			(await requirePeers("status", "d1", { atlas: tested, cwd: tmpdir(), locate: () => entry })).wrangler?.manifest,
+		).toBe(appWrangler)
 		const bare = inFolder(join(ROOT, "bare"), { bin: { "cf-wrangler": "x.js" }, name: "wrangler", version: "4.150.0" })
-		expect(() => requirePeers("status", "d1", { atlas: tested, cwd: join(bare, "../../..") })).toThrow(
+		await expect(requirePeers("status", "d1", { atlas: tested, cwd: join(bare, "../../..") })).rejects.toThrow(
 			`${bare} names no wrangler bin`,
 		)
 	})
 
-	it("finds a peer comb imports as comb resolves it, and gives no bin for it", () => {
-		expect(requirePeers("check", "libsql", { atlas: tested, cwd: tmpdir() })).toEqual({})
+	it("finds a peer comb imports as comb resolves it, and gives no bin for it", async () => {
+		expect(await requirePeers("check", "libsql", { atlas: tested, cwd: tmpdir() })).toEqual({})
 	})
 })
 
@@ -363,70 +363,75 @@ describe("Atlas is a row of the peer table (PA5, KC6 + PA22; sibling: K3's PATH-
 	const ATLAS = `atlas (${ATLAS_RANGE}) to hash, diff and apply migrations`
 	const INSTALL = "atlas from https://atlasgo.io/getting-started"
 
-	it("refuses an Atlas outside its range by the version it says, with the install page, official or community", () => {
+	it("refuses an Atlas outside its range by the version it says, with the install page, official or community", async () => {
 		const old = says("atlas community version v0.32.0\nhttps://github.com/ariga/atlas/releases/tag/v0.32.0\n")
-		expect(() => requirePeers("status", "postgres", { atlas: old, cwd: ROOT, locate: only() })).toThrow(
+		await expect(requirePeers("status", "postgres", { atlas: old, cwd: ROOT, locate: only() })).rejects.toThrow(
 			new MissingPeerError(
 				`comb needs atlas (${ATLAS_RANGE}, found 0.32.0) to hash, diff and apply migrations; install ${INSTALL}`,
 			),
 		)
 		const next = says("atlas version v2.0.0\n")
-		expect(() => requirePeers("apply", "libsql", { atlas: next, cwd: ROOT, locate: only("@libsql/client") })).toThrow(
-			`found 2.0.0`,
-		)
+		await expect(
+			requirePeers("apply", "libsql", { atlas: next, cwd: ROOT, locate: only("@libsql/client") }),
+		).rejects.toThrow(`found 2.0.0`)
 		const community = says("atlas community version v1.3.0\n")
-		expect(() => requirePeers("check", "bun-sqlite", { atlas: community, cwd: ROOT, locate: only() })).not.toThrow()
+		const found = requirePeers("check", "bun-sqlite", { atlas: community, cwd: ROOT, locate: only() })
+		await expect(found).resolves.toEqual({})
 	})
 
-	it("refuses a missing Atlas, and one that says no version, on every command that runs it, Postgres status included", () => {
+	it("refuses a missing Atlas, and one that says no version, on every command that runs it, Postgres status included", async () => {
 		const missing = says("", 127)
 		for (const command of ["apply", "baseline", "check", "diff", "status"] as const)
-			expect(() =>
+			await expect(
 				requirePeers(command, "postgres", {
 					atlas: missing,
 					cwd: ROOT,
 					locate: only("libpg-query", "postgres", "drizzle-kit"),
 				}),
-			).toThrow(`comb needs ${ATLAS}; install ${INSTALL}`)
-		expect(() => requirePeers("diff", "d1", { atlas: says("", 1), cwd: ROOT, locate: only("drizzle-kit") })).toThrow(
-			`atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1)`,
-		)
+			).rejects.toThrow(`comb needs ${ATLAS}; install ${INSTALL}`)
+		await expect(
+			requirePeers("diff", "d1", { atlas: says("", 1), cwd: ROOT, locate: only("drizzle-kit") }),
+		).rejects.toThrow(`atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1)`)
 		/* D4-1 of the area D round-four review: one that exits 0 and prints no version */
-		expect(() =>
+		await expect(
 			requirePeers("diff", "d1", { atlas: says("atlas: unknown\n"), cwd: ROOT, locate: only("drizzle-kit") }),
-		).toThrow(`atlas (${ATLAS_RANGE}, found no version)`)
+		).rejects.toThrow(`atlas (${ATLAS_RANGE}, found no version)`)
 	})
 
-	it("names Atlas with the npm peers in one refusal, the installs together", () => {
-		expect(() => requirePeers("baseline", "postgres", { atlas: says("", 127), cwd: ROOT, locate: only() })).toThrow(
+	it("names Atlas with the npm peers in one refusal, the installs together", async () => {
+		await expect(
+			requirePeers("baseline", "postgres", { atlas: says("", 127), cwd: ROOT, locate: only() }),
+		).rejects.toThrow(
 			`comb needs libpg-query (>=17.7.4 <18) to read Postgres migrations, and postgres (>=3.4.9 <4) to read what Atlas OSS leaves out of a baseline's compare, and ${ATLAS}; install "libpg-query@>=17.7.4 <18" "postgres@>=3.4.9 <4", and ${INSTALL}`,
 		)
 	})
 
-	it("reads Atlas's version once, only where the command runs Atlas", () => {
+	it("reads Atlas's version once, only where the command runs Atlas", async () => {
 		let reads = 0
-		const counted = () => {
+		const counted = async () => {
 			reads++
 			return tested()
 		}
-		requirePeers("check", "libsql", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
+		await requirePeers("check", "libsql", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
 		expect(reads).toBe(1)
-		requirePeers("status", "libsql", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
-		requirePeers("status", "turso", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
+		await requirePeers("status", "libsql", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
+		await requirePeers("status", "turso", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
 		expect(reads).toBe(1)
 	})
 })
 
 /* AD11 of the area D review: a version manager's shim with no version set exits 1, and says why on stderr */
-const shim = (): RunResult => ({
+const shim = async (): Promise<RunResult> => ({
 	code: 1,
 	stderr: "\nmise ERROR No version is set for shim: atlas\nSet a global default version\n",
 	stdout: "",
 })
 
 describe("an Atlas that exits otherwise than found or missing (AD11)", () => {
-	it("keeps the first line it says on stderr, as the reason it found no version", () => {
-		expect(() => requirePeers("check", "postgres", { atlas: shim, cwd: ROOT, locate: only("libpg-query") })).toThrow(
+	it("keeps the first line it says on stderr, as the reason it found no version", async () => {
+		await expect(
+			requirePeers("check", "postgres", { atlas: shim, cwd: ROOT, locate: only("libpg-query") }),
+		).rejects.toThrow(
 			new MissingPeerError(
 				`comb needs atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1: mise ERROR No version is set for shim: atlas) to hash, diff and apply migrations; install atlas from https://atlasgo.io/getting-started`,
 			),
@@ -436,28 +441,32 @@ describe("an Atlas that exits otherwise than found or missing (AD11)", () => {
 
 /* KC3 of r22: the FTS part of a SQLite diff loads the tables file, through ts-morph */
 describe("a SQLite diff whose comb.config.ts declares FTS needs ts-morph (KC3; sibling: drizzle-kit's row)", () => {
-	it("adds ts-morph to a SQLite-family diff whose comb.config.ts declares FTS, named with drizzle-kit in one refusal", () => {
+	it("adds ts-morph to a SQLite-family diff whose comb.config.ts declares FTS, named with drizzle-kit in one refusal", async () => {
 		const KIT = `drizzle-kit (${OPTIONAL_PEER_RANGES["drizzle-kit"]}) to export the drizzle schema for comb migrate diff`
 		const MORPH = `ts-morph (>=28.0.0 <29) to read the tables file whose FTS comb.config.ts declares`
 		const install = `install "drizzle-kit@${OPTIONAL_PEER_RANGES["drizzle-kit"]}" "ts-morph@>=28.0.0 <29"`
 		for (const provider of ["bun-sqlite", "d1", "libsql", "turso"] as const)
-			expect(() => requirePeers("diff", provider, { atlas: tested, cwd: ROOT, fts: true, locate: only() })).toThrow(
-				`comb needs ${KIT}, and ${MORPH}; ${install}`,
-			)
-		expect(() => requirePeers("diff", "libsql", { atlas: tested, cwd: ROOT, fts: false, locate: only() })).toThrow(
-			`comb needs ${KIT}; install "drizzle-kit@`,
-		)
-		expect(() =>
+			await expect(
+				requirePeers("diff", provider, { atlas: tested, cwd: ROOT, fts: true, locate: only() }),
+			).rejects.toThrow(`comb needs ${KIT}, and ${MORPH}; ${install}`)
+		await expect(
+			requirePeers("diff", "libsql", { atlas: tested, cwd: ROOT, fts: false, locate: only() }),
+		).rejects.toThrow(`comb needs ${KIT}; install "drizzle-kit@`)
+		await expect(
 			requirePeers("diff", "d1", { atlas: tested, cwd: ROOT, fts: true, locate: only("drizzle-kit", "ts-morph") }),
-		).not.toThrow()
+		).resolves.toEqual({
+			"drizzle-kit": expect.objectContaining({ peer: "drizzle-kit", runtime: process.execPath }),
+		})
 		/* Postgres has no FTS of comb's: its diff never loads the tables file */
-		expect(() =>
+		await expect(
 			requirePeers("diff", "postgres", {
 				atlas: tested,
 				cwd: ROOT,
 				fts: true,
 				locate: only("drizzle-kit", "libpg-query"),
 			}),
-		).not.toThrow()
+		).resolves.toEqual({
+			"drizzle-kit": expect.objectContaining({ peer: "drizzle-kit", runtime: process.execPath }),
+		})
 	})
 })

@@ -16,8 +16,8 @@ function sqlFiles(dir: string): string[] {
 }
 
 /** Write `dir`'s atlas.sum with `atlas migrate hash` */
-function hashDir(exec: Run, dir: string): void {
-	const result = exec("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
+async function hashDir(exec: Run, dir: string): Promise<void> {
+	const result = await exec("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
 	if (result.code !== 0) throw new Error(`atlas migrate hash failed: ${result.stderr.trim()}`)
 }
 
@@ -34,7 +34,7 @@ function sumHashes(dir: string): Map<string, string> {
 }
 
 /** Refuse a directory whose atlas.sum does not match its files: comb hashes an untouched copy and compares */
-function verifySum(exec: Run, dir: string, shown: string = dir): void {
+async function verifySum(exec: Run, dir: string, shown: string = dir): Promise<void> {
 	/* a directory with no migration and no sum, as `comb migrate init` makes it, is an empty history (S9, K3) */
 	if (!existsSync(join(dir, "atlas.sum"))) {
 		if (sqlFiles(dir).length === 0) return
@@ -45,7 +45,7 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 	const { dir: check, remove: removeCheck } = scratchDir("comb-migrate-sum-")
 	try {
 		for (const file of sqlFiles(dir)) copyFileSync(join(dir, file), join(check, file))
-		hashDir(exec, check)
+		await hashDir(exec, check)
 		if (readFileSync(join(check, "atlas.sum"), "utf8") !== readFileSync(join(dir, "atlas.sum"), "utf8")) {
 			throw new Error(
 				`${shown}/atlas.sum does not match its migrations; if a migration was edited on purpose, run atlas migrate hash`,
@@ -59,14 +59,14 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 /**
  * A private 0700 copy of `dir`'s migrations and atlas.sum, checked against the sum. What comb
  * classifies and what Atlas applies are both read from it, so an edit to `dir` in between changes
- * nothing; the caller removes it through the scratch's `remove`, which lets its hold go too.
+ * nothing; the caller removes it.
  */
-function snapshotDir(exec: Run, dir: string): Scratch {
+async function snapshotDir(exec: Run, dir: string): Promise<Scratch> {
 	const snapshot = scratchDir("comb-migrate-snapshot-")
 	try {
 		const sum = existsSync(join(dir, "atlas.sum")) ? ["atlas.sum"] : []
 		for (const file of [...sqlFiles(dir), ...sum]) copyFileSync(join(dir, file), join(snapshot.dir, file))
-		verifySum(exec, snapshot.dir, dir)
+		await verifySum(exec, snapshot.dir, dir)
 		return snapshot
 	} catch (error) {
 		snapshot.remove()

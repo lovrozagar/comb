@@ -428,7 +428,7 @@ describe("baselineWithAtlas: what it refuses", () => {
 
 	it("says what Atlas could not set", async () => {
 		const atlas = fakeAtlas({ status: status({}) })
-		const failing: Run = (cmd, args, more) => (args[1] === "set" ? fail("Error: boom") : atlas(cmd, args, more))
+		const failing: Run = async (cmd, args, more) => (args[1] === "set" ? fail("Error: boom") : atlas(cmd, args, more))
 		await expect(baselineWithAtlas(options(failing))).rejects.toThrow("atlas migrate set: Error: boom")
 	})
 })
@@ -438,7 +438,7 @@ const gone = () =>
 	fakeAtlas({ status: status({ applied: [revision("1", { hash: "7=" }), revision("9")], current: "9" }) })
 
 describe("statusWithAtlas", () => {
-	it("lists what is applied and what is pending", () => {
+	it("lists what is applied and what is pending", async () => {
 		const run = options(
 			fakeAtlas({
 				status: status({
@@ -449,42 +449,42 @@ describe("statusWithAtlas", () => {
 				}),
 			}),
 		)
-		statusWithAtlas(run)
+		await statusWithAtlas(run)
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
 	})
 
 	/* G1-a: Atlas's status skips the clean check apply's dry run makes, so status inspects as a check does */
-	it("refuses a database holding tables and no history as apply does, and lists every file of an empty one", () => {
+	it("refuses a database holding tables and no history as apply does, and lists every file of an empty one", async () => {
 		const legacy = ok(JSON.stringify({ schemas: [{ name: "public", tables: [{ name: "legacy" }] }] }))
-		expect(() => statusWithAtlas(options(fakeAtlas({ inspect: legacy, status: PENDING })))).toThrow(
+		await expect(statusWithAtlas(options(fakeAtlas({ inspect: legacy, status: PENDING })))).rejects.toThrow(
 			/^the database has objects but no migration history/,
 		)
 		const empty = options(fakeAtlas({ status: PENDING }))
-		statusWithAtlas(empty)
+		await statusWithAtlas(empty)
 		expect(empty.out).toEqual(["Applied: 0", "Pending: 1_a.sql, 2_b.sql"])
 	})
 
 	/* M76 (atlas-history.ts): status names a revision whose file is gone; check and apply refuse it */
 	it("names a revision whose file is gone in status, and refuses it in check and apply", async () => {
 		const run = options(gone())
-		expect(statusWithAtlas(run).applied).toEqual(["1_a.sql", "9"])
+		expect((await statusWithAtlas(run)).applied).toEqual(["1_a.sql", "9"])
 		expect(run.out).toEqual(["Applied: 2 (up to 9)", "Pending: none", "9 was applied, and its file is gone or renamed"])
 		await expect(applyWithAtlas({ ...options(gone()), checkOnly: true })).rejects.toThrow("9 was applied, and its file")
 		await expect(applyWithAtlas(options(gone()))).rejects.toThrow("9 was applied, and its file")
 	})
 
-	it("reports a file Atlas ran halfway, and an error in the history", () => {
+	it("reports a file Atlas ran halfway, and an error in the history", async () => {
 		const half = status({
 			applied: [revision("2", { applied: 1, error: "pq: x", errorStmt: "S", hash: "7=", total: 2 })],
 			error: "pq: x",
 			pending: [file("2_b.sql")],
 		})
 		const run = options(fakeAtlas({ status: half }))
-		statusWithAtlas(run)
+		await statusWithAtlas(run)
 		expect(run.out).toContain(
 			"2_b.sql ran 1 of its 2 statements before it failed at S (pq: x); migrate apply resumes after them",
 		)
-		expect(() => statusWithAtlas(options(fakeAtlas({ status: status({ error: "broken" }) })))).toThrow(
+		await expect(statusWithAtlas(options(fakeAtlas({ status: status({ error: "broken" }) })))).rejects.toThrow(
 			"atlas migrate status: broken",
 		)
 	})

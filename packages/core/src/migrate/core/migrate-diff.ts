@@ -80,7 +80,7 @@ function afterHistory(dir: string, history: readonly string[], added: readonly s
 }
 
 /** The files `atlas migrate diff` adds to `dir` for the target; none when it is in sync */
-function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[] {
+async function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): Promise<string[]> {
 	const { dir: work, remove: removeWork } = scratchDir("comb-migrate-diff-")
 	try {
 		const target = join(work, "schema.sql")
@@ -90,9 +90,9 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 		const format = ["--format", "{{ sql . }}"]
 		const result =
 			atlas.target === undefined
-				? atlas.exec("atlas", [...args, "--dev-url", sqliteDevUrl(), ...format])
-				: withAtlasEnv(atlas.target, { dev: true }, (env) => {
-						const ran = atlas.exec("atlas", [...args, ...env.args, ...format], { env: env.env })
+				? await atlas.exec("atlas", [...args, "--dev-url", sqliteDevUrl(), ...format])
+				: await withAtlasEnv(atlas.target, { dev: true }, async (env) => {
+						const ran = await atlas.exec("atlas", [...args, ...env.args, ...format], { env: env.env })
 						/* diff gives Atlas the dev database alone: a database not clean is the dev's (P3) */
 						const stderr = explainAtlasFailure(ran.stderr, env.scrub, { devOnly: true })
 						return { ...ran, stderr, stdout: env.scrub(ran.stdout) }
@@ -111,8 +111,8 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 }
 
 /** The plain-only diff on a stripped copy of the history, and the FTS delta comb adds to it */
-function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Diffed {
-	verifySum(atlas.exec, options.migrationsDir)
+async function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Promise<Diffed> {
+	await verifySum(atlas.exec, options.migrationsDir)
 	const groups = new Set<string>()
 	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-history-")
 	try {
@@ -126,13 +126,13 @@ function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 			before = extractSchema(sql, before)
 			writeFileSync(join(copy, file), asSql(separated.plain))
 		}
-		hashDir(atlas.exec, copy)
+		await hashDir(atlas.exec, copy)
 		const target = separate(options.ftsSql ?? "", groups)
-		const added = atlasDiff(atlas, copy, { name: options.migrationName, schema: options.targetSchema })
+		const added = await atlasDiff(atlas, copy, { name: options.migrationName, schema: options.targetSchema })
 		const plainDiff = added.map((file) => readFileSync(join(copy, file), "utf8")).join("\n")
 		const fts = ftsDelta({ from: history, plainDiff, to: target.state, toStatements: target.fts })
 		const transform = (sql: string) => applySqliteMigrationTransforms(sql, before, history)
-		return finish({ added, atlas, copy, fts, options, plainDiff, transform })
+		return await finish({ added, atlas, copy, fts, options, plainDiff, transform })
 	} finally {
 		removeCopy()
 	}
@@ -149,7 +149,7 @@ type Finish = {
 	transform: (sql: string) => string
 }
 
-function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Finish): Diffed {
+async function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Finish): Promise<Diffed> {
 	const { migrationName, migrationsDir } = options
 	if (added.length === 0 && fts === "") return { files: [], synced: true }
 	const name = added[0] ?? `${freshVersion(migrationsDir)}_${migrationName}.sql`
@@ -158,7 +158,7 @@ function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Fini
 	const sql = transform(`${plainDiff}${plainDiff && fts ? "\n" : ""}${fts}`)
 	writeFileSync(file, sql)
 	for (const extra of added.slice(1)) copyFileSync(join(copy, extra), join(migrationsDir, extra))
-	hashDir(atlas.exec, migrationsDir)
+	await hashDir(atlas.exec, migrationsDir)
 	return { files: [file, ...added.slice(1).map((extra) => join(migrationsDir, extra))], synced: false }
 }
 
@@ -168,9 +168,9 @@ function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Fini
  * atlas: directives), and diffs it against the target read the same way; comb wraps the file Atlas
  * writes with those objects' part (pg-objects.ts)
  */
-function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
+async function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Promise<Diffed> {
 	const { migrationName, migrationsDir } = options
-	verifySum(atlas.exec, migrationsDir)
+	await verifySum(atlas.exec, migrationsDir)
 	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-history-")
 	try {
 		const history = emptyPgObjects()
@@ -184,8 +184,8 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		/* each written back so Atlas sends each statement alone, as Postgres runs it (M75) */
 		for (const [i, { file, head, plain: kept }] of plain.entries())
 			writeFileSync(join(copy, file), atlasFile([...(i === 0 ? pgStatements(prelude) : []), ...kept], head))
-		hashDir(atlas.exec, copy)
-		const added = atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.replay) })
+		await hashDir(atlas.exec, copy)
+		const added = await atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.replay) })
 		const atlasFiles = added.map((file) => readFileSync(join(copy, file), "utf8"))
 		const delta = pgDelta({ atlasSql: atlasFiles.join("\n"), from: history, to: target })
 		if (added.length === 0 && delta.before.length === 0 && delta.after.length === 0) return { files: [], synced: true }
@@ -195,7 +195,7 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		)
 		for (const [name, sql] of written) writeFileSync(join(migrationsDir, name), sql)
 		for (const extra of added.slice(1)) copyFileSync(join(copy, extra), join(migrationsDir, extra))
-		hashDir(atlas.exec, migrationsDir)
+		await hashDir(atlas.exec, migrationsDir)
 		const names = [...written.map(([name]) => name), ...added.slice(1)]
 		return { files: names.map((file) => join(migrationsDir, file)), synced: false }
 	} finally {
@@ -212,7 +212,7 @@ export async function generateIncrementalMigration(options: MigrateDiffOptions):
 	if (dialect === "postgres") await (options.readyDev ?? readyDevSchema)(target as PgTarget)
 	const atlas: Atlas = { dialect, exec, notices: [], target: dialect === "postgres" ? target : undefined }
 	if (!existsSync(migrationsDir)) mkdirSync(migrationsDir, { recursive: true })
-	if (!existsSync(join(migrationsDir, "atlas.sum"))) hashDir(atlas.exec, migrationsDir)
-	const diffed = dialect === "sqlite" ? diffWithFts(atlas, options) : diffPostgres(atlas, options)
+	if (!existsSync(join(migrationsDir, "atlas.sum"))) await hashDir(atlas.exec, migrationsDir)
+	const diffed = dialect === "sqlite" ? await diffWithFts(atlas, options) : await diffPostgres(atlas, options)
 	return { ...diffed, notices: atlas.notices }
 }

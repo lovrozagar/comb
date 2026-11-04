@@ -13,7 +13,7 @@ afterEach(temp.clean)
 function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] } {
 	const calls: string[][] = []
 	const envs: unknown[] = []
-	const run: Run = (_cmd, args, options) => {
+	const run: Run = async (_cmd, args, options) => {
 		calls.push([...args])
 		envs.push(options?.env)
 		const dirAt = args.indexOf("--dir")
@@ -40,15 +40,15 @@ function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] 
 }
 
 /** A project whose comb.migrate.config.ts declares a Postgres `core`, with these migrations hashed into ./pg */
-function postgresProject(
+async function postgresProject(
 	migrations: Record<string, string>,
 	url = "postgres://app:pw@db.example.com/app?sslmode=verify-full",
 	devUrl?: string,
-): string {
+): Promise<string> {
 	const dir = project()
 	mkdirSync(join(dir, "pg"))
 	for (const [name, sql] of Object.entries(migrations)) writeFileSync(join(dir, "pg", name), sql)
-	pgAtlas([])("atlas", ["migrate", "hash", "--dir", `file://${join(dir, "pg")}`])
+	await pgAtlas([])("atlas", ["migrate", "hash", "--dir", `file://${join(dir, "pg")}`])
 	writeFileSync(
 		join(dir, "comb.migrate.config.ts"),
 		`export default { databases: { core: { migrationsDir: "./pg", name: "core", provider: { type: "postgres", url: ${JSON.stringify(url)}${devUrl === undefined ? "" : `, devUrl: ${JSON.stringify(devUrl)}`} } } } }\n`,
@@ -59,7 +59,7 @@ function postgresProject(
 /* KC7 of r22b: a blank url said only "url is empty", which init's starter gives whenever DATABASE_URL is unset */
 describe("a Postgres database with a blank url", () => {
 	it("is refused naming the database, and where init's starter reads it, before Atlas runs", async () => {
-		const dir = postgresProject({}, " ")
+		const dir = await postgresProject({}, " ")
 		for (const mode of ["status", "check", "apply"]) {
 			const atlas = pgAtlas([])
 			const io = makeIo(dir, atlas)
@@ -74,7 +74,7 @@ describe("a Postgres database with a blank url", () => {
 
 describe("a Postgres database's migrations directory", () => {
 	it("refuses a migrations directory that does not exist, or a file --dir names (AD10 of the area D review)", async () => {
-		const dir = postgresProject({})
+		const dir = await postgresProject({})
 		const io = makeIo(dir, pgAtlas([]))
 		expect(await runCliWithFakes(["migrate", "apply", "core", "--dir", "nowhere"], io)).toBe(1)
 		expect(io.errors).toEqual([`Migrations dir not found: ${join(dir, "nowhere")}`])
@@ -88,7 +88,7 @@ describe("a Postgres database's migrations directory", () => {
 /* AD9 of the area D review: a blank devUrl said only "devUrl is empty", whose database unnamed */
 describe("a Postgres database with a blank devUrl", () => {
 	it("is refused naming the database by each command that reaches it, before Atlas runs", async () => {
-		const dir = postgresProject({}, undefined, " ")
+		const dir = await postgresProject({}, undefined, " ")
 		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "postgresql" }\n')
 		for (const mode of ["diff", "check", "apply", "baseline"]) {
 			const atlas = pgAtlas([])
@@ -100,14 +100,14 @@ describe("a Postgres database with a blank devUrl", () => {
 	})
 
 	it("is left to status, which never reaches it", async () => {
-		const io = makeIo(postgresProject({}, undefined, " "), pgAtlas([]))
+		const io = makeIo(await postgresProject({}, undefined, " "), pgAtlas([]))
 		expect(await runCliWithFakes(["migrate", "status", "core"], io)).toBe(0)
 	})
 })
 
 describe("migrate apply and baseline: a Postgres database, through Atlas", () => {
 	it("applies the pending files through Atlas, the URL in its environment only", async () => {
-		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const dir = await postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const atlas = pgAtlas(["1_init.sql"])
 		const io = makeIo(dir, atlas)
 		expect(await runCliWithFakes(["migrate", "apply", "core"], io)).toBe(0)
@@ -116,7 +116,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 	})
 
 	it("checks and approves the pending files with check, applying none", async () => {
-		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const dir = await postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const atlas = pgAtlas(["1_init.sql"])
 		const io = makeIo(dir, atlas)
 		expect(await runCliWithFakes(["migrate", "check", "core"], io)).toBe(0)
@@ -129,7 +129,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 	})
 
 	it("asks before an unsafe file, and takes no --yes for it", async () => {
-		const dir = postgresProject({ "1_drop.sql": 'DROP TABLE "post";\n' })
+		const dir = await postgresProject({ "1_drop.sql": 'DROP TABLE "post";\n' })
 		const io = makeIo(dir, pgAtlas(["1_drop.sql"]))
 		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], io)).toBe(1)
 		expect(io.errors[0]).toContain('1_drop.sql is unsafe (DROP TABLE "post");')
@@ -138,7 +138,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 
 describe("migrate baseline and its refusals: a Postgres database, through Atlas", () => {
 	it("records every file with baseline, running none", async () => {
-		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n", "2_more.sql": "SELECT 2;\n" })
+		const dir = await postgresProject({ "1_init.sql": "SELECT 1;\n", "2_more.sql": "SELECT 2;\n" })
 		const atlas = pgAtlas([])
 		const io = makeIo(dir, atlas)
 		expect(await runCliWithFakes(["migrate", "baseline", "core"], io)).toBe(0)
@@ -153,7 +153,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 
 	/* M75: baseline replays the history as Postgres's parser reads it, so it loads it first */
 	it("loads the Postgres parser itself before baseline reads the history", async () => {
-		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const dir = await postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		/* a fresh module graph: the setup file loaded the parser in the one the other tests share */
 		vi.resetModules()
 		const fresh = await import("./run.ts")
@@ -163,7 +163,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 	})
 
 	it("refuses --file and --local, which Atlas has no use for", async () => {
-		const dir = postgresProject({})
+		const dir = await postgresProject({})
 		for (const flag of [["--file", "x.sql"], ["--local"]]) {
 			const io = makeIo(dir, pgAtlas([]))
 			expect(await runCliWithFakes(["migrate", "apply", "core", ...flag], io)).toBe(1)
@@ -173,7 +173,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 
 	/* M1: only D1's history records names apart from hashes */
 	it("refuses baseline --hashes, as Atlas records each file's hash in its revisions", async () => {
-		const io = makeIo(postgresProject({}), pgAtlas([]))
+		const io = makeIo(await postgresProject({}), pgAtlas([]))
 		expect(await runCliWithFakes(["migrate", "baseline", "core", "--hashes"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
@@ -181,7 +181,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 	})
 
 	it("warns of a URL that may send the password unprotected", async () => {
-		const dir = postgresProject({}, "postgres://app:pw@db.example.com/app?sslmode=prefer")
+		const dir = await postgresProject({}, "postgres://app:pw@db.example.com/app?sslmode=prefer")
 		const io = makeIo(dir, pgAtlas([]))
 		expect(await runCliWithFakes(["migrate", "apply", "core"], io)).toBe(0)
 		expect(io.errors).toEqual([
@@ -192,7 +192,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 
 describe("migrate status", () => {
 	it("lists a Postgres database's applied and pending migrations", async () => {
-		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n" })
+		const dir = await postgresProject({ "1_init.sql": "SELECT 1;\n" })
 		const io = makeIo(dir, pgAtlas(["1_init.sql"]))
 		expect(await runCliWithFakes(["migrate", "status", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["Applied: 0", "Pending: 1_init.sql"])
@@ -201,7 +201,7 @@ describe("migrate status", () => {
 
 describe("migrate apply, check and status --json on Postgres (C5)", () => {
 	it("prints one JSON object as the only stdout, for each mode", async () => {
-		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const dir = await postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const run = async (mode: string) => {
 			const io = makeIo(dir, pgAtlas(["1_init.sql"]))
 			expect(await runCliWithFakes(["migrate", mode, "core", "--json"], io)).toBe(0)
@@ -233,12 +233,12 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 
 	/* K6 of r21: a refusal quoting Atlas is one line, as every other entry, without Atlas's trailing newline */
 	it("prints a refusal that quotes Atlas without Atlas's trailing newline", async () => {
-		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n" })
+		const dir = await postgresProject({ "1_init.sql": "SELECT 1;\n" })
 		const said = "Error: postgres: querying system variables: dial tcp 127.0.0.1:9: connect: connection refused\n"
 		for (const mode of ["status", "check", "apply"]) {
 			const atlas = pgAtlas([])
-			const refused: Run = (cmd, args, options) =>
-				args[1] === "status" ? { code: 1, stderr: said, stdout: "" } : atlas(cmd, args, options)
+			const refused: Run = async (cmd, args, options) =>
+				args[1] === "status" ? { code: 1, stderr: said, stdout: "" } : await atlas(cmd, args, options)
 			const io = makeIo(dir, refused)
 			expect(await runCliWithFakes(["migrate", mode, "core", "--json"], io)).toBe(1)
 			expect((JSON.parse(io.outputs[0] as string) as { refused: string[] }).refused).toEqual([
@@ -251,12 +251,12 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 /* KC6 + PA22 of r22: a missing Atlas is a peer the command lacks, said one way by every command */
 describe("no Atlas on PATH: every Postgres command names it (KC6 + PA22; sibling: K3's PATH-free refusal)", () => {
 	it("refuses diff, status, check, apply and baseline naming Atlas, its range and its install page, before any other call", async () => {
-		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const dir = await postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		writeFileSync(join(dir, "drizzle.config.ts"), `export default { dialect: "postgresql", schema: "./x.ts" }\n`)
 		for (const mode of ["diff", "status", "check", "apply", "baseline"]) {
 			const calls: string[] = []
 			/* comb's own runner, with a PATH that holds no atlas */
-			const noAtlas: Run = (cmd, args, options) => {
+			const noAtlas: Run = async (cmd, args, options) => {
 				calls.push([cmd, ...args].join(" "))
 				return runProcess(cmd, args, { ...options, env: { ...options?.env, PATH: "/nonexistent" } })
 			}

@@ -195,7 +195,7 @@ async function proveLive(
 /** Check the pending migrations of `options.files`, prove them on the database's schema, and approve each; returns them in apply order */
 async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const { conn, dir, files } = options
-	if (options.whole !== false) verifySum(options.exec, dir)
+	if (options.whole !== false) await verifySum(options.exec, dir)
 	const texts = files.map((name) => readFileSync(join(dir, name), "utf8"))
 	const applied = new Set(files.filter((name, i) => options.applied(name, texts[i] as string)))
 	if (options.whole !== false) refuseOutOfOrder(files, applied)

@@ -70,8 +70,8 @@ export function d1Io(dir: string) {
 }
 
 /** One column of `sql` on the project's local D1 */
-export function d1Column(dir: string, sql: string): unknown[] {
-	const ran = wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", "--json", `--command=${sql}`])
+export async function d1Column(dir: string, sql: string): Promise<unknown[]> {
+	const ran = await wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", "--json", `--command=${sql}`])
 	const [first] = JSON.parse(ran.stdout) as Array<{ results: Array<Record<string, unknown>> }>
 	return (first?.results ?? []).map((row) => Object.values(row)[0])
 }

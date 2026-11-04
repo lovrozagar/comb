@@ -276,7 +276,7 @@ describe("applyD1 when wrangler fails before it makes its table", () => {
 		const { d1, read, run } = await target({})
 		const early: D1Target = {
 			...d1,
-			exec: asWrangler((cmd, args, options) =>
+			exec: asWrangler(async (cmd, args, options) =>
 				args[1] === "migrations"
 					? { code: 1, stderr: "✘ [ERROR] Authentication error [code: 10000]", stdout: "" }
 					: run(cmd, args, options),
@@ -379,8 +379,8 @@ describe("applyD1 when wrangler stops short", () => {
 
 	it("reports what wrangler applied before it failed, and its error line without colours or banner", async () => {
 		const { d1, read, run } = await target({})
-		const coloured: typeof d1.exec = asWrangler((cmd, args, options) => {
-			const result = run(cmd, args, options)
+		const coloured: typeof d1.exec = asWrangler(async (cmd, args, options) => {
+			const result = await run(cmd, args, options)
 			if (cmd !== "wrangler" || args[1] !== "migrations" || result.code === 0) return result
 			return {
 				...result,

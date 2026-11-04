@@ -36,7 +36,7 @@ async function exec(url: string, sql: string): Promise<void> {
 /** A target built by `target`, baselined against `history`: what it printed, or why it refused */
 async function baselineOf(target: string, history: string): Promise<{ out: string[]; refused?: string | undefined }> {
 	writeFileSync(join(dir, "20260101000000_init.sql"), history)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 	return withScratchDb((dev) =>
 		withScratchDb(async (url) => {
 			if (target !== "") await exec(url, target)

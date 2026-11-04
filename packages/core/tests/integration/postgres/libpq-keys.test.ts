@@ -68,19 +68,22 @@ describe("libpq keys through Atlas v1.3.0", () => {
 	})
 
 	const cases = Object.entries(PROBES).flatMap(([key, values]) => values.map((value) => [key, value] as const))
-	it.each(cases)("%s=%s: comb hands Atlas a URL it reads, or refuses it, as Atlas reads the key raw", (key, value) => {
-		const url = withKey(key, value)
-		const raw = inspects(url)
-		const target: PgTarget = { devUrl: "docker://postgres/17/dev", lockTimeout: "0", schema: "public", url }
-		const refused = pgUrlProblems(target, { url: true }).errors.length > 0
-		const handed = refused
-			? undefined
-			: withAtlasEnv(target, { allSchemas: true, url: true }, (env) => {
-					const ran = inspects(env.env["COMB_ATLAS_URL"] as string, env.env, [...env.args])
-					const kept = new URL(env.env["COMB_ATLAS_URL"] as string).searchParams.has(key)
-					return ran.code === 0 ? (kept ? "kept" : "stripped") : `Atlas failed: ${ran.stderr}`
-				})
-		/* a key kept is one Atlas reads; one Atlas would send the server is stripped or refused */
-		expect(raw.code === 0 ? ["kept"] : ["refused", "stripped"], raw.stderr).toContain(handed ?? "refused")
-	})
+	it.each(cases)(
+		"%s=%s: comb hands Atlas a URL it reads, or refuses it, as Atlas reads the key raw",
+		async (key, value) => {
+			const url = withKey(key, value)
+			const raw = await inspects(url)
+			const target: PgTarget = { devUrl: "docker://postgres/17/dev", lockTimeout: "0", schema: "public", url }
+			const refused = pgUrlProblems(target, { url: true }).errors.length > 0
+			const handed = refused
+				? undefined
+				: await withAtlasEnv(target, { allSchemas: true, url: true }, async (env) => {
+						const ran = await inspects(env.env["COMB_ATLAS_URL"] as string, env.env, [...env.args])
+						const kept = new URL(env.env["COMB_ATLAS_URL"] as string).searchParams.has(key)
+						return ran.code === 0 ? (kept ? "kept" : "stripped") : `Atlas failed: ${ran.stderr}`
+					})
+			/* a key kept is one Atlas reads; one Atlas would send the server is stripped or refused */
+			expect(raw.code === 0 ? ["kept"] : ["refused", "stripped"], raw.stderr).toContain(handed ?? "refused")
+		},
+	)
 })

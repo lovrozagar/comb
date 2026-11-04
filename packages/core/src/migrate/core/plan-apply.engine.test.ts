@@ -56,7 +56,7 @@ async function rate(sql: string, target = TARGET): Promise<{ notes: string[]; sa
 		},
 		conn,
 		dir,
-		exec: () => ({ code: 0, stderr: "", stdout: "" }),
+		exec: async () => ({ code: 0, stderr: "", stdout: "" }),
 		files: ["0_init.sql", "1_m.sql"],
 		print: () => undefined,
 		whole: false,

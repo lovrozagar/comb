@@ -30,9 +30,9 @@ afterEach(() => {
 })
 
 /** The directory `dir` holding `files`, hashed */
-function migrations(dir: string, files: Record<string, string>): void {
+async function migrations(dir: string, files: Record<string, string>): Promise<void> {
 	for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql)
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** What comb 0.12 did: Atlas applies `dir` to `schema`, its history in the shared atlas_schema_revisions */
@@ -107,18 +107,18 @@ const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
  */
 async function reportCase(url: string, dev: string, otherHash = false): Promise<void> {
 	await query(url, "CREATE SCHEMA app")
-	migrations(pub, { "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
+	await migrations(pub, { "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 	applyAs012(url, "public", pub)
-	migrations(app, { "20260105000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
+	await migrations(app, { "20260105000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
 	applyAs012(url, "app", app)
 	if (otherHash) {
-		migrations(app, { "20260105000000_b.sql": 'CREATE TABLE "b" ("id" integer, "x" integer);\n' })
+		await migrations(app, { "20260105000000_b.sql": 'CREATE TABLE "b" ("id" integer, "x" integer);\n' })
 		recordOwn(url, app, "20260105000000")
 	} else {
 		const adopting = command(url, "app", app)
 		await applyWithAtlas({ ...adopting, target: { ...adopting.target, devUrl: dev } })
 	}
-	migrations(pub, { "20260103000000_c.sql": 'CREATE TABLE "c" ("id" integer);\n' })
+	await migrations(pub, { "20260103000000_c.sql": 'CREATE TABLE "c" ("id" integer);\n' })
 }
 
 describe("migrate on Postgres: public's shared history beside another schema's 0.12 rows (M78)", () => {
@@ -127,7 +127,7 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 			await withDevAndTarget(async (dev, url) => {
 				await reportCase(url, dev)
 				const status = command(url, "public", pub)
-				expect(statusWithAtlas(status).pending).toEqual(["20260103000000_c.sql"])
+				expect((await statusWithAtlas(status)).pending).toEqual(["20260103000000_c.sql"])
 				expect(status.out).toContain(IGNORED)
 				const check = command(url, "public", pub)
 				expect(await applyWithAtlas({ ...check, checkOnly: true, target: { ...check.target, devUrl: dev } })).toEqual([
@@ -145,11 +145,11 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 			await withDevAndTarget(async (dev, url) => {
 				await reportCase(url, dev)
 				await applyWithAtlas(command(url, "public", pub))
-				migrations(pub, { "20260110000000_d.sql": 'CREATE TABLE "d" ("id" integer);\n' })
+				await migrations(pub, { "20260110000000_d.sql": 'CREATE TABLE "d" ("id" integer);\n' })
 				expect(await applyWithAtlas(command(url, "public", pub))).toEqual(["20260110000000_d.sql"])
-				migrations(pub, { "20260102000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
+				await migrations(pub, { "20260102000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
 				const late = "20260102000000_late.sql is older than a migration already applied; rename it to a newer version"
-				expect(() => statusWithAtlas(command(url, "public", pub))).toThrow(late)
+				await expect(statusWithAtlas(command(url, "public", pub))).rejects.toThrow(late)
 				await expect(applyWithAtlas(command(url, "public", pub))).rejects.toThrow(late)
 				expect(await query(url, "SELECT to_regclass('public.late') IS NULL AS absent")).toEqual([{ absent: true }])
 			})

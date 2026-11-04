@@ -30,9 +30,9 @@ const UNSAFE = "-- comb:allow-unsafe: the test's history\n"
 const REFUSAL = "Atlas runs this file in one transaction and records it there, so its own COMMIT ends that transaction"
 
 /** The files, named in order and hashed */
-function write(files: readonly string[]): void {
+async function write(files: readonly string[]): Promise<void> {
 	files.forEach((sql, i) => writeFileSync(join(dir, `2026010${i + 1}000000_f${i}.sql`), sql))
-	hashDir(run, dir)
+	await hashDir(run, dir)
 }
 
 /** The options of a run against `url`, approving every file */
@@ -54,7 +54,7 @@ describe("a transactional file holds no transaction control (PA2; sibling: PA13'
 	it("is refused at check before the replay runs a statement of it, so a later DO's role stays off devUrl's server", async () => {
 		const made = unique("comb_t_commit")
 		try {
-			write([
+			await write([
 				"CREATE TABLE a (id int PRIMARY KEY);\n",
 				`${UNSAFE}CREATE TABLE b (id int);\nCOMMIT;\nDO $$ BEGIN CREATE ROLE ${made}; END $$;\n`,
 			])
@@ -72,9 +72,9 @@ describe("a transactional file holds no transaction control (PA2; sibling: PA13'
 	it("is refused at apply before Atlas runs it, so nothing of it stays", async () => {
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				write(["CREATE TABLE a (id int PRIMARY KEY);\n"])
+				await write(["CREATE TABLE a (id int PRIMARY KEY);\n"])
 				await applyWithAtlas(options(dev, url))
-				write([
+				await write([
 					"CREATE TABLE a (id int PRIMARY KEY);\n",
 					"CREATE TABLE b (id int);\nCOMMIT;\nCREATE TABLE c (id int);\n",
 				])
@@ -87,7 +87,7 @@ describe("a transactional file holds no transaction control (PA2; sibling: PA13'
 	it("leaves a txmode none file its own BEGIN and COMMIT, which apply runs", async () => {
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				write(["-- atlas:txmode none\n\nBEGIN;\nCREATE TABLE a (id int);\nCREATE TABLE b (id int);\nCOMMIT;\n"])
+				await write(["-- atlas:txmode none\n\nBEGIN;\nCREATE TABLE a (id int);\nCREATE TABLE b (id int);\nCOMMIT;\n"])
 				expect(await applyWithAtlas(options(dev, url, true))).toHaveLength(1)
 				expect(await applyWithAtlas(options(dev, url))).toHaveLength(1)
 				expect(await tables(url)).toEqual(["a", "b"])

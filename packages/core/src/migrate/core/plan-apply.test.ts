@@ -39,7 +39,7 @@ function plan(files: Record<string, string>, more: Partial<PlanOptions> = {}) {
 				applied: () => false,
 				approve: (migration) => approveMigration(migration, { target: "core", yes: true }),
 				dir,
-				exec: () => ({ code: 0, stderr: "", stdout: "" }),
+				exec: async () => ({ code: 0, stderr: "", stdout: "" }),
 				files: Object.keys(files),
 				print: (line) => out.push(line),
 				whole: false,

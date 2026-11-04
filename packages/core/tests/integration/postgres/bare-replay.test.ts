@@ -159,9 +159,9 @@ describe("another session's change is its own (P2; sibling: two checks on one se
 		const roles = [unique("comb_t_one"), unique("comb_t_two")]
 		const dirs = [dir(), tempDir()]
 		try {
-			const both = roles.map((role, i) => {
+			const both = roles.map(async (role, i) => {
 				const at = dirs[i] as string
-				files(
+				await files(
 					`${T}-- comb:allow-unsafe: the test's role\nCREATE ROLE ${role};\n`,
 					`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's sleep\nSELECT pg_sleep(0.5);\nGRANT SELECT ON t TO ${role};\nSELECT pg_sleep(0.5);\n`,
 					at,

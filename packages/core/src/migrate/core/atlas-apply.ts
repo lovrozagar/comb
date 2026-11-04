@@ -55,9 +55,9 @@ type ApplyOptions = AtlasCommand & {
 }
 
 /** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
-function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): string[] {
+async function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): Promise<string[]> {
 	if (options.target.schema === "public" || own.applied.length > 0) return []
-	return sharedPrefix(atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }), copy)
+	return sharedPrefix(await atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }), copy)
 }
 
 /** `own` as status, apply and check take it: a database with objects and no history, or one adoption gave, refused */
@@ -67,8 +67,12 @@ function known(own: AtlasStatus): AtlasStatus {
 }
 
 /** `raw` as the target's own history: another schema's rows in public's left out, each named (M78) */
-function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign: Foreign; status: AtlasStatus } {
-	const foreign = foreignRows(options, copy, raw)
+async function ownOf(
+	options: AtlasCommand,
+	copy: string,
+	raw: AtlasStatus,
+): Promise<{ foreign: Foreign; status: AtlasStatus }> {
+	const foreign = await foreignRows(options, copy, raw)
 	for (const line of ignoredLines(foreign, options.target)) options.print(line)
 	return { foreign, status: ownHistory(raw, foreign, copy) }
 }
@@ -80,7 +84,7 @@ async function adopt(
 	ran: readonly string[],
 ): Promise<void> {
 	await proveAdoption({ ...options, exec: options.exec ?? run }, copy, ran)
-	const set = atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
+	const set = await atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
 	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 	options.print(adopted(ran))
 }
@@ -120,11 +124,11 @@ async function approvePending(
 
 /** Apply the pending migrations of `options.dir` through Atlas; returns the files applied, or only checked */
 async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
-	const snapshot = snapshotDir(options.exec ?? run, options.dir)
+	const snapshot = await snapshotDir(options.exec ?? run, options.dir)
 	const copy = snapshot.dir
 	try {
-		const own = atlasStatus(options, copy, { notClean: true })
-		const ran = sharedRan(options, copy, own)
+		const own = await atlasStatus(options, copy, { notClean: true })
+		const ran = await sharedRan(options, copy, own)
 		/* a check of an adoption writes nothing: it classifies the files after what 0.12 ran */
 		if (ran.length > 0 && options.checkOnly === true) {
 			options.print(adopts(ran))
@@ -132,7 +136,11 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			return after(copy, ran).map((file) => file.Name)
 		}
 		if (ran.length > 0) await adopt(options, copy, ran)
-		const { foreign, status } = ownOf(options, copy, ran.length > 0 ? atlasStatus(options, copy) : known(own))
+		const { foreign, status } = await ownOf(
+			options,
+			copy,
+			ran.length > 0 ? await atlasStatus(options, copy) : known(own),
+		)
 		const report = { elsewhere: foreign.elsewhere, scrub: scrubbing(options.target), unread: foreign.unread }
 		const halfway = checkHistory(status, copy, report)
 		if (halfway !== undefined) options.print(`${halfway}; resuming after them`)
@@ -143,9 +151,9 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		/* Atlas's dry run creates its revisions schema on a database with none, so a check of a
 		   database with nothing applied inspects it instead, refusing what the dry run would: a check writes nothing */
 		if (options.checkOnly === true && status.applied.length === 0)
-			refuseUnclean({ exec: options.exec ?? run, target: options.target })
+			await refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		else {
-			const dry = atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
+			const dry = await atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
 			reported(dry, "apply --dry-run", copy)
 		}
 		const files = await approvePending(options, copy, status.pending)
@@ -154,27 +162,18 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		await (options.sweepDev ?? sweepDev)(options.target, options.print)
 		/* one file is one call whatever the target holds, so only more read its code */
 		const server = status.pending.length > 1 ? await (options.targetCode ?? targetCode)(options.target) : NO_SERVER_CODE
-		return applyRuns(options, copy, { files, foreign, report, server, status })
-	} finally {
-		snapshot.remove()
-	}
-}
-
-/** `body` on a snapshot of the directory, removed afterwards */
-function onSnapshot<T>(options: AtlasCommand, body: (copy: string) => T): T {
-	const snapshot = snapshotDir(options.exec ?? run, options.dir)
-	try {
-		return body(snapshot.dir)
+		return await applyRuns(options, copy, { files, foreign, report, server, status })
 	} finally {
 		snapshot.remove()
 	}
 }
 
 /** `body`, which reads the database as it goes, on a snapshot of the directory, removed once it is done */
-async function onSnapshotAsync<T>(options: AtlasCommand, body: (copy: string) => Promise<T>): Promise<T> {
-	const snapshot = snapshotDir(options.exec ?? run, options.dir)
+async function onSnapshot<T>(options: AtlasCommand, body: (copy: string) => Promise<T>): Promise<T> {
+	const snapshot = await snapshotDir(options.exec ?? run, options.dir)
+	const copy = snapshot.dir
 	try {
-		return await body(snapshot.dir)
+		return await body(copy)
 	} finally {
 		snapshot.remove()
 	}
@@ -194,15 +193,15 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
 async function baselineWithAtlas(
 	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev">,
 ): Promise<string[]> {
-	return onSnapshotAsync(options, async (copy) => {
-		const status = atlasStatus(options, copy, { notClean: true })
+	return onSnapshot(options, async (copy) => {
+		const status = await atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
 			throw new Error(
 				`the database already records ${migrations(status.applied.length)} (up to ${lastVersion(status)}); baseline marks a database that has none`,
 			)
 		}
 		/* what 0.12 ran is recorded, and only that: the files after it still run on apply (M77) */
-		const ran = sharedRan(options, copy, status)
+		const ran = await sharedRan(options, copy, status)
 		if (ran.length > 0) {
 			await adopt(options, copy, ran)
 			return ran
@@ -214,11 +213,11 @@ async function baselineWithAtlas(
 		await (options.readyDev ?? readyDevSchema)(options.target)
 		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it (P1 of r21) */
 		const warnings = await refuseObjectDrift(options, copy)
-		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
+		for (const notice of await refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
 			options.print(`Warning: Atlas: ${notice}`)
 		for (const warning of warnings()) options.print(warning)
 		/* the version as Atlas reads the name, the reader status and adoption use (M76, M88) */
-		const set = atlas(options, copy, ["set", versionOf(latest).version])
+		const set = await atlas(options, copy, ["set", versionOf(latest).version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 		for (const name of files) options.print(`Marked applied: ${name}`)
 		return files
@@ -226,10 +225,10 @@ async function baselineWithAtlas(
 }
 
 /** Print what Atlas records as applied, what is pending, and where a file stopped halfway; returns both, by file name */
-function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: string[] } {
-	return onSnapshot(options, (copy) => {
-		const own = atlasStatus(options, copy, { notClean: true })
-		const ran = sharedRan(options, copy, own)
+async function statusWithAtlas(options: AtlasCommand): Promise<{ applied: string[]; pending: string[] }> {
+	return onSnapshot(options, async (copy) => {
+		const own = await atlasStatus(options, copy, { notClean: true })
+		const ran = await sharedRan(options, copy, own)
 		if (ran.length > 0) {
 			const rest = after(copy, ran).map((file) => file.Name)
 			options.print("Applied: 0")
@@ -237,10 +236,10 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 			options.print(adopts(ran))
 			return { applied: [], pending: rest }
 		}
-		const { foreign, status } = ownOf(options, copy, known(own))
+		const { foreign, status } = await ownOf(options, copy, known(own))
 		/* Atlas's status skips the clean check its apply's dry run makes, so it is inspected here as a check does (G1-a) */
 		if (status.applied.length === 0 && status.pending.length > 0)
-			refuseUnclean({ exec: options.exec ?? run, target: options.target })
+			await refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		const missing: string[] = []
 		const halfway = checkHistory(status, copy, {
 			gone: (line) => missing.push(line),

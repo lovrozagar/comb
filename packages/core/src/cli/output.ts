@@ -32,7 +32,7 @@ export type CliDeps = {
 	/** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
 	locatePeer?: ((peer: string) => string) | undefined
 	/** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
-	readAtlasVersion?: (() => RunResult) | undefined
+	readAtlasVersion?: (() => Promise<RunResult>) | undefined
 }
 
 /** The io a command runs on, with the seams runCliWith was given */

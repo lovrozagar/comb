@@ -50,9 +50,9 @@ async function onServer(...statements: string[]): Promise<void> {
 const unique = (prefix: string) => `${prefix}_${randomBytes(4).toString("hex")}`
 
 /** The files, named in order and hashed, in `at` */
-function write(files: readonly string[], at = dir): void {
+async function write(files: readonly string[], at = dir): Promise<void> {
 	files.forEach((sql, i) => writeFileSync(join(at, `20260101${String(i).padStart(6, "0")}_f${i}.sql`), sql))
-	hashDir(run, at)
+	await hashDir(run, at)
 }
 
 /** A check of every file against the empty target at `url`: what it printed, and why it refused */
@@ -113,7 +113,7 @@ describe("the replay on a server dev and target share leaves what lies past its 
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
 					const target = new URL(url).pathname.slice(1)
-					write([
+					await write([
 						`-- comb:allow-unsafe: the test's history\nCREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\nALTER ROLE ${pre} CONNECTION LIMIT 7;\nALTER DATABASE ${target} SET work_mem = '8MB';\n`,
 						`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's history\nALTER SYSTEM SET work_mem = '9MB';\nDROP DATABASE ${other};\n`,
 					])
@@ -155,7 +155,7 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 					const target = new URL(url).pathname.slice(1)
 					const tables = `CREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\n`
 					await query(url, tables)
-					write([
+					await write([
 						`CREATE ROLE ${made};\n${tables}ALTER ROLE ${pre} CONNECTION LIMIT 7;\nALTER DATABASE ${target} SET work_mem = '8MB';\n`,
 					])
 					await baselineWithAtlas({
@@ -179,7 +179,7 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 		try {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write([
+					await write([
 						`-- comb:allow-unsafe: the test's history\nCREATE ROLE ${made};\nCREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\n`,
 					])
 					const both = await Promise.all([check(dev, url), check(dev, url)])
@@ -211,7 +211,7 @@ describe("the replay's sweep", () => {
 		try {
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
-					write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
+					await write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
 					expect((await check(dev, url)).refused).toBeUndefined()
 				}),
 			)
@@ -238,7 +238,7 @@ describe("the replay's database", () => {
 			const refused = await withScratchDb(async (dev) => {
 				const as = await asRole(dev, role, "NOCREATEDB")
 				return withScratchDb(async (url) => {
-					write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
+					await write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
 					return (await check(as, url)).refused
 				})
 			})
@@ -254,7 +254,7 @@ describe("the replay's database", () => {
 			await withScratchDb(async (dev) => {
 				await query(dev, "CREATE SCHEMA ext; CREATE EXTENSION citext WITH SCHEMA ext VERSION '1.5'")
 				await withScratchDb(async (url) => {
-					write(["CREATE TABLE person (id int PRIMARY KEY, mail ext.citext);\n"])
+					await write(["CREATE TABLE person (id int PRIMARY KEY, mail ext.citext);\n"])
 					expect((await check(dev, url)).refused).toBeUndefined()
 					await query(dev, "CREATE EXTENSION pageinspect")
 					const as = await asRole(dev, role, "CREATEDB")
@@ -275,7 +275,7 @@ describe("the replay's database beside what the history makes", () => {
 		await withScratchDb(async (dev) => {
 			await query(dev, "CREATE EXTENSION pgcrypto; CREATE EXTENSION citext")
 			await withScratchDb(async (url) => {
-				write([
+				await write([
 					"CREATE TABLE t (id int PRIMARY KEY);\n",
 					"CREATE EXTENSION pgcrypto;\nCREATE TABLE k (id uuid DEFAULT gen_random_uuid(), mail citext);\n",
 				])
@@ -294,7 +294,7 @@ describe("the replay's database beside what the history makes", () => {
 				await withScratchDb(async (url) => {
 					const grant = `GRANT ${app} TO CURRENT_USER`
 					const outside = `GRANT ${other} TO CURRENT_USER`
-					write([
+					await write([
 						`-- comb:allow-unsafe: the test's history\nCREATE ROLE ${app};\n${grant};\n${outside};\nGRANT CREATE ON SCHEMA public TO ${app};\nCREATE TABLE t (id int);\nALTER TABLE t OWNER TO ${app};\n`,
 					])
 					const { out, refused } = await check(as, url)
@@ -323,8 +323,8 @@ describe("two replays at once, one paused between the file making a role and the
 				withScratchDb(async (url) => {
 					const policy = `CREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\n`
 					const unsafe = "-- comb:allow-unsafe: the test's history\n"
-					write([`${unsafe}CREATE ROLE ${made};\n`, `${unsafe}${waitFor(resume)}`, `${unsafe}${policy}`])
-					write([`${unsafe}CREATE ROLE ${made};\n${policy}`], other)
+					await write([`${unsafe}CREATE ROLE ${made};\n`, `${unsafe}${waitFor(resume)}`, `${unsafe}${policy}`])
+					await write([`${unsafe}CREATE ROLE ${made};\n${policy}`], other)
 					const long = check(dev, url)
 					await untilRole(made)
 					const short = await check(dev, url, other)

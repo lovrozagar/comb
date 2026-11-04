@@ -57,7 +57,7 @@ const byName = (rows: Rows) => new Map(rows.map((row) => [String(row["name"]), S
  * tables only once every check has passed (S5 of the 0.15.0 review), and a local database wrangler
  * keeps nowhere yet holds no history, read without a call that would create it.
  */
-function readHistory(read: ReadConfig, target: D1Target, table: string): HistoryRead {
+async function readHistory(read: ReadConfig, target: D1Target, table: string): Promise<HistoryRead> {
 	if (localMissing(read, target)) return noHistory()
 	const [names, hashes, intents, drizzle] = [
 		namesOf(table),
@@ -68,10 +68,13 @@ function readHistory(read: ReadConfig, target: D1Target, table: string): History
 	const tables = [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE, DRIZZLE_HISTORY_TABLE]
 	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${tables.map(literal).join(", ")})`
 	/* executeAll answers one result per statement, or throws */
-	const present = new Set((executeAll(target.exec, target, [listing])[0] as Rows).map((row) => String(row["name"])))
+	const present = new Set(
+		((await executeAll(target.exec, target, [listing]))[0] as Rows).map((row) => String(row["name"])),
+	)
 	const later = [names, hashes, intents, drizzle].filter((_, i) => present.has(tables[i] as string))
 	const rows = new Map<string, Rows>()
-	if (later.length > 0) executeAll(target.exec, target, later).forEach((each, i) => rows.set(later[i] as string, each))
+	if (later.length > 0)
+		(await executeAll(target.exec, target, later)).forEach((each, i) => rows.set(later[i] as string, each))
 	const at = (sql: string) => rows.get(sql) ?? []
 	return {
 		applied: new Set(at(names).map((row) => String(row["name"]))),
@@ -128,7 +131,7 @@ const settleStatements = (hashed: Hashed, intents: boolean): Array<{ sql: string
  */
 function settled(
 	files: ReturnType<typeof d1Files>,
-	{ applied, intents, recorded }: ReturnType<typeof readHistory>,
+	{ applied, intents, recorded }: Awaited<ReturnType<typeof readHistory>>,
 ): { hasIntents: boolean; settle: Hashed } {
 	const settle = files
 		.filter(({ name }) => applied.has(name) && !recorded.has(name))

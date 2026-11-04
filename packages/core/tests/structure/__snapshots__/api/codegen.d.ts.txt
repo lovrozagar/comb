@@ -24,7 +24,7 @@ import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
  */
 declare function analyze(tablesPath: string, { cwd }?: {
     cwd?: string | undefined;
-}): AnalysisResult;
+}): Promise<AnalysisResult>;
 export { analyze };
 export type { AnalysisResult, TableMeta };
 

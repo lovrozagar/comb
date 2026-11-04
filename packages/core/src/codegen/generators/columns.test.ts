@@ -25,10 +25,10 @@ afterEach(() => {
 })
 
 /** Generate into `<tmp>/output` from `body`; returns the progress lines */
-function generate(body: string, opts: Options = {}): string[] {
+async function generate(body: string, opts: Options = {}): Promise<string[]> {
 	const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 	fs.writeFileSync(tablesPath, `${PRELUDE}${body}\n`)
-	const ctx = testContext(analyze(tablesPath), { cwd: tmpDir, tablesPath })
+	const ctx = testContext(await analyze(tablesPath), { cwd: tmpDir, tablesPath })
 	generateColumns(ctx, { output: "output", ...opts })
 	return ctx.logged
 }
@@ -41,8 +41,8 @@ const readExports = () =>
 		.exports
 
 describe("generateColumns", () => {
-	it("generates rqb-cols, sql-cols and table-names", () => {
-		const logged = generate(
+	it("generates rqb-cols, sql-cols and table-names", async () => {
+		const logged = await generate(
 			`export const user = createTable("user", { id: c.id(), name: c.text("name"), email: c.text("email") })`,
 		)
 
@@ -58,14 +58,16 @@ describe("generateColumns", () => {
 		expect(logged).toEqual(["Generated column refs for 1 tables"])
 	})
 
-	it("quotes and indexes a field key that is not an identifier (D6)", () => {
-		generate(`export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })`)
+	it("quotes and indexes a field key that is not an identifier (D6)", async () => {
+		await generate(
+			`export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })`,
+		)
 		expect(read("rqb-cols", "member", "index.gen.ts")).toContain(`\t"display-name": true,`)
 		expect(read("sql-cols", "member", "index.gen.ts")).toContain(`\t"display-name": member["display-name"],`)
 	})
 
-	it("excludes private fields from column refs", () => {
-		generate(
+	it("excludes private fields from column refs", async () => {
+		await generate(
 			`export const user = createTable("user", { id: c.id(), _secret: c.text("_secret", { private: true }), name: c.text("name") })`,
 		)
 		const rqb = read("rqb-cols", "user", "index.gen.ts")
@@ -74,15 +76,15 @@ describe("generateColumns", () => {
 	})
 
 	/* K17 of r17: typed as the table's own columns, none when every column is private */
-	it("types the sql-cols record as the table's columns, never when it shows none", () => {
-		generate(`export const vault = createTable("vault", { _key: c.text("_key"), _blob: c.text("_blob") })`)
+	it("types the sql-cols record as the table's columns, never when it shows none", async () => {
+		await generate(`export const vault = createTable("vault", { _key: c.text("_key"), _blob: c.text("_blob") })`)
 		expect(read("sql-cols", "vault", "index.gen.ts")).toContain(
 			"export const vaultSqlCols: Pick<typeof vault, never> = {",
 		)
 	})
 
-	it("names every file by the prefix when one is given", () => {
-		generate(POST, { filePrefix: "app.db-test" })
+	it("names every file by the prefix when one is given", async () => {
+		await generate(POST, { filePrefix: "app.db-test" })
 		expect(read("rqb-cols", "post", "app.db-test.post.gen.ts")).toContain("postRqbCols")
 		expect(read("sql-cols", "post", "app.db-test.post.gen.ts")).toContain("postSqlCols")
 		expect(read("table-names", "app.db-test.table-names.gen.ts")).toContain('post: "post"')
@@ -90,18 +92,18 @@ describe("generateColumns", () => {
 })
 
 describe("generateColumns — package.json exports", () => {
-	it("leaves package.json alone unless asked", () => {
+	it("leaves package.json alone unless asked", async () => {
 		writePkg({ ".": "./x.ts" })
-		generate(POST)
+		await generate(POST)
 		expect(readExports()).toEqual({ ".": "./x.ts" })
 	})
 
-	it("does nothing when there is no package.json to update", () => {
-		expect(() => generate(POST, { updatePackageJson: true })).not.toThrow()
+	it("does nothing when there is no package.json to update", async () => {
+		await expect(generate(POST, { updatePackageJson: true })).resolves.toEqual(expect.any(Array))
 		expect(fs.existsSync(path.join(tmpDir, "package.json"))).toBe(false)
 	})
 
-	it("registers rqb-cols, sql-cols and table-names per table, replacing its own stale entries", () => {
+	it("registers rqb-cols, sql-cols and table-names per table, replacing its own stale entries", async () => {
 		writePkg({
 			".": "./index.ts",
 			"./rqb-cols/stale": "./gone.ts",
@@ -110,7 +112,7 @@ describe("generateColumns — package.json exports", () => {
 			"./table-names": "./stale.ts",
 			"./table-names-extra": "./kept.ts",
 		})
-		generate(POST, { updatePackageJson: true })
+		await generate(POST, { updatePackageJson: true })
 		expect(readExports()).toEqual({
 			".": "./index.ts",
 			"./rqb-cols/post": "./output/rqb-cols/post/index.gen.ts",
@@ -120,17 +122,17 @@ describe("generateColumns — package.json exports", () => {
 		})
 	})
 
-	it("uses the file prefix in the generated export paths", () => {
+	it("uses the file prefix in the generated export paths", async () => {
 		writePkg({})
-		generate(POST, { filePrefix: "app.db-test", updatePackageJson: true })
+		await generate(POST, { filePrefix: "app.db-test", updatePackageJson: true })
 		const exports = readExports()
 		expect(exports["./rqb-cols/post"]).toBe("./output/rqb-cols/post/app.db-test.post.gen.ts")
 		expect(exports["./table-names"]).toBe("./output/table-names/app.db-test.table-names.gen.ts")
 	})
 
-	it("keeps a single-target exports as the . export (S-13)", () => {
+	it("keeps a single-target exports as the . export (S-13)", async () => {
 		writePkg("./index.ts")
-		generate(POST, { updatePackageJson: true })
+		await generate(POST, { updatePackageJson: true })
 		expect(readExports()["."]).toBe("./index.ts")
 	})
 })

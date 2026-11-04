@@ -115,7 +115,7 @@ describe("comb on Postgres", () => {
 		}
 	}, 180_000)
 
-	it("refuses to drop a column until the migration approves it, then drops it", () => {
+	it("refuses to drop a column until the migration approves it, then drops it", async () => {
 		project.write({ "src/db/core.tables.ts": tables(VIEW_AND_POLICY) })
 		ok(project.comb("migrate", "diff", "core", "drop_body"), "diff")
 		const refused = project.comb("migrate", "apply", "core", "--yes")
@@ -124,7 +124,7 @@ describe("comb on Postgres", () => {
 		const file = readdirSync(migrations).filter((name) => name.endsWith("_drop_body.sql"))[0] as string
 		const path = join(migrations, file)
 		writeFileSync(path, `-- comb:allow-unsafe: body moved to a separate table\n${readFileSync(path, "utf8")}`)
-		hashDir(run, migrations)
+		await hashDir(run, migrations)
 		expect(ok(project.comb("migrate", "apply", "core"), "apply").stdout).toContain("Approved in")
 	}, 180_000)
 

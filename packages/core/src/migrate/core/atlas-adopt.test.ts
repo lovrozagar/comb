@@ -41,7 +41,7 @@ function hashed(args: readonly string[]): RunResult {
 }
 
 /** Atlas on a database with objects whose own history is empty: every status refused as not clean */
-const notClean: Run = (_cmd, args) =>
+const notClean: Run = async (_cmd, args) =>
 	args[1] === "hash"
 		? hashed(args)
 		: {
@@ -111,7 +111,7 @@ describe("sharedPrefix: the files 0.12's shared history ran", () => {
 describe("adoption: read once, while the schema's own history is empty", () => {
 	it("never reads the shared history once the schema's own records a file", async () => {
 		const histories: string[] = []
-		const exec: Run = (_cmd, args) => {
+		const exec: Run = async (_cmd, args) => {
 			if (args[1] === "hash") return hashed(args)
 			const config = readFileSync((args[args.indexOf("--config") + 1] as string).replace("file://", ""), "utf8")
 			histories.push(/revisions_schema = "([^"]+)"/.exec(config)?.[1] ?? "")
@@ -137,15 +137,15 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 			url: "postgres://localhost/app",
 		}
 		const refusal = /^atlas migrate status: the database has objects but no migration history/
-		expect(() => statusWithAtlas({ dir, exec: notClean, print, target })).toThrow(refusal)
+		await expect(statusWithAtlas({ dir, exec: notClean, print, target })).rejects.toThrow(refusal)
 		await expect(
 			applyWithAtlas({ approve: async () => ({ ok: true }), dir, exec: notClean, print, target }),
 		).rejects.toThrow(refusal)
 	})
 
-	it("says nothing is pending when 0.12 ran every file, and writes nothing", () => {
+	it("says nothing is pending when 0.12 ran every file, and writes nothing", async () => {
 		const calls: string[][] = []
-		const allRan: Run = (_cmd, args) => {
+		const allRan: Run = async (_cmd, args) => {
 			calls.push([...args])
 			if (args[1] === "hash") return hashed(args)
 			const config = readFileSync((args[args.indexOf("--config") + 1] as string).replace("file://", ""), "utf8")
@@ -159,7 +159,7 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 			schema: "app",
 			url: "postgres://localhost/app",
 		}
-		expect(statusWithAtlas({ dir, exec: allRan, print: (line) => out.push(line), target })).toEqual({
+		expect(await statusWithAtlas({ dir, exec: allRan, print: (line) => out.push(line), target })).toEqual({
 			applied: [],
 			pending: [],
 		})
@@ -181,11 +181,11 @@ const noObjects: LiveRead = async () => ({
 /** atlas, its schema diff answering `stdout` and `stderr` */
 const diffing =
 	(stdout: string, stderr = ""): Run =>
-	(_cmd, args) =>
+	async (_cmd, args) =>
 		args[0] === "schema" ? { code: 0, stderr, stdout } : { code: 0, stderr: "", stdout: "" }
 
 /** atlas, its schema diff failing to reach the dev database */
-const unreachable: Run = (_cmd, args) =>
+const unreachable: Run = async (_cmd, args) =>
 	args[0] === "schema"
 		? { code: 1, stderr: "Error: dial tcp: lookup dev: no such host", stdout: "" }
 		: { code: 0, stderr: "", stdout: "" }

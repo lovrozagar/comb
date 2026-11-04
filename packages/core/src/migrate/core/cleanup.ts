@@ -5,6 +5,7 @@
  * for the process that made it, so a later run removes one a killed process left at once, by
  * whether that process still runs.
  */
+import { AsyncLocalStorage } from "node:async_hooks"
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
@@ -19,21 +20,72 @@ const held = /* @__PURE__ */ new Set<Step>()
 /* the signals a held step runs on: a Ctrl-C, and what a supervisor, a container stop or a CI step timeout sends */
 const SIGNALS = ["SIGINT", "SIGTERM"] as const
 
+// per-process-constant: the steps a signal is running, so a step's own work goes on while what it stops waits
+const inStep = /* @__PURE__ */ new AsyncLocalStorage<true>()
+
+/** A stop under way: `open` settles once it lets the work it holds go on, which a stop that ends the process never does */
+type Gate = { let(): void; open: Promise<void> }
+
+// per-process-constant: the stop under way, if any
+let gate: Gate | undefined
+
+// per-process-constant: the steps of every stop so far, the last signal's at the end, which alone ends the stop
+let stopping: Promise<void> | undefined
+
+function newGate(): Gate {
+	let release: (() => void) | undefined
+	const open = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	return { let: () => release?.(), open }
+}
+
+/** Every step, last held first, each once the one before ends: a child stops before the scratch it used goes */
+async function runSteps(steps: readonly Step[], signal: NodeJS.Signals): Promise<void> {
+	for (const step of steps.toReversed()) {
+		try {
+			await step(signal)
+		} catch {
+			// reason: one step that fails must not keep the rest from cleaning up; the process ends either way
+		}
+	}
+}
+
 /**
  * Run every held step, then end the process by the signal again, unless the host listens for it too
  * and so ends it its own way. The listener stays from the first hold on: Node drops a signal that
  * comes while its last listener is going, so one removed at each release could lose a Ctrl-C, and
  * the run would go on (to apply, say). With nothing held it ends the process at once, as Node would.
+ * While the steps run, work outside them waits (pastStop), so a caller whose child a step stopped
+ * never goes on to start the next. A signal that comes while they run (a supervisor's second SIGTERM,
+ * a second Ctrl-C) runs what was held since once they end, and the last stop alone ends the process,
+ * once: a child a step stops ends before comb does.
  */
 function stop(signal: NodeJS.Signals): void {
 	const steps = [...held]
 	held.clear()
-	void Promise.allSettled(steps.map(async (step) => step(signal))).then(() => {
-		if (process.listenerCount(signal) > 1) return
-		/* both gone before the signal comes again, so it ends the process */
+	const current = (gate ??= newGate())
+	const ending = (stopping ?? Promise.resolve()).then(() => inStep.run(true, () => runSteps(steps, signal)))
+	stopping = ending
+	void ending.then(() => {
+		/* a later signal came while these steps ran: its stop ends this one, after its own steps */
+		if (stopping !== ending) return
+		stopping = undefined
+		gate = undefined
+		if (process.listenerCount(signal) > 1) return current.let()
+		/* both gone before the signal comes again, so it ends the process, and what waits for this stop waits on */
 		for (const each of SIGNALS) process.off(each, stop)
 		process.kill(process.pid, signal)
 	})
+}
+
+/**
+ * Settles at once unless a signal's steps are running and the caller is not one of them; then once
+ * they end without ending the process, as a host that listens may: work that waits for this starts
+ * nothing a stopping run would leave behind
+ */
+export function pastStop(): Promise<void> {
+	return gate === undefined || inStep.getStore() === true ? Promise.resolve() : gate.open
 }
 
 /**

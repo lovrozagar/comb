@@ -86,7 +86,7 @@ async function sqliteDrift(
 				asSql(separated.plain.filter((stmt) => !UNINSPECTED_DDL.test(stmt) && !vectorStatement(stmt, vectors))),
 			)
 		}
-		hashDir(exec, copy)
+		await hashDir(exec, copy)
 		const live = separate(await liveDdl(conn), groups)
 		/* every virtual table's shadows, the database's own included: Atlas would read them as tables (N-S5) */
 		const virtual = await conn.execute(
@@ -101,7 +101,7 @@ async function sqliteDrift(
 		})
 		writeFileSync(join(work, "live.sql"), asSql(plain))
 		const args = ["schema", "diff", "--from", `file://${join(work, "live.sql")}`, "--to", `file://${copy}`]
-		const ran = exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
+		const ran = await exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
 		if (ran.code !== 0) throw new Error(`atlas schema diff failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
 		const atlasDiff = ran.stdout.trim() === SYNCED ? [] : [ran.stdout.trim()]
 		return [...atlasDiff, ...(await objectDrift(conn, dir, engine))].join("\n")
@@ -116,11 +116,11 @@ async function sqliteDrift(
  * statement whose scope is the server or another database, in a scratch the caller removes; one
  * this fails to write is removed here
  */
-function replayableHistory(exec: Run, copy: string): Scratch {
+async function replayableHistory(exec: Run, copy: string): Promise<Scratch> {
 	const scratch = scratchDir("comb-baseline-history-")
 	try {
 		writeReplayable(scratch.dir, copy)
-		hashDir(exec, scratch.dir)
+		await hashDir(exec, scratch.dir)
 		return scratch
 	} catch (error) {
 		scratch.remove()
@@ -153,12 +153,16 @@ function writeReplayable(plain: string, copy: string): void {
  * against the history replayed on the dev database. Atlas OSS inspects no view, policy or
  * sequence, so those are not compared.
  */
-function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, refusal?: string): string[] {
-	const plain = replayableHistory(options.exec, copy)
+async function refuseDrift(
+	options: { exec: Run; target: PgTarget },
+	copy: string,
+	refusal?: string,
+): Promise<string[]> {
+	const plain = await replayableHistory(options.exec, copy)
 	try {
-		const ran = withAtlasEnv(options.target, { dev: true, url: true }, (env) => {
+		const ran = await withAtlasEnv(options.target, { dev: true, url: true }, async (env) => {
 			const args = ["schema", "diff", "--from", "env://url", "--to", `file://${plain.dir}`, ...env.args]
-			const result = options.exec("atlas", args, { env: env.env })
+			const result = await options.exec("atlas", args, { env: env.env })
 			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
 			if (result.code !== 0) {
 				const said = `${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`

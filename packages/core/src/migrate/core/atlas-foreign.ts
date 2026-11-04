@@ -36,8 +36,8 @@ type Foreign = { elsewhere: boolean; ignored: Map<string, string>; unread: strin
 const none = (): Foreign => ({ elsewhere: false, ignored: new Map(), unread: undefined })
 
 /** The names of the database's schemas */
-function schemasOf(options: AtlasCommand): string[] {
-	const ran = withAtlasEnv(options.target, { allSchemas: true, url: true }, (env) => {
+async function schemasOf(options: AtlasCommand): Promise<string[]> {
+	const ran = await withAtlasEnv(options.target, { allSchemas: true, url: true }, async (env) => {
 		const args = [
 			"schema",
 			"inspect",
@@ -49,7 +49,7 @@ function schemasOf(options: AtlasCommand): string[] {
 			"{{ json . }}",
 			...env.args,
 		]
-		const result = (options.exec ?? run)("atlas", args, { env: env.env })
+		const result = await (options.exec ?? run)("atlas", args, { env: env.env })
 		if (result.code !== 0)
 			throw new Error(
 				`atlas schema inspect: ${explainAtlasFailure(result.stderr, env.scrub).trim() || `exit ${result.code}`}`,
@@ -61,17 +61,17 @@ function schemasOf(options: AtlasCommand): string[] {
 }
 
 /** The revisions of public's history `status` that are another schema's, read from those schemas' own histories */
-function foreignRows(options: AtlasCommand, copy: string, status: AtlasStatus): Foreign {
+async function foreignRows(options: AtlasCommand, copy: string, status: AtlasStatus): Promise<Foreign> {
 	if (options.target.schema !== "public") return none()
 	const fileless = status.applied.filter((revision) => fileOf(copy, revision.version) === revision.version)
 	if (fileless.length === 0) return none()
 	const own = new Map<string, string>()
 	let elsewhere = false
 	try {
-		const schemas = schemasOf(options)
+		const schemas = await schemasOf(options)
 		elsewhere = schemas.some((name) => name !== "public" && name !== SHARED_REVISIONS)
 		for (const name of schemas.filter((each) => each.startsWith(OWN))) {
-			for (const revision of atlasStatus({ ...options, revisions: name }, copy, { notClean: true }).applied)
+			for (const revision of (await atlasStatus({ ...options, revisions: name }, copy, { notClean: true })).applied)
 				own.set(`${revision.version} ${revision.hash}`, name.slice(OWN.length))
 		}
 	} catch (error) {

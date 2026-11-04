@@ -111,7 +111,7 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 	/* Atlas diffs on the dev database (AD9 of the area D review) */
 	if (target?.provider.type === "postgres") refuseBlank(target, { devUrl: target.provider.devUrl })
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
-	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
+	const peers = await needPeers(io, "diff", { fts: fts !== undefined, provider })
 	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
 	checkDialect(exported.configPath, await statedDialect(exported.configPath), expected)
 	const { exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
@@ -130,7 +130,7 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 			readyDev: io.readyPgDev,
 			run: io.run,
 			target: pg,
-			targetSchema: exportWith(binOf(peers, "drizzle-kit"), exported),
+			targetSchema: await exportWith(binOf(peers, "drizzle-kit"), exported),
 		})
 		/* Atlas OSS may say it left part of the schema out of the diff (plan 14's 5.4) */
 		for (const notice of notices) io.err(`Warning: Atlas: ${notice}`)

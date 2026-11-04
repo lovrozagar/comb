@@ -85,8 +85,8 @@ import { type PgTarget } from "./atlas-target.ts";
 import { type ProjectBin, type Run } from "./process.ts";
 export { applySqliteMigrationTransforms } from "./atlas-env.ts";
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts";
-export declare function checkAtlasInstalled(exec?: Run): boolean;
-export declare function getAtlasVersion(exec?: Run): string | null;
+export declare function checkAtlasInstalled(exec?: Run): Promise<boolean>;
+export declare function getAtlasVersion(exec?: Run): Promise<string | null>;
 export type SchemaDiffOptions = {
     dialect: Dialect;
     fromSchema: string;
@@ -124,9 +124,9 @@ export type DrizzleExportOptions = {
  * drizzle-kit's export of the schema, normalized for the dialect: on Postgres, scoped to the
  * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
  */
-export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
+export declare function exportDrizzleSchema(options: DrizzleExportOptions): Promise<string>;
 /** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
-export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string;
+export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): Promise<string>;
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
@@ -701,15 +701,17 @@ export type RunOptions = {
     peer?: BinPeer | undefined;
     /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
     timeoutMs?: number | undefined;
+    /** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
+    killAfterMs?: number | undefined;
 };
-export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
-/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>;
+/** Runs `cmd` and reports how it ended; it never rejects for a failed command. Started while a signal stops comb, it waits with the rest. */
 export declare const run: Run;
 /**
  * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
  * holds, the one comb checked (K1 of r22), never a name looked up on PATH
  */
-export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
+export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 
 // migrate/config-schema.d.ts
 /**
@@ -896,7 +898,7 @@ declare function executeAll(exec: Run, { flags, name, wrangler }: {
     flags: readonly string[];
     name: string;
     wrangler: ProjectBin;
-}, statements: readonly string[]): Array<Array<Record<string, unknown>>>;
+}, statements: readonly string[]): Promise<Array<Array<Record<string, unknown>>>>;
 export { executeAll, wranglerFlags };
 /**
  * The connection to the D1 database `config` names, through `wrangler`, the bin the command
