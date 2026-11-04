@@ -181,6 +181,7 @@ const RESERVED_LIST_KEYS = [
 	"q",
 	"select",
 	"sortOrderBy",
+	"tiebreak",
 	"validated",
 ] as const
 

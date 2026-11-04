@@ -545,6 +545,8 @@ type ListQueryInput<TSortField extends string = string> = {
     pageBound?: number | undefined;
     /** the largest limit this query may take; absent, the default maxLimit (Q16 of r18) */
     limitBound?: number | undefined;
+    /** the column the list schema breaks ties on; a derived list's idColumn must name it */
+    tiebreak?: string | undefined;
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: readonly SortField<TSortField>[];
     q?: string | null | undefined;
@@ -1194,6 +1196,8 @@ type ListQueryOutput<TSortField extends string = string> = {
     pageBound?: number | undefined;
     /** The schema's own maxLimit, which holds the limit as `pageBound` holds the page (Q16 of r18, C7 of r19) */
     limitBound?: number | undefined;
+    /** The column the schema says the list breaks ties on, `id` by default, which a derived list's idColumn names */
+    tiebreak?: string | undefined;
     /** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
     validated: true;
 };
@@ -1232,7 +1236,7 @@ declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.Zod
  * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
  */
 declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<CountParam>;
-declare const RESERVED_LIST_KEYS: readonly ["cursor", "filter", "filterAst", "lang", "limit", "limitBound", "order", "page", "pageBound", "parsedFields", "parsedSort", "q", "select", "sortOrderBy", "validated"];
+declare const RESERVED_LIST_KEYS: readonly ["cursor", "filter", "filterAst", "lang", "limit", "limitBound", "order", "page", "pageBound", "parsedFields", "parsedSort", "q", "select", "sortOrderBy", "tiebreak", "validated"];
 declare const RESERVED_RETRIEVE_KEYS: readonly ["lang", "parsedFields", "select"];
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
 declare function assertNotReserved(builder: string, extendFields: Record<string, unknown> | undefined, reserved: readonly string[]): void;

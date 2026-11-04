@@ -8,7 +8,7 @@ import { EMPTY_OBJ } from "../empty.ts"
 import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
 import { limitsOver } from "./filter-validate.ts"
-import { listQueryStamp } from "./list-meta.ts"
+import { listQueryStamp, tiebreakOf } from "./list-meta.ts"
 import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
 import { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
 import {
@@ -123,6 +123,8 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 		pageBound: z.number().optional(),
 		/* the limit's bound, as the page's: the schema's own maxLimit (Q16 of r18) */
 		limitBound: z.number().optional(),
+		/* the tiebreak the schema publishes, which a derived list's idColumn must name (AB6 of area B) */
+		tiebreak: z.string().optional(),
 		validated: z.literal(true),
 		...extendFields,
 	})
@@ -161,8 +163,7 @@ function createListQuerySchema<
 	const schema = extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape)
 	const outputSchema = outputSchemaFor(sortConfig, extensions)
 
-	const maxLimit = config.pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
-	const maxPage = config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage
+	const { maxLimit = PAGINATION_DEFAULTS.maxLimit, maxPage = PAGINATION_DEFAULTS.maxPage } = config.pagination ?? {}
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
 		if (data.page !== undefined && data.page > maxPage) throw pageTooDeep(data.page, maxPage)
 		/* Optional params exist on `data` only when advertised above. */
@@ -188,6 +189,7 @@ function createListQuerySchema<
 			sortOrderBy: sortOrderByOf(parsedSort),
 			pageBound: maxPage,
 			limitBound: maxLimit,
+			tiebreak: tiebreakOf(config.tiebreak),
 			validated: true as const,
 			...(pickExtended(extensions, data) as { [K in keyof T]: z.infer<T[K]> }),
 		}

@@ -8,6 +8,7 @@ import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-co
 import { describe, expect, it } from "vitest"
 import { CombError } from "../../error.ts"
 import { createCursor } from "../cursor-mint.ts"
+import { createListQuerySchema } from "../list-schema.ts"
 import type { SortField } from "../types.ts"
 import { buildDerivedListQuery } from "./build-list-query.ts"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
@@ -226,5 +227,49 @@ describe("buildDerivedListQuery — a sort key declared as time (Q4)", () => {
 		expect(() =>
 			buildDerivedListQuery({ ...SEALED, ...timed, parsed: { cursor, limit: 20, parsedSort: sort } }),
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
+	})
+})
+
+/*
+ * AB6 of area B: the list schema publishes its tiebreak as stableTiebreak, `id` without one, and the
+ * builder takes its parsed output, so a tiebreak that names another column than idColumn is a wiring
+ * mistake the build can see: the published fact would be wrong silently
+ */
+const keyed = sqliteTable("keyed", { title: text("title"), uid: text("uid").primaryKey() })
+
+/** The list schema's output over `keyed`, sorted by title, with `tiebreak` when given */
+const parseKeyed = (tiebreak?: string) =>
+	createListQuerySchema({
+		sort: ["title"] as const,
+		...(tiebreak === undefined ? {} : { tiebreak }),
+	}).parse({ order: "title.asc" })
+
+/** The derived list `query` builds over `keyed`, broken by `idColumn` */
+const buildKeyed = (query: ReturnType<typeof parseKeyed>, idColumn: typeof keyed.uid | typeof derived.id) =>
+	buildDerivedListQuery({ ...SEALED, idColumn, parsed: query, sortColumns: { title: keyed.title } })
+
+describe("buildDerivedListQuery holds idColumn to the schema's tiebreak (AB6 of area B; sibling: QL10)", () => {
+	it("refuses an idColumn the schema's tiebreak does not name, naming both", () => {
+		expect(() => buildKeyed(parseKeyed(), keyed.uid)).toThrow(
+			new TypeError(
+				`buildDerivedListQuery: idColumn "uid" is not the column the list schema breaks ties on, "id": set the schema's tiebreak to "uid"`,
+			),
+		)
+		expect(() => buildKeyed(parseKeyed("uid"), derived.id)).toThrow(
+			/idColumn "id" is not the column the list schema breaks ties on, "uid"/,
+		)
+		const anchor = { idColumn: keyed.uid, table: keyed }
+		expect(() =>
+			buildDerivedListQuery({ ...SEALED, anchor, parsed: parseKeyed(), sortColumns: { title: keyed.title } }),
+		).toThrow(TypeError)
+	})
+
+	it("builds where they agree, and where the query names no tiebreak", () => {
+		expect(parseKeyed("uid").tiebreak).toBe("uid")
+		expect(parseKeyed().tiebreak).toBe("id")
+		expect(() => buildKeyed(parseKeyed("uid"), keyed.uid)).not.toThrow()
+		expect(() => buildKeyed(parseKeyed(), derived.id)).not.toThrow()
+		const { tiebreak: _, ...unstated } = parseKeyed()
+		expect(() => buildKeyed(unstated as ReturnType<typeof parseKeyed>, keyed.uid)).not.toThrow()
 	})
 })

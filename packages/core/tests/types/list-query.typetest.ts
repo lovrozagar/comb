@@ -93,6 +93,7 @@ expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
 	| "parsedSort"
 	| "q"
 	| "sortOrderBy"
+	| "tiebreak"
 	| "validated"
 >()
 expectTypeOf<z.output<ReturnType<typeof createListQuerySchema<Record<string, never>, ["created_at"]>>>>().toMatchTypeOf<

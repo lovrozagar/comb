@@ -75,4 +75,4 @@ function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits): CombM
 	})
 }
 
-export { buildDefaultOrder, listQueryStamp, selectableFrom }
+export { buildDefaultOrder, listQueryStamp, selectableFrom, tiebreakOf }

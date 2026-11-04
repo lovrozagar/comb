@@ -1,4 +1,4 @@
-import { getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-orm"
+import { Column, getTableColumns, is, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
@@ -167,6 +167,18 @@ function buildListQuery<TTable extends SQLiteTable>(
 	}) as ListQueryResult | MergedListQueryResult
 }
 
+/**
+ * Throw where the list schema publishes a tiebreak (stableTiebreak) that `idColumn` is not: the list
+ * would break ties on one column and say it breaks them on another (AB6 of area B). A query built by
+ * hand names none, and an idColumn that is an expression has no name to compare
+ */
+function refuseOtherTiebreak(idColumn: SQLWrapper, tiebreak: string | undefined): void {
+	if (tiebreak === undefined || !is(idColumn, Column) || idColumn.name === tiebreak) return
+	throw new TypeError(
+		`buildDerivedListQuery: idColumn "${idColumn.name}" is not the column the list schema breaks ties on, "${tiebreak}": set the schema's tiebreak to "${idColumn.name}"`,
+	)
+}
+
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField> & {
 		anchor?: never | undefined
@@ -188,6 +200,7 @@ function buildDerivedListQuery<TSortField extends string>(
 	})
 
 	const idColumn = opts.anchor === undefined ? opts.idColumn : opts.anchor.idColumn
+	refuseOtherTiebreak(idColumn, opts.parsed.tiebreak)
 	const tiebreak: SortKey = { column: idColumn, direction: sort[0]?.direction ?? "desc" }
 	/* every key the list may sort by, not only this request's: a list's dialect is its wiring's, on every page */
 	const wired = Object.values<SQLWrapper | { sql: SQLWrapper; type: "date" }>(opts.sortColumns)

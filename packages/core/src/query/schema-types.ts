@@ -83,6 +83,8 @@ type ListQueryOutput<TSortField extends string = string> = {
 	pageBound?: number | undefined
 	/** The schema's own maxLimit, which holds the limit as `pageBound` holds the page (Q16 of r18, C7 of r19) */
 	limitBound?: number | undefined
+	/** The column the schema says the list breaks ties on, `id` by default, which a derived list's idColumn names */
+	tiebreak?: string | undefined
 	/** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
 	validated: true
 }

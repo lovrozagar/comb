@@ -71,6 +71,8 @@ type ListQueryInput<TSortField extends string = string> = {
 	pageBound?: number | undefined
 	/** the largest limit this query may take; absent, the default maxLimit (Q16 of r18) */
 	limitBound?: number | undefined
+	/** the column the list schema breaks ties on; a derived list's idColumn must name it */
+	tiebreak?: string | undefined
 	parsedFields?: ParsedFields | null | undefined
 	parsedSort: readonly SortField<TSortField>[]
 	q?: string | null | undefined

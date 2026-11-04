@@ -465,6 +465,7 @@ describe("the parsed cursor (Q7)", () => {
 			"parsedSort",
 			"q",
 			"sortOrderBy",
+			"tiebreak",
 			"validated",
 		])
 	})
