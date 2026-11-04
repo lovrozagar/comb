@@ -52,6 +52,15 @@ describe("statesOf", () => {
 		})
 	})
 
+	/* D2-3 of the area D round-two review: a transitions entry set to undefined is the key left out, as canTransition reads it */
+	it("reads a transitions entry set to undefined as the key left out", () => {
+		expect(statesOf({ transitions: { a: ["b"], b: undefined } }, "t.c")).toEqual({
+			initial: null,
+			terminal: null,
+			transitions: { a: ["b"] },
+		})
+	})
+
 	it("refuses a machine of another shape, naming the column", () => {
 		for (const raw of [{ initial: 1 }, { terminal: "b" }, { transitions: { a: "b" } }])
 			expect(() => statesOf(raw, "t.c")).toThrow("t.c: its state machine is not")

@@ -58,7 +58,11 @@ function statesOf(raw: unknown, at: string, fill: Fill = {}): SnapshotComb["stat
 			`${at}: its state machine has ${unknown}, which is none of initial, terminal, transitions and values`,
 		)
 	const { initial, terminal, transitions } = raw as Record<string, unknown>
-	const map = transitions as Record<string, unknown> | undefined
+	/* an entry set to undefined is the key left out, as canTransition reads it (D2-3 of the area D round-two review) */
+	const map =
+		transitions === undefined
+			? undefined
+			: Object.fromEntries(Object.entries(transitions as object).filter(([, to]) => to !== undefined))
 	const valid =
 		(initial === undefined || typeof initial === "string") &&
 		(terminal === undefined || STRING_LIST(terminal)) &&
