@@ -62,6 +62,14 @@ type Schema = { anyOf?: Schema[]; items?: Schema } & Record<string, unknown>
 
 const xComb = (schema: Schema): string[] => Object.keys(schema).filter((key) => key.startsWith("x-comb-"))
 
+/** Each level's element keys of an array `member` that the property's `items` at that level does not state */
+function unstatedItems(member: Schema | undefined, property: Schema | undefined, at: string): string[] {
+	const keys = Object.fromEntries(xComb(member ?? {}).map((key) => [key, member?.[key]]))
+	const stated = Object.fromEntries(xComb(property ?? {}).map((key) => [key, property?.[key]]))
+	const here = JSON.stringify(keys) === JSON.stringify(stated) ? [] : [`${at}: ${JSON.stringify(keys)}`]
+	return member?.type === "array" ? [...here, ...unstatedItems(member.items, property?.items, `${at}.items`)] : here
+}
+
 /**
  * Each `x-comb-*` key inside an `anyOf` member of `schema` that `schema` itself does not carry with
  * the same value, by the path to it: a nullable field's member repeats the property's keys, so
@@ -197,5 +205,21 @@ describe("where a field's x-comb-* keys sit", () => {
 			((create.properties[key] as Schema).anyOf as Schema[]).find(({ type }) => type === "array")?.items as Schema
 		expect(xComb(items("tags"))).toEqual(["x-comb-text"])
 		expect(xComb(items("docs"))).toEqual(["x-comb-text"])
+	})
+
+	/* A2-6 of r22: a nullable array's element keys on the property's own `items` too, as §2.1 reads them */
+	it("is on a nullable array's own `items`, read with no anyOf step, in any DTO", async () => {
+		const [[, create]] = (await documents()) as Array<[string, { properties: Record<string, Schema> }]> as [
+			[string, { properties: Record<string, Schema> }],
+		]
+		expect(create.properties["nets"]?.items?.["x-comb-cidr"]).toBe(true)
+		expect(create.properties["tags"]?.items?.["x-comb-text"]).toBe("no U+0000 or unpaired surrogate")
+		const unstated: string[] = []
+		for (const [name, { properties }] of await documents())
+			for (const [key, schema] of Object.entries(properties)) {
+				const array = schema.anyOf?.find(({ type }) => type === "array")
+				if (array !== undefined) unstated.push(...unstatedItems(array.items, schema.items, `${name}.${key}.items`))
+			}
+		expect(unstated).toEqual([])
 	})
 })

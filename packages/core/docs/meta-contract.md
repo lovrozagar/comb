@@ -92,7 +92,9 @@ ordinary discriminated union: `if (m.kind === "entity")` narrows, with no extra 
 Beside `x-comb` on the object, a field's own JSON Schema may carry flat `x-comb-*` keys for rules
 JSON Schema cannot state. Every one sits on the property's own schema, beside the `anyOf` of a
 nullable field, so a reader finds it at `properties[name]["x-comb-*"]`; an array element's rules
-sit on `items` the same way. A nullable field's non-null member carries the same keys with the
+sit on `items` the same way, a nullable array's on the property's own `items` beside its `anyOf`
+(at `properties[name].items`, each further level of a written multidimensional one an `items`
+deeper), which binds an array alone, so a null still passes. A nullable field's non-null member carries the same keys with the
 same values, and no other, so a schema composed from the field with zod's `.unwrap()` (a nullable
 column taken as a required input) still publishes them; a reader reads the property's and needs
 no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes it on a write:

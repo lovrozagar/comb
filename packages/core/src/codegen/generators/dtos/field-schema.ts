@@ -2,7 +2,8 @@
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
 import { writesOf } from "../../entity-meta.ts"
-import { type Base, type Build, plain } from "./build-types.ts"
+import { arrayBase } from "./array-schema.ts"
+import { type Base, type Build, keyed, metaOf, plain } from "./build-types.ts"
 import type { SchemaType, SharedName } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { CIDR, pgWriteRule } from "./pg-types.ts"
@@ -165,23 +166,12 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
-/** The `.meta` that puts `keys` on the schema it follows; nothing for none */
-const metaOf = (keys: Record<string, unknown>): string =>
-	Object.keys(keys).length === 0 ? "" : `.meta(${JSON.stringify(keys)})`
-
-/**
- * `code` with `keys` on it, nullable unless `takesNull`: the keys then sit on the nullable, so they
- * publish beside its anyOf (C4 of r19), and on its member too, so `.unwrap()` keeps them (C1 of r20)
- */
-const keyed = (code: string, keys: Record<string, unknown>, takesNull: boolean): string =>
-	`${code}${takesNull ? "" : `${metaOf(keys)}.nullable()`}${metaOf(keys)}`
-
 /** `base` with its OpenAPI example, nullability unless the base takes null itself, its keys, and the schema type's optionality. */
 function finish(build: Build, base: Base): string {
 	const { dialect, field, schemaType } = build
 	const example = generateExampleMeta(field)
 	const required = isRequired(field)
-	const zodType = keyed(`${base.code}${example?.code ?? ""}`, base.keys, required || base.takesNull)
+	const zodType = keyed(`${base.code}${example?.code ?? ""}`, base, required || base.takesNull)
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -210,10 +200,7 @@ export function fieldSchemaOf(
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
 	const one: Build = { ...build, element: true, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
-	/* the array takes null by its own column alone, whatever its elements take; a written one past one
-	   dimension is rectangular, a key finish places as any other (AA3 of area A's review) */
-	const keys = dimensions > 1 && isMutative(schemaType) ? { "x-comb-rectangular": true } : {}
-	return { code: finish(build, plain(arrayOf(dimensions, schemaType, element), keys)), uses: element.uses }
+	return { code: finish(build, arrayBase(dimensions, schemaType, element)), uses: element.uses }
 }
 
 /** The Zod expression for `field` in a `schemaType` DTO, as fieldSchemaOf gives it, or null */
@@ -223,9 +210,6 @@ export const generateFieldSchema = (
 	options: FieldSchemaOptions,
 ): string | null => fieldSchemaOf(field, schemaType, options)?.code ?? null
 
-/** An array's element: nullable, its keys on it, which publish on `items` */
-const elementOf = (element: Base): string => keyed(element.code, element.keys, element.takesNull)
-
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
 function baseOf(build: Build): Base {
 	for (const builder of BUILDERS) {
@@ -233,31 +217,6 @@ function baseOf(build: Build): Base {
 		if (base !== undefined) return base
 	}
 	return textBase(build)
-}
-
-/* Postgres keeps at most 6 dimensions (MAXDIM) */
-const MAX_DIMENSIONS = 6
-
-/* Postgres refuses a ragged multidimensional array: each level's sub-arrays must share one shape */
-const RECTANGULAR =
-	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
-
-/**
- * An array column of `element`s: written, in exactly its declared dimensions, rectangular past one;
- * read, in any depth Postgres holds, as it keeps no declared dimensions and a read never refuses a
- * stored row (F49). A read level's items is the element or a deeper array, a union that carries the
- * element's keys, so every level's `items` states them and no anyOf member alone does (C3 of r20)
- */
-function arrayOf(dimensions: number, schemaType: SchemaType, element: Base): string {
-	let nested = `z.array(${elementOf(element)})`
-	if (!isMutative(schemaType)) {
-		const bare = element.takesNull ? element.code : `${element.code}.nullable()`
-		for (let depth = 1; depth < MAX_DIMENSIONS; depth++)
-			nested = `z.array(z.union([${bare}, ${nested}])${metaOf(element.keys)})`
-		return nested
-	}
-	for (let depth = 1; depth < dimensions; depth++) nested = `z.array(${nested})`
-	return dimensions > 1 ? `${nested}${RECTANGULAR}` : nested
 }
 
 /** What a written value of a column is held to: its bounds and the regexes it must match */
