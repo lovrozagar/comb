@@ -30,12 +30,17 @@ export const isInteger = (field: FieldMeta): boolean =>
 
 /* the integer range each column holds: Postgres's int2 and int4, else a JS number's exact range */
 const INT2 = { max: 32767, min: -32768 }
-export const SAFE: { max: string; min: string } = {
-	max: "globalThis.Number.MAX_SAFE_INTEGER",
-	min: "globalThis.Number.MIN_SAFE_INTEGER",
-}
+export type Range = { max: number; min: number }
 
-export type Range = { max: number | string; min: number | string }
+export const SAFE: Range = { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER }
+
+/** A bound as generated code writes it, a JS number's exact range by its name */
+export const boundCode = (bound: number): string =>
+	bound === SAFE.max
+		? "globalThis.Number.MAX_SAFE_INTEGER"
+		: bound === SAFE.min
+			? "globalThis.Number.MIN_SAFE_INTEGER"
+			: String(bound)
 
 /** The range an integer column holds, by what the dialect stores it in */
 export function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range {
@@ -44,21 +49,14 @@ export function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range
 	return field.dataType === "number int16" ? INT2 : SAFE
 }
 
-/** A declared bound clamped to the column's, which a numeric bound is and a safe-integer name is not */
-export const clamp = (
-	declared: number | null,
-	bound: number | string,
-	pick: (a: number, b: number) => number,
-): number | string => (declared === null ? bound : typeof bound === "number" ? pick(declared, bound) : declared)
-
-/** A bound as the number it is: SAFE names a JS number's exact range */
-const numberOf = (bound: number | string): number =>
-	typeof bound === "number" ? bound : bound === SAFE.max ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER
+/** A declared bound clamped to the column's, the column's where none is declared (CD8 of r22b) */
+export const clamp = (declared: number | null, bound: number, pick: (a: number, b: number) => number): number =>
+	declared === null ? bound : pick(declared, bound)
 
 /** Refuses an integer's bounds, clamped to what the column holds, that leave no integer: every write would be refused (F8) */
 export function refuseNoInteger(name: string, annotations: FieldConstraints, range: Range): void {
-	const min = numberOf(clamp(annotations.min, range.min, Math.max))
-	const max = numberOf(clamp(annotations.max, range.max, Math.min))
+	const min = clamp(annotations.min, range.min, Math.max)
+	const max = clamp(annotations.max, range.max, Math.min)
 	if (Math.ceil(min) > Math.floor(max))
 		throw new Error(`${name}: its bounds min ${min} and max ${max} leave no integer the column holds; widen them`)
 }
@@ -75,5 +73,5 @@ export function numberRules(field: FieldMeta, dialect: Build["dialect"]): { max:
 		return { max: null, min: null }
 	const range = kind === "timestamp" ? SAFE : isInteger(field) ? integerRange(field, dialect) : undefined
 	if (range === undefined) return { max, min }
-	return { max: numberOf(clamp(max, range.max, Math.min)), min: numberOf(clamp(min, range.min, Math.max)) }
+	return { max: clamp(max, range.max, Math.min), min: clamp(min, range.min, Math.max) }
 }

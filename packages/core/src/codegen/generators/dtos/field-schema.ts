@@ -9,6 +9,7 @@ import { CIDR, pgWriteRule } from "./pg-types.ts"
 import { isMutative, isRead } from "./schema-type.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import {
+	boundCode,
 	clamp,
 	integerRange,
 	isInteger,
@@ -93,11 +94,11 @@ const isRequired = (field: FieldMeta): boolean => field.isPrimaryKey || field.is
 function integerOf(annotations: FieldConstraints, range: Range, schemaType: SchemaType): Base {
 	if (isRead(schemaType))
 		return plain(
-			`z.number().int().min(${range.min}).max(${range.max})`,
+			`z.number().int().min(${boundCode(range.min)}).max(${boundCode(range.max)})`,
 			stated({ maximum: annotations.max, minimum: annotations.min }),
 		)
 	return plain(
-		`z.number().int().min(${clamp(annotations.min, range.min, Math.max)}).max(${clamp(annotations.max, range.max, Math.min)})`,
+		`z.number().int().min(${boundCode(clamp(annotations.min, range.min, Math.max))}).max(${boundCode(clamp(annotations.max, range.max, Math.min))})`,
 	)
 }
 

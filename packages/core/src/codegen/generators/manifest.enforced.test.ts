@@ -121,3 +121,38 @@ describe("the manifest states what the DTO enforces (C2 of r20)", () => {
 		},
 	)
 })
+
+/*
+ * CD8 of r22b: a bound declared past a JS number's exact range is clamped to it, as the column
+ * holds no other integer, so the manifest, the generated chain and the published schema all state
+ * ±(2^53 − 1) where 0.20 stated the declared ±1e20 beside a DTO that, through `.int()`, enforced the range
+ */
+describe("a bound past a JS number's exact range is clamped to it (CD8 of r22b; siblings: int4, a timestamp)", () => {
+	const PAST: Record<string, string> = {
+		at: 'c.timestamp("at", { max: 1e20 }).notNull()',
+		before: 'c.timestamp("before", { min: -1e20 }).notNull()',
+	}
+	const ONLY_SQLITE: Record<string, string> = {
+		big: 'c.integer("big", { max: 1e20 }).notNull()',
+		neg: 'c.integer("neg", { min: -1e20 }).notNull()',
+	}
+	const SAFE = { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER }
+
+	/* Postgres holds c.timestamp in a bigint and c.integer in int4, which clamps it already */
+	it.each(["sqlite", "postgres"] as const)("on %s, in the manifest, the chain and the published schema", (dialect) => {
+		const columns = dialect === "sqlite" ? { ...PAST, ...ONLY_SQLITE } : PAST
+		const table = tableOf("past", columns, { dialect })
+		const [entity] = buildManifest([table], "test", dialect).entities
+		for (const name of Object.keys(columns)) {
+			const field = table.fields.find((each) => each.name === name) as FieldMeta
+			const column = entity?.columns.find((each) => each.name === name)
+			expect({ max: column?.max, min: column?.min }, `${name} in the manifest`).toEqual(SAFE)
+			const imports: ImportsMeta = { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
+			expect(generateFieldSchema(field, "create", { dialect, imports }), `${name}'s chain`).toContain(
+				".min(globalThis.Number.MIN_SAFE_INTEGER).max(globalThis.Number.MAX_SAFE_INTEGER)",
+			)
+			const published = publishedOf(field, dialect)
+			expect({ max: published["maximum"], min: published["minimum"] }, `${name} published`).toEqual(SAFE)
+		}
+	})
+})

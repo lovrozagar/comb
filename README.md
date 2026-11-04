@@ -1170,6 +1170,8 @@ What changes for a project on 0.20. Before deploying it:
 
 37. **Rely on an `LruCache` hard TTL alone.** A cache built with `hardTtlMs` and no `ttlMs` had `get()` return an entry and `has()` say true long past its hard TTL, while `getWithMeta()` evicted it. Every read now checks the hard expiry first, and a missing soft TTL means fresh until the hard one. **Fix:** none.
 
+38. **Read an integer bound past a JS number's exact range as that range.** A `c.integer` on SQLite, or a `c.timestamp` on either dialect, declared with a `max` above 2^53 − 1 or a `min` below −(2^53 − 1) is clamped to the range the column holds, as a smaller bound past int4 already was on Postgres: the manifest's `min` and `max`, the generated chain and the published schema all state ±9007199254740991. 0.20 stated the declared bound, `max 1e20`, in the manifest and the chain, while the DTO, through `.int()`, refused anything past the range, so a reader validating with the manifest took values the server refused. **Fix:** none in the app; a reader of the manifest gets the bound the server enforces.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:
