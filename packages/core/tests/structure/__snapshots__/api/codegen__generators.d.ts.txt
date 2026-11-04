@@ -125,6 +125,8 @@ type ManifestColumn = {
      * zone`, `interval day`, `numeric(3, -2)`): with `kind`, the check a plain Postgres type's rule is (AA8 of r22)
      */
     sqlType: string;
+    /** An array column's dimensions, 0 for a column of one value: its `sqlType` is its element's (A2-5 of r22) */
+    dimensions: number;
     notNull: boolean;
     primaryKey: boolean;
     /** Declared values for an enum column, or null when not an enum or the list is a const reference */

@@ -195,4 +195,35 @@ describe("the manifest names a plain Postgres column's SQL type (AA8 of r22)", (
 			ruleOf.set(named, rule)
 		}
 	})
+
+	/* A2-5 of r22: an array's sqlType is its element's, so its dimensions tell `text[]` from `text` */
+	it("states an array column's dimensions, which tell it from its scalar twin", () => {
+		const columns = {
+			grid: 'integer("grid").array("[][]")',
+			n: 'integer("n")',
+			tag: 'text("tag")',
+			tags: 'text("tags").array()',
+		}
+		const [entity] = buildManifest([tableOf("arrays", columns, { dialect: "postgres" })], "test", "postgres").entities
+		const stated = Object.fromEntries(
+			(entity?.columns ?? []).map(({ dimensions, kind, name, sqlType }) => [name, { dimensions, kind, sqlType }]),
+		)
+		expect(stated).toEqual({
+			grid: { dimensions: 2, kind: "PgInteger", sqlType: "integer" },
+			n: { dimensions: 0, kind: "PgInteger", sqlType: "integer" },
+			tag: { dimensions: 0, kind: "PgText", sqlType: "text" },
+			tags: { dimensions: 1, kind: "PgText", sqlType: "text" },
+		})
+	})
+
+	it("states 0 for a column whose FieldMeta, built by hand, leaves its dimensions out", () => {
+		const table = tableOf("plain", { tag: 'text("tag")' }, { dialect: "postgres" })
+		const fields = table.fields.map((field) => {
+			const copy = { ...field }
+			delete copy.dimensions
+			return copy
+		})
+		const [entity] = buildManifest([{ ...table, fields }], "test", "postgres").entities
+		expect(entity?.columns.map((column) => column.dimensions)).toEqual([0])
+	})
 })

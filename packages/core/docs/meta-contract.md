@@ -642,7 +642,7 @@ every entity is, and its `column` and `refColumn` by their names among each enti
 reader joins through the manifest alone. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
-declared it, its `sqlType`, the column's SQL type with its modifier as drizzle writes it (`timestamp(3) with time zone`, `interval day`, `numeric(3, -2)`), the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
+declared it, its `sqlType`, the column's SQL type with its modifier as drizzle writes it (`timestamp(3) with time zone`, `interval day`, `numeric(3, -2)`), an array's that of its element, beside its `dimensions` (0 for a column of one value, 2 for `integer[][]`), the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
 `"password"`, `"name"`, or null), `transform`, the list the DTO publishes as `x-comb-transform`
 (§2.1), and `generated`, `immutable` and `private` flags. `min`, `max`, `patterns` and `maxBytes`
 are what the create DTO enforces, not what the column declares, from `writeRules`, which reads
