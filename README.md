@@ -242,13 +242,14 @@ The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migra
 
 The CLI is tested on Linux and macOS (CI runs its loader, codegen and SQLite-family migrate suites on both, with real Atlas) and relies on POSIX process groups, so Windows is not supported: `comb codegen` loads each tables module in a child of its own process group, which a supervisor kills whole, with every process the module started, after 60 s or when the run is interrupted. The library itself (columns, queries, error handling) runs wherever its database driver does.
 
-External tools the migration commands shell out to, none of them install-time dependencies:
+External tools the migration commands shell out to, none of them install-time dependencies: [Atlas](https://atlasgo.io) `>=1.2.0 <2` on `PATH`, and the project's own `drizzle-kit` and `wrangler`, `wrangler` authenticated against the account for a remote D1 database. Each command needs these, on the providers named; the npm clients a provider's commands load are in the peer dependencies table.
 
-| Command                                              | Needs                                                                                                                                                      |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `migrate diff`                                       | [Atlas](https://atlasgo.io) `>=1.2.0 <2` on `PATH`, plus `drizzle-kit`                                                                                     |
-| `migrate check`, `migrate apply`, `migrate baseline` | Atlas on `PATH` (not for a D1 baseline) and the configured provider's client; for D1, `wrangler` (authenticated against the account for a remote database) |
-| `migrate status` on Postgres                         | Atlas on `PATH`                                                                                                                                            |
+| Command                          | Needs                                                               |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `migrate diff`                   | `atlas` and `drizzle-kit`                                           |
+| `migrate check`, `migrate apply` | `atlas`; `wrangler` on D1                                           |
+| `migrate baseline`               | `atlas` on bun:sqlite, libsql, Postgres and Turso; `wrangler` on D1 |
+| `migrate status`                 | `atlas` on Postgres; `wrangler` on D1                               |
 
 The D1 provider drives `wrangler d1 execute` and `wrangler d1 migrations apply` as child processes, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database. `wranglerConfig` (relative to `comb.migrate.config.ts`; default: the wrangler config beside it) and `wranglerEnv` name the wrangler config that binds the database and its environment, and comb passes them as `--config` and `--env` to every wrangler command. Wrangler is given the provider's `databaseName`, a binding or a `database_name` of that config, whatever the environment is called; a binding is the safer choice, since a bare name can reach an unrelated D1 that shares it.
 

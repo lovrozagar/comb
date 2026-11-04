@@ -10,8 +10,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import { PEERS } from "../../src/migrate/core/peer-needs.ts"
-import { ATLAS_RANGE } from "../../src/migrate/core/process.ts"
+import { type Command, needsOf, PEERS, type Provider } from "../../src/migrate/core/peer-needs.ts"
+import { ATLAS_RANGE, type BinPeer } from "../../src/migrate/core/process.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const REPO = join(ROOT, "../..")
@@ -186,6 +186,45 @@ describe("README peer dependencies table", () => {
 			),
 	)("names %s for %s, which runs without it, to %s", (peer, command, why) => {
 		expect(ROWS.get(peer)).toContain(`\`${command}\` to ${why}`)
+	})
+})
+
+/* D2-13 of the area D round-two review: the table named no tool for a D1 status, and nothing held it to PEERS */
+describe("README external tools table", () => {
+	// lookup-table: what a migrate command shells out to, Atlas and each bin peer; a new BinPeer fails the typecheck until it is listed
+	const SHELLED: Record<"atlas" | BinPeer, true> = { atlas: true, "drizzle-kit": true, wrangler: true }
+	const PROVIDERS = Object.keys(PEERS) as Provider[]
+	const COMMANDS = [...new Set(Object.values(PEERS).flatMap((commands) => Object.keys(commands)))] as Command[]
+	const START = README.indexOf("External tools the migration commands shell out to")
+
+	/** The Needs cell of `command`: the tools every provider needs, then each other with the providers that need it */
+	function needs(command: Command): string {
+		const tools = Object.keys(SHELLED)
+			.map((tool) => {
+				const at = PROVIDERS.filter((provider) =>
+					needsOf(command, provider, false).some((need) => need.peer === tool && need.optional !== true),
+				)
+				return [tool, at] as const
+			})
+			.filter(([, at]) => at.length > 0)
+		const everywhere = tools.filter(([, at]) => at.length === PROVIDERS.length).map(([tool]) => `\`${tool}\``)
+		const some = tools
+			.filter(([, at]) => at.length < PROVIDERS.length)
+			.map(([tool, at]) => `\`${tool}\` on ${inWords(at.map((provider) => NAMES[provider] as string))}`)
+		return [...(everywhere.length > 0 ? [inWords(everywhere)] : []), ...some].join("; ")
+	}
+
+	it("gives every command a row naming what PEERS says it shells out to, on the providers it does", () => {
+		const head = README.indexOf("\n|", START)
+		const table = README.slice(head, README.indexOf("\n\n", head))
+		const cells = [...table.matchAll(/^\| (`migrate .+?`) +\| (.+?) +\|$/gm)].flatMap((row) =>
+			[...(row[1] as string).matchAll(/`migrate (\w+)`/g)].map((command) => [command[1] as string, row[2] as string]),
+		)
+		expect(Object.fromEntries(cells)).toEqual(Object.fromEntries(COMMANDS.map((command) => [command, needs(command)])))
+	})
+
+	it("states Atlas's range above it", () => {
+		expect(README.slice(START, README.indexOf("\n", START))).toContain(`\`${ATLAS_RANGE}\``)
 	})
 })
 
