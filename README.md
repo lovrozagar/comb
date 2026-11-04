@@ -386,7 +386,7 @@ Built-in keys (`combErrorKeys`): `CHECK_CONSTRAINT_VIOLATION`, `CONSTRAINT_VIOLA
 
 ### Constraint maps
 
-A constraint map turns a database's constraint _name_ into your domain's error:
+A constraint map turns a constraint violation into your domain's error, keyed by what every dialect's message lets the handler read: a unique by its columns' SQL names, comma-joined (`email`, `org_id,slug`); a unique index on an expression by its index name; a foreign key by its first column's SQL name; a CHECK, and on Postgres an exclusion, by its constraint name. SQLite and D1 report a plain unique's columns and no foreign key's name, so a map keyed by those names works on Postgres alone; key it as codegen does:
 
 ```ts
 import type { ConstraintMap } from "@lovrozagar/comb"
@@ -394,14 +394,14 @@ import type { ConstraintMap } from "@lovrozagar/comb"
 export const authorConstraints: ConstraintMap = {
 	author: {
 		unique: {
-			idx_author_email: {
+			email: {
 				cause: "email",
 				errorKey: "email_already_registered",
 				statusKey: "conflict",
 			},
 		},
 		foreignKey: {
-			author_org_id_fk: { cause: "org_id", errorKey: "org_not_found" },
+			org_id: { cause: "org_id", errorKey: "org_not_found" },
 		},
 		check: {
 			author_locale_check: { cause: "locale", errorKey: "locale_invalid", statusKey: "bad_request" },
@@ -410,7 +410,7 @@ export const authorConstraints: ConstraintMap = {
 }
 ```
 
-`comb codegen -g constraints` writes this file from your table definitions, so the constraint names always match what the migration actually created. A CHECK enters the map from ``check("name", sql`…`)`` or `check("name", sql.raw("…"))`; a `check()` codegen cannot read, such as one named by a variable or built from a variable, fails the run with its file and line rather than be left out. A unique index on an expression, such as `lower(email)`, is keyed by its index name under `unique` on every dialect. On Postgres, an `exclusion` record maps an `EXCLUDE` constraint by name; without an entry its violation is a 409 `exclusion_constraint_violation`. `referenced` lists a table's columns that another table's foreign key points at, which codegen fills: on SQLite, whose message names no side, an `UPDATE` or an upsert's `DO UPDATE SET` that assigns one answers the neutral "Referenced record does not exist or is still in use", as it may have failed on a row that references the old value. A hand-written map should add it; without it the table's own key is blamed as before. On Postgres, `partitions` lists a partitioned table's partitions, which codegen fills from `comb.config.ts`'s `partitions`: Postgres reports a violation on the partition, and the map reads it as the parent's, under its keys and its `private` list. On every dialect, a violation on a table the maps given key nowhere, such as a partition left out or a table outside the schema a trigger writes, names no column, as no map can say which of its columns are private. A key ending in `*` is a prefix pattern for tables an app makes at run time, which no generated map can name: add `"ut_*": {}` beside the generated map, once at module load (`const MAPS = defineConstraintMaps({ ...DB_CONSTRAINT_MAP, "ut_*": {} })`), and every `ut_` table is known, its columns named, with the entry's `private` list and constraints if it has them. A table's own key wins over a pattern, and the longest pattern over a shorter one; a `*` anywhere but a key's end is a `TypeError`. `private` lists a table's private columns by SQL name, which codegen fills too: an error names none of them, so its `column` is unset and its cause generic ("Required field missing", "Duplicate value detected", "Invalid value"), and each constraint on one answers its table's own key for its kind, `<table>_duplicate`, `<table>_reference_not_found`, `<table>_value_invalid` or `<table>_check_failed`, which names neither the column nor the constraint. A map without the list names every column as before.
+`comb codegen -g constraints` writes this file from your table definitions, so each key always matches what the migration actually created. A CHECK enters the map from ``check("name", sql`…`)`` or `check("name", sql.raw("…"))`; a `check()` codegen cannot read, such as one named by a variable or built from a variable, fails the run with its file and line rather than be left out. A unique index on an expression, such as `lower(email)`, is keyed by its index name under `unique` on every dialect. On Postgres, an `exclusion` record maps an `EXCLUDE` constraint by name; without an entry its violation is a 409 `exclusion_constraint_violation`. `referenced` lists a table's columns that another table's foreign key points at, which codegen fills: on SQLite, whose message names no side, an `UPDATE` or an upsert's `DO UPDATE SET` that assigns one answers the neutral "Referenced record does not exist or is still in use", as it may have failed on a row that references the old value. A hand-written map should add it; without it the table's own key is blamed as before. On Postgres, `partitions` lists a partitioned table's partitions, which codegen fills from `comb.config.ts`'s `partitions`: Postgres reports a violation on the partition, and the map reads it as the parent's, under its keys and its `private` list. On every dialect, a violation on a table the maps given key nowhere, such as a partition left out or a table outside the schema a trigger writes, names no column, as no map can say which of its columns are private. A key ending in `*` is a prefix pattern for tables an app makes at run time, which no generated map can name: add `"ut_*": {}` beside the generated map, once at module load (`const MAPS = defineConstraintMaps({ ...DB_CONSTRAINT_MAP, "ut_*": {} })`), and every `ut_` table is known, its columns named, with the entry's `private` list and constraints if it has them. A table's own key wins over a pattern, and the longest pattern over a shorter one; a `*` anywhere but a key's end is a `TypeError`. `private` lists a table's private columns by SQL name, which codegen fills too: an error names none of them, so its `column` is unset and its cause generic ("Required field missing", "Duplicate value detected", "Invalid value"), and each constraint on one answers its table's own key for its kind, `<table>_duplicate`, `<table>_reference_not_found`, `<table>_value_invalid` or `<table>_check_failed`, which names neither the column nor the constraint. A map without the list names every column as before.
 
 ### Handlers
 
@@ -1171,6 +1171,8 @@ What changes for a project on 0.20. Before deploying it:
 37. **Rely on an `LruCache` hard TTL alone.** A cache built with `hardTtlMs` and no `ttlMs` had `get()` return an entry and `has()` say true long past its hard TTL, while `getWithMeta()` evicted it. Every read now checks the hard expiry first, and a missing soft TTL means fresh until the hard one. **Fix:** none.
 
 38. **Read an integer bound past a JS number's exact range as that range.** A `c.integer` on SQLite, or a `c.timestamp` on either dialect, declared with a `max` above 2^53 − 1 or a `min` below −(2^53 − 1) is clamped to the range the column holds, as a smaller bound past int4 already was on Postgres: the manifest's `min` and `max`, the generated chain and the published schema all state ±9007199254740991. 0.20 stated the declared bound, `max 1e20`, in the manifest and the chain, while the DTO, through `.int()`, refused anything past the range, so a reader validating with the manifest took values the server refused. **Fix:** none in the app; a reader of the manifest gets the bound the server enforces.
+
+36. **Key a hand-written constraint map as codegen does.** README's example keyed a unique and a foreign key by constraint name, which only the Postgres handler matches; on libsql, bun:sqlite and D1 both entries went unused, and the violation got the generic `unique_constraint_violation` or `foreign_key_violation`. The example now keys a unique by its columns and a foreign key by its first column, as codegen writes them, and states each kind's key. **Fix:** a hand-written map copied from the old example keys its `unique` and `foreignKey` entries by column SQL name.
 
 ## Upgrading to 0.20.1
 
