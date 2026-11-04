@@ -68,7 +68,8 @@ function modifierAs<B extends PgModifier["base"]>(sqlType: string, base: B): Ext
 const OFFSET = "(?:Z|[+-](?:0[0-9]|1[0-5]):[0-5][0-9])"
 
 /*
- * zod's ISO date, date-time and time regexes (4.6.0), each \d written as [0-9], and passed as their
+ * zod's ISO date, date-time and time regexes, each \d written as [0-9] and nothing else changed (a test
+ * holds each copy to zod's own, read as it runs), and passed as their
  * `pattern`: zod's publish \d, which Rust's regex reads as any Unicode digit, so comb publishes its
  * own, which ECMAScript, Go's RE2 and Rust's regex read alike (AA7 of r22)
  */
@@ -79,7 +80,7 @@ const ISO_SECOND = "(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?"
 const ISO_WALL = `${ISO_CLOCK}(?::[0-5][0-9](?:\\.[0-9]+)?)?`
 const ISO_TIME = `^${ISO_WALL}$`
 const ISO_LOCAL = `^${ISO_DATE}T(?:${ISO_SECOND}(?:Z)|${ISO_WALL})$`
-const ISO_OFFSET = `^${ISO_DATE}T(?:${ISO_SECOND}(?:Z|(?:[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])))$`
+const ISO_OFFSET = `^${ISO_DATE}T(?:${ISO_SECOND}(?:Z|([+-](?:[01][0-9]|2[0-3]):[0-5][0-9])))$`
 
 /** A second's fraction of at most `precision` digits, any length for none, as a regex piece */
 const fractionOf = (precision: number | null): string =>

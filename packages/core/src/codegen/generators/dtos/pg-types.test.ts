@@ -243,3 +243,23 @@ describe("a timetz and a timestamptz take one offset spelling (CD11 of r22b; sib
 		expect(timestamptz).toEqual(TAKEN)
 	})
 })
+
+/*
+ * AA7 of r22: comb publishes its own copy of zod's ISO date, date-time and time regexes, each \d
+ * written as [0-9]. Read from zod as it runs, so a zod release that changes one fails here rather
+ * than leaving comb's rule and zod's apart
+ */
+/** The pattern zod publishes for a format, its regex's source */
+const zodPattern = (schema: z.ZodType): string => (z.toJSONSchema(schema) as { pattern: string }).pattern
+
+describe("comb's ISO patterns are zod's, each \\d written as [0-9] (AA7 of r22)", () => {
+	it.each([
+		['date("v")', z.iso.date()],
+		['timestamp("v", { mode: "string" })', z.iso.datetime({ local: true })],
+		['timestamp("v", { mode: "string", withTimezone: true })', z.iso.datetime({ offset: true })],
+		['time("v")', z.iso.time()],
+	] as const)("%s", (column, zod) => {
+		const comb = /pattern: \/(.*?)\/u \}/.exec(rule(column) as string)?.[1]
+		expect(comb).toBe(zodPattern(zod).replaceAll(String.raw`\d`, "[0-9]"))
+	})
+})
