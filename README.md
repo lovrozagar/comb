@@ -1212,6 +1212,8 @@ What changes for a project on 0.20. Before deploying it:
 
 52. **Write an interval's fraction of a second with `.`.** A plain `interval` column's create and update DTOs refuse ISO 8601's comma for the decimal mark (`PT1,5S`), which 0.20 took and Postgres refused with a 22007; write `PT1.5S`.
 
+53. **Name a plain JSON value `CombJsonValue`.** A written plain `json` or `jsonb` column's JSON Schema refers to `#/$defs/CombJsonValue`, where 0.20 published zod's positional `__schema0`, which a recursive `c.json` column added before it renumbered, renaming the type a generated client gives the value. A client that names the old definition names `CombJsonValue`.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

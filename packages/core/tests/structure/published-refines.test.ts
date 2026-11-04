@@ -112,4 +112,23 @@ describe("a written plain JSON value (CS9)", () => {
 		const published = z.toJSONSchema(await create(), { io: "input" }) as Node
 		expect(Object.keys((published["$defs"] ?? {}) as Node)).toHaveLength(1)
 	})
+
+	/* AA9 of r22: under its own id, so a recursive c.json beside it does not renumber the definition a client names */
+	it.each([
+		["alone", ""],
+		["beside a recursive c.json before it", '\n\ttree: c.json("tree", treeSchema),'],
+	])("names it CombJsonValue %s", async (label, tree) => {
+		const tables = `import { jsonb } from "drizzle-orm/pg-core"
+import * as z from "zod"
+export const treeSchema = z.object({ name: z.string(), get kids() { return z.array(treeSchema) } })
+export const row = pgTable("row", {
+	id: c.id("row"),${tree}
+	raw: jsonb("raw"),
+})`
+		const dtos = await generatedDtos(`published-json-${label.length}`, tables, { dialect: "postgres" })
+		const published = z.toJSONSchema(dtos["row"]?.["rowDtoCreateSchema"] as z.ZodObject, { io: "input" }) as Node
+		const raw = JSON.stringify((published["properties"] as Node)["raw"])
+		expect(raw.match(/#\/\$defs\/([^"]+)/)?.[1]).toBe("CombJsonValue")
+		expect(Object.keys(published["$defs"] as Node)).toContain("CombJsonValue")
+	})
 })
