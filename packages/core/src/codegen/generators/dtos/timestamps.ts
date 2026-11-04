@@ -143,8 +143,8 @@ function header(): string[] {
 		"const _json = z.json()",
 		"export const jsonValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(_json), z.record(z.string(), _json)])",
 		"",
-		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50), published as x-comb-cidr (CS8 of r22b) */",
-		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" }).meta({ "x-comb-cidr": true })',
+		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50), published as x-comb-cidr, which a field that names it states (CS8 of r22b, AA3) */",
+		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })',
 		"",
 	]
 }

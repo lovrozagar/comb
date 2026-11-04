@@ -12,7 +12,7 @@ import { cleanGeneratedDtos, generatedDtos } from "../support/dtos.ts"
 
 afterAll(() => cleanGeneratedDtos())
 
-const TABLE = `import { json, jsonb, text } from "drizzle-orm/pg-core"
+const TABLE = `import { cidr, integer, json, jsonb, text } from "drizzle-orm/pg-core"
 import * as z from "zod"
 export const Doc = z.object({ a: z.string() })
 export const Reg = z.object({ b: z.string() }).meta({ id: "XcombReg" })
@@ -38,6 +38,10 @@ export const row = pgTable("row", {
 	shortReq: c.text("short_req", { max: 5 }).array().notNull(),
 	nums: c.integer("nums", { max: 9, min: 1 }).array(),
 	ratios: c.real("ratios", { max: 1, min: 0 }).array().notNull(),
+	/* AA3 of area A's review: the keys a cidr and a multidimensional array publish, on nullable columns */
+	net: cidr("net"),
+	nets: cidr("nets").array(),
+	grid: integer("grid").array("[][]"),
 })`
 
 /* SQLite's JSON kinds, for the wrapper walk: a c.json column, registered or not, and a drizzle JSON text */

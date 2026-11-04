@@ -135,11 +135,19 @@ function numberBase({ annotations, dialect, element, field, schemaType }: Build)
 	return plain(`z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`)
 }
 
-/** A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65) */
+/**
+ * A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65). A
+ * cidr's host-bit rule is its keys, so finish puts it beside a nullable field's anyOf and elementOf
+ * on items, as §2.1 places every key (AA3 of area A's review)
+ */
 function pgTypeBase({ dialect, field, schemaType }: Build): Built {
 	const rule =
 		dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
-	return rule === undefined ? undefined : plain(rule, {}, rule === CIDR ? ["cidrSchema"] : [])
+	return rule === undefined
+		? undefined
+		: rule === CIDR
+			? plain(rule, { "x-comb-cidr": true }, ["cidrSchema"])
+			: plain(rule)
 }
 
 const BUILDERS = [enumBase, jsonBase, pgTypeBase, numberBase]
@@ -201,8 +209,10 @@ export function fieldSchemaOf(
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
 	const one: Build = { ...build, element: true, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
-	/* the array takes null by its own column alone, whatever its elements take */
-	return { code: finish(build, plain(arrayOf(dimensions, schemaType, element))), uses: element.uses }
+	/* the array takes null by its own column alone, whatever its elements take; a written one past one
+	   dimension is rectangular, a key finish places as any other (AA3 of area A's review) */
+	const keys = dimensions > 1 && isMutative(schemaType) ? { "x-comb-rectangular": true } : {}
+	return { code: finish(build, plain(arrayOf(dimensions, schemaType, element), keys)), uses: element.uses }
 }
 
 /** The Zod expression for `field` in a `schemaType` DTO, as fieldSchemaOf gives it, or null */
@@ -229,7 +239,7 @@ const MAX_DIMENSIONS = 6
 
 /* Postgres refuses a ragged multidimensional array: each level's sub-arrays must share one shape */
 const RECTANGULAR =
-	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" }).meta({ "x-comb-rectangular": true })'
+	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
 
 /**
  * An array column of `element`s: written, in exactly its declared dimensions, rectangular past one;

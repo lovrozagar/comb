@@ -20,6 +20,9 @@ export const row = pgTable("row", {
 	ratio: real("ratio").notNull(),
 	net: cidr("net").notNull(),
 	grid: integer("grid").array("[][]").notNull(),
+	netn: cidr("netn"),
+	nets: cidr("nets").array(),
+	gridn: integer("gridn").array("[][]"),
 	raw: jsonb("raw"),
 })`
 
@@ -28,20 +31,20 @@ const create = async (): Promise<z.ZodObject> =>
 
 type Node = Record<string, unknown>
 
-/** Every node of `node` holding an `x-comb-*` key */
-function keyed(node: unknown, found: Node[] = []): Node[] {
-	if (Array.isArray(node)) for (const child of node) keyed(child, found)
-	else if (node !== null && typeof node === "object") {
-		if (Object.keys(node).some((key) => key.startsWith("x-comb-"))) found.push(node as Node)
-		for (const child of Object.values(node)) keyed(child, found)
-	}
-	return found
-}
-
-/** What a reader of the published field takes: the standard schema, then each node's `x-comb-*` keys */
+/**
+ * What a reader of the published field takes: the standard schema, then the `x-comb-*` keys where
+ * §2.1 puts them, on the property's own schema and an element's on the array's `items`, with no `anyOf` walk for a key
+ * (AA3 of area A's review: a nullable field's keys sat in its member alone)
+ */
 function readerOf(field: Node): (value: unknown) => boolean {
 	const validate = new Ajv2020({ logger: false, strict: false, validateFormats: true, formats: FORMATS }).compile(field)
-	return (value) => validate(value) && keyed(field).every((node) => contractReader(node, value))
+	/* a nullable array's items is its array member's, as JSON Schema writes one */
+	const array = [field, ...((field["anyOf"] ?? []) as Node[])].find((each) => each["type"] === "array")
+	const items = array?.["items"] as Node | undefined
+	return (value) =>
+		validate(value) &&
+		contractReader(field, value) &&
+		(items === undefined || !Array.isArray(value) || value.every((element) => contractReader(items, element)))
 }
 
 /* the formats a cidr's branches publish, as a reader's format library checks them */
@@ -83,11 +86,14 @@ const EDGES: Record<string, unknown[]> = {
 		[[1], [2], [3]],
 		[[1], []],
 	],
+	gridn: [null, [[1, 2], [3]], [[1], [2]]],
+	netn: [null, "10.0.0.0/8", "10.0.0.1/8", "fe80::1/10"],
+	nets: [null, ["10.0.0.0/8"], ["10.0.0.1/8"], ["10.0.0.0/8", "192.168.1.1/24"]],
 	net: ["10.0.0.0/8", "10.0.0.1/8", "10.0.0.1", "192.168.1.0/24", "192.168.1.1/24", "::1", "fe80::/10", "fe80::1/10"],
 	ratio: [0, 1.5, -1.5, 1e-50, -1e-50, 7.006492321624085e-46, 7.1e-46, -7.1e-46, 1e-45, 3.4028235e38, 3.5e38],
 }
 
-describe("the rules comb's refines hold, as the published document states them (CS8; siblings: int64, real, cidr, a rectangular array)", () => {
+describe("the rules comb's refines hold, as the published document states them (CS8, AA3; siblings: int64, real, cidr, a rectangular array, nullable)", () => {
 	it.each(Object.keys(EDGES))(
 		"%s: a reader of the published field reaches zod's verdict on every edge",
 		async (key) => {
