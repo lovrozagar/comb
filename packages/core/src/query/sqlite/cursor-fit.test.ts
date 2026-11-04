@@ -88,7 +88,7 @@ describe("assertCursorFits", () => {
 			expect(() => assertCursorFits([at], [value])).not.toThrow()
 		for (const value of ["2024-01-01", "07", Number.NaN, Number.POSITIVE_INFINITY])
 			expect(() => assertCursorFits([at], [value])).toThrow()
-		expect(boundForKeys([at, sql`x`], [new Date(5), new Date(6)])).toEqual([5, new Date(6)])
+		expect(boundForKeys("sqlite", [at, sql`x`], [new Date(5), new Date(6)])).toEqual([5, new Date(6)])
 		expect(at.getSQL()).toBe(at.expression.getSQL())
 	})
 
@@ -101,7 +101,7 @@ describe("assertCursorFits", () => {
 		expect(bindable(7n)).toBe(7)
 		expect(bindable(9007199254740993n)).toBe(9007199254740993n)
 		expect(bindable("7")).toBe("7")
-		expect(boundForKeys([sql`x`, sql`y`], [7n, 9007199254740993n])).toEqual([7, 9007199254740993n])
+		expect(boundForKeys("sqlite", [sql`x`, sql`y`], [7n, 9007199254740993n])).toEqual([7, 9007199254740993n])
 	})
 
 	it("checks every position, the tiebreak id last", () => {
@@ -200,14 +200,14 @@ describe("assertCursorFits on what libsql's intMode string reads", () => {
 	it("takes a canonical integer string on a number column, and binds it as that integer, exact", () => {
 		for (const value of ["1", "-5", "9007199254740993"]) expect(fits("count", value), value).toBe(true)
 		for (const value of ["01", "1.5", "", "+1"]) expect(fits("count", value), value).toBe(false)
-		expect(boundForKeys([columns.count, sql`x`], ["7", "7"])).toEqual([7, "7"])
-		expect(boundForKeys([columns.count], ["9007199254740993"])).toEqual([9007199254740993n])
+		expect(boundForKeys("sqlite", [columns.count, sql`x`], ["7", "7"])).toEqual([7, "7"])
+		expect(boundForKeys("sqlite", [columns.count], ["9007199254740993"])).toEqual([9007199254740993n])
 	})
 
 	it("takes a time key's epoch milliseconds as a decimal string, and binds them as that number", () => {
 		const at = new DateKey(sql`max(created_at)`)
 		expect(() => assertCursorFits([at], ["1700000000000"])).not.toThrow()
-		expect(boundForKeys([at], ["1700000000000"])).toEqual([1700000000000])
+		expect(boundForKeys("sqlite", [at], ["1700000000000"])).toEqual([1700000000000])
 	})
 })
 
@@ -238,5 +238,15 @@ describe("a key that reads its number rounded (QL3 of r22b; sibling: a time key'
 		expect(new PgDialect().sqlToQuery(bound)).toEqual({ params: ["0.1000000000000000001"], sql: "$1::numeric" })
 		expect(boundCarried(amounts.n, 0.1)).toBe(0.1)
 		expect(boundCarried(amounts.exact, "0.1")).toBe("0.1")
+	})
+})
+
+/* QL4 of r22b: a Postgres list binds a cursor value as its driver does, never as the SQLite literal 9e999 */
+describe("boundForKeys by the list's dialect (QL4 of r22b; sibling: SQLite's binding above)", () => {
+	it("binds ±Infinity, a bigint and an integer text as they are on Postgres, and a time key's Date as its milliseconds", () => {
+		const values = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 7n, "9007199254740993", new Date(5)]
+		const keys = [sql`a`, sql`b`, sql`c`, columns.count, new DateKey(sql`d`)]
+		expect(boundForKeys("postgres", keys, values)).toEqual([...values.slice(0, 4), 5])
+		expect(boundForKeys("sqlite", keys, values)).toEqual([sql`9e999`, sql`-9e999`, 7, 9007199254740993n, 5])
 	})
 })

@@ -310,7 +310,7 @@ describe("a merged derived list over Postgres is refused at build (Q2; sibling: 
 		n: numeric("n").notNull(),
 	})
 	const refusal = new TypeError(
-		"a merged derived list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
+		"a merged list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
 	)
 	const build = (sortColumns: Record<string, SQL>, extra: { dialect?: "postgres" } = {}) =>
 		buildDerivedListQuery({
@@ -429,4 +429,19 @@ describe("the bounds a list is made under", () => {
 			)
 		},
 	)
+})
+
+/* QL4 of r22b: buildListQuery reads its dialect from its table, so 7.6's refusal holds there too */
+describe("a merged table list over Postgres is refused at build (QL4; sibling: Q2's derived list above)", () => {
+	const item = pgTable("item", { id: pgText("id").primaryKey(), k: numeric("k").notNull() })
+
+	it("refuses buildListQuery with merged over a Postgres table", () => {
+		expect(() =>
+			buildListQuery({ ...SEALED, merged: {}, parsed: parse({ order: "k.asc" }), table: item as never }),
+		).toThrow(
+			new TypeError(
+				"a merged list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
+			),
+		)
+	})
 })

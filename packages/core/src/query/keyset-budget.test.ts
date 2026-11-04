@@ -91,7 +91,15 @@ describe("a three-key cursor's parameters, by every mix of keys", () => {
 					nulls,
 				}))
 				const tiebreak = { column: t.id, direction: parsed.parsedSort[0]?.direction ?? "desc" }
-				const built = cursorWhere({ cursor, keys, options: SEALED, sort: parsed.parsedSort, table: t, tiebreak }).where
+				const built = cursorWhere({
+					cursor,
+					dialect: "sqlite",
+					keys,
+					options: SEALED,
+					sort: parsed.parsedSort,
+					table: t,
+					tiebreak,
+				}).where
 				expect(count(built)).toBeLessThanOrEqual(10)
 				const options = queryHelpers.listOptions(schema.parse({ cursor, order: given }), SEALED)
 				const relational = (options.where as { RAW: (table: typeof t) => SQL }).RAW(t)

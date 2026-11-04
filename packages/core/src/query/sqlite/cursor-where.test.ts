@@ -7,7 +7,9 @@ import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { cursorWhere } from "./cursor-where.ts"
 
 /** The predicate alone, as the builders take it */
-const whereOf = (...args: Parameters<typeof cursorWhere>) => cursorWhere(...args).where
+/** The predicate of a SQLite list, every list here being one */
+const whereOf = (args: Omit<Parameters<typeof cursorWhere>[0], "dialect">) =>
+	cursorWhere({ ...args, dialect: "sqlite" }).where
 
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title") })
 const sort: SortField[] = [{ direction: "asc", field: "title" }]

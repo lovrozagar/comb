@@ -151,7 +151,8 @@ function buildListQuery<TTable extends SQLiteTable>(
 	/* finish built the pagination its `merged` says: a merged list's query is paged by paginateMerged alone */
 	return finish({
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite },
-		dialect: "sqlite",
+		/* its table's, whose columns the cursor binds (QL4 of r22b) */
+		dialect: listDialect(Object.values(columns), undefined),
 		keyset,
 		merged: opts.merged,
 		parsed,
@@ -197,11 +198,6 @@ function buildDerivedListQuery<TSortField extends string>(
 	const merged = opts.merged !== undefined
 	if (merged && opts.anchor !== undefined)
 		throw new TypeError("a merged derived list reads no key by reference: give it idColumn, not anchor")
-	/* paginateMerged compares as SQLite does (r22 Q2); a Postgres server's numeric and collated text orders are its own */
-	if (merged && dialect === "postgres")
-		throw new TypeError(
-			"a merged derived list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
-		)
 	return finish({
 		cursor: {
 			cursorScope: opts.cursorScope,

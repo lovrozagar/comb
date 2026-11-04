@@ -237,7 +237,8 @@ function finishCursor(list: Finish, cursor: string): Finished {
 		})
 	}
 	const merged = list.merged !== undefined
-	const after = cursorWhere({ cursor, keys: keyset.keys, merged, options: list.cursor, sort, table, tiebreak })
+	const { dialect } = list
+	const after = cursorWhere({ cursor, dialect, keys: keyset.keys, merged, options: list.cursor, sort, table, tiebreak })
 	const gone = after.gone === undefined ? {} : { _combAnchorGone: sql<number>`${after.gone}`.as("_combAnchorGone") }
 	return {
 		...withExtras(list, { ...idOf(tiebreak), ...keyTypesOf(list), ...gone }),
@@ -277,6 +278,11 @@ function finish(given: Finish): Finished {
 	assertCursorWired(given.cursor)
 	assertLimitWithin(given.parsed)
 	if (given.merged !== undefined) assertMaxRows(given.merged)
+	/* paginateMerged compares as SQLite does (r22 Q2); a Postgres server's numeric and collated text orders are its own */
+	if (given.merged !== undefined && given.dialect === "postgres")
+		throw new TypeError(
+			"a merged list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
+		)
 	return given.parsed.cursor ? finishCursor(given, given.parsed.cursor) : finishOffset(given)
 }
 

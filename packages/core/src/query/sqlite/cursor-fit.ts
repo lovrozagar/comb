@@ -10,6 +10,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
+import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
 
 /**
@@ -215,10 +216,20 @@ const bindableAs = (column: SQLWrapper | undefined, value: unknown): unknown =>
 			: value,
 	)
 
-/** The cursor's values as the keys bind them: a Date on a key declared as time as its epoch milliseconds, a safe bigint as a number */
-const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
+/**
+ * A cursor value as a key of a `dialect` list binds it: SQLite's way on SQLite (bindableAs), itself on
+ * Postgres, whose own cast reads the 'Infinity' its driver writes (QL4 of r22b)
+ */
+const bindableIn = (dialect: ListDialect, column: SQLWrapper | undefined, value: unknown): unknown =>
+	dialect === "sqlite" ? bindableAs(column, value) : value
+
+/**
+ * The cursor's values as the keys of a `dialect` list bind them: a Date on a key declared as time as
+ * its epoch milliseconds, any other as bindableIn binds it
+ */
+const boundForKeys = (dialect: ListDialect, columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
 	values.map((value, i) =>
-		columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindableAs(columns[i], value),
+		columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindableIn(dialect, columns[i], value),
 	)
 
 /**
@@ -243,6 +254,7 @@ export {
 	assertCursorFits,
 	bindable,
 	bindableAs,
+	bindableIn,
 	bindableOn,
 	boundAsRead,
 	boundCarried,
