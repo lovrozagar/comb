@@ -8,6 +8,8 @@ import { oxlintReports, reportsOf } from "./rule-harness.ts"
 const rule = plugin.rules["optional-undefined"]
 const MESSAGE =
 	"an optional property takes undefined, which comb reads as the key left out: declare it `name?: T | undefined`, a method as `name?: ((…) => R) | undefined`"
+const MAPPED =
+	"an optional mapped key takes undefined, which comb reads as the key left out: declare it `{ [K in …]?: T | undefined }`"
 const PARTIAL =
 	"a Partial<…> that comb reads refuses undefined, which comb reads as the key left out: declare the input `{ [K in …]?: T | undefined }`; Partial<…> is for what comb hands back, in a return type or an alias only return types reach"
 
@@ -95,6 +97,90 @@ describe("comb/optional-undefined on Partial<…>", () => {
 		expect(oxlintReports("optional-undefined", fixture)).toEqual([
 			{ file: "packages/core/src/query/shapes.ts", message: PARTIAL },
 		])
+	})
+})
+
+/* D2-6 of the area D round-two review: the shapes L1 to L5 its probe found, each with its control */
+const at = "packages/core/src/query/probe.ts"
+const lint = (source: string) => reportsOf(rule, { [at]: source })
+
+describe("comb/optional-undefined through a generic alias", () => {
+	it("reads a Partial<…> in a generic alias's type argument the way that alias's parameter flows (L1, L2)", () => {
+		const setter = "type Setter<T> = (value: T) => void\n"
+		expect(
+			lint(`${setter}export function make(): Setter<Partial<{ a: number }>> { return (v) => void v.a }\n`),
+		).toEqual([{ file: at, message: PARTIAL }])
+		expect(lint(`${setter}export function on(listener: Setter<Partial<{ a: number }>>) { listener({}) }\n`)).toEqual([])
+		/* a parameter one alias passes to another flows as the inner one's does */
+		const wrap = `${setter}type Wrap<U> = { set: Setter<U> }\n`
+		expect(lint(`${wrap}export function make(): Wrap<Partial<{ a: number }>> { return { set: () => {} } }\n`)).toEqual([
+			{ file: at, message: PARTIAL },
+		])
+		/* one that comb both reads and hands out is an input */
+		const box = "type Box<T> = { get: () => T; set: (value: T) => void }\n"
+		expect(lint(`${box}export function on(box: Box<Partial<{ a: number }>>) { return box.get() }\n`)).toEqual([
+			{ file: at, message: PARTIAL },
+		])
+		/* one another type parameter is bounded by is a caller's, and an alias naming itself adds no flow */
+		expect(
+			lint(
+				"type G<T, U extends T = T> = { get: () => U }\nexport function make(): G<Partial<{ a: number }>> { return { get: () => ({}) } }\n",
+			),
+		).toEqual([{ file: at, message: PARTIAL }])
+		expect(
+			lint(
+				"type L<T> = { next: L<T> | null; get: () => T }\nexport function make(): L<Partial<{ a: number }>> { return { next: null, get: () => ({}) } }\n",
+			),
+		).toEqual([])
+		/* a parameter the alias never uses, and a type argument of a type src does not declare, flow as written */
+		expect(
+			lint(
+				"type Tag<T> = { tag: string }\nexport function make(): Tag<Partial<{ a: number }>> { return { tag: '' } }\n",
+			),
+		).toEqual([])
+		expect(lint("export function make(): Promise<Partial<{ a: number }>> { return Promise.resolve({}) }\n")).toEqual([])
+	})
+})
+
+describe("comb/optional-undefined through heritage, mapped types and private fields", () => {
+	it("rejects an optional mapped type that refuses undefined, and allows one that takes it or is required (L3)", () => {
+		expect(lint("export function f(o: { [K in 'a' | 'b']?: string }) { return o }\n")).toEqual([
+			{ file: at, message: MAPPED },
+		])
+		expect(lint("export type M = { readonly [K in 'a']+?: number }\n")).toEqual([{ file: at, message: MAPPED }])
+		expect(
+			lint(
+				"export type M = { [K in 'a']?: string | undefined }\nexport type R = { [K in 'a']-?: string }\nexport type N = { [K in 'a']: string }\nexport type U = { [K in 'a']?: undefined }\n",
+			),
+		).toEqual([])
+	})
+
+	it("reads a private or #-named class field as comb's own state, and a protected one as a subclass's input (L4)", () => {
+		expect(
+			lint(
+				"export class C { private seen: Partial<Record<string, number>> = {}; #own: Partial<{ a: number }> = {}; private log?: number; #at?: number }\n",
+			),
+		).toEqual([])
+		expect(lint("export class C { protected seen: Partial<{ a: number }> = {}; protected log?: number }\n")).toEqual([
+			{ file: at, message: PARTIAL },
+			{ file: at, message: MESSAGE },
+		])
+	})
+
+	it("follows an interface's extends and a class's implements as references (L5)", () => {
+		expect(
+			lint("type B = { a: number }\ninterface A extends Partial<B> {}\nexport function f(a: A) { return a }\n"),
+		).toEqual([{ file: at, message: PARTIAL }])
+		expect(
+			lint("type B = { a: number }\ninterface A extends Partial<B> {}\nexport function f(): A { return {} }\n"),
+		).toEqual([])
+		/* an alias only an interface's extends names flows as that interface does */
+		const extended = "type B = Partial<{ a: number }>\ninterface A extends B {}\n"
+		expect(lint(`${extended}export function f(): A { return {} }\n`)).toEqual([])
+		expect(lint(`${extended}export function f(a: A) { return a }\n`)).toEqual([{ file: at, message: PARTIAL }])
+		expect(
+			lint("type B = { a: number }\nexport class C implements Partial<B> {}\nexport function f(c: C) { return c }\n"),
+		).toEqual([])
 	})
 })
 

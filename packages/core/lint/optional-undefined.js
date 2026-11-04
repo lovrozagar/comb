@@ -15,6 +15,8 @@ import { srcPath } from "./scope.js"
  * so each such output comb takes back is named in TAKEN_BACK with why it stays Partial<…>. */
 const MESSAGE =
 	"an optional property takes undefined, which comb reads as the key left out: declare it `name?: T | undefined`, a method as `name?: ((…) => R) | undefined`"
+const MAPPED =
+	"an optional mapped key takes undefined, which comb reads as the key left out: declare it `{ [K in …]?: T | undefined }`"
 const PARTIAL =
 	"a Partial<…> that comb reads refuses undefined, which comb reads as the key left out: declare the input `{ [K in …]?: T | undefined }`; Partial<…> is for what comb hands back, in a return type or an alias only return types reach"
 
@@ -31,21 +33,70 @@ const ADMITS = new Set(["TSAnyKeyword", "TSUndefinedKeyword", "TSUnknownKeyword"
 const admitsUndefined = (type) =>
 	ADMITS.has(type.type) || (type.type === "TSUnionType" && type.types.some((member) => admitsUndefined(member)))
 
+/* a private or #-named class field is comb's own state, which no caller sets (D2-6 of the area D round-two review) */
+const ownField = (node) => node.accessibility === "private" || node.key.type === "PrivateIdentifier"
+
+/* what a reference names: a type reference's type, or the type an interface extends or a class implements */
+const HERITAGE = new Set(["TSClassImplements", "TSInterfaceHeritage"])
+const namedBy = (node) => {
+	const name = node.type === "TSTypeReference" ? node.typeName : HERITAGE.has(node.type) ? node.expression : null
+	return name?.type === "Identifier" ? name.name : null
+}
+
+/** Calls `found` with every node under `node` and the path to it, `node` itself first */
+function walk(node, path, found) {
+	found(node, path)
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "parent") continue
+		for (const child of Array.isArray(value) ? value : [value]) {
+			if (typeof child === "object" && child !== null && typeof child.type === "string")
+				walk(child, [...path, { key, node: child }], found)
+		}
+	}
+}
+
+/**
+ * How type argument `index` of `owner` flows inside the generic alias or interface of this file it
+ * names: flipped (true) when its type parameter sits in a function parameter there, as it is (false)
+ * when it is unused or no such alias holds it, and "both" when comb reads it and hands it out alike.
+ * `scope` holds this file's generic aliases by name, and in `seen` those already followed, so a
+ * cycle adds nothing.
+ */
+function argumentFlow(owner, index, scope) {
+	const { generics, seen } = scope
+	const alias = generics.get(namedBy(owner))
+	const parameter = alias?.typeParameters.params[index]
+	if (parameter === undefined || seen.has(alias)) return false
+	const flips = new Set()
+	walk(alias, [{ key: null, node: alias }], (node, path) => {
+		if (namedBy(node) !== parameter.name.name || node.type !== "TSTypeReference") return
+		const place = placeOf(path, { generics, seen: new Set([...seen, alias]) })
+		if (place === "input") flips.add(true).add(false)
+		else flips.add(place.flip)
+	})
+	return flips.size === 2 ? "both" : flips.has(true)
+}
+
 /**
  * Which way a type written at the end of `path` (its ancestors, outermost first, each with the key
  * it hangs by) flows. Each function parameter it sits in flips it: comb reads its own parameter and
- * hands out a callback's. At the top of the file it is comb's own value ("output"), a type a class
- * field or a type parameter holds is a caller's ("input"), and one in an alias or interface flows
- * as that type does, flipped or not.
+ * hands out a callback's. A type argument of a generic alias of this file flows as that alias's type
+ * parameter does there. At the top of the file it is comb's own value ("output"), a type a type
+ * parameter or a caller-set class field holds is a caller's ("input"), and one in an alias or
+ * interface flows as that type does, flipped or not.
  */
-function placeOf(path) {
+function placeOf(path, scope) {
 	let flip = false
 	for (let at = path.length - 1; at > 0; at--) {
-		const { key } = path[at]
+		const { key, node } = path[at]
 		const parent = path[at - 1].node
-		if (key === "typeParameters" || parent.type === "PropertyDefinition") return "input"
+		if (key === "typeParameters" || (parent.type === "PropertyDefinition" && !ownField(parent))) return "input"
 		/* a type argument list hangs its types by `params` too; only a function's parameters flip */
-		if (key === "params" && parent.type !== "TSTypeParameterInstantiation") flip = !flip
+		if (key === "params" && parent.type === "TSTypeParameterInstantiation") {
+			const flow = argumentFlow(path[at - 2].node, parent.params.indexOf(node), scope)
+			if (flow === "both") return "input"
+			if (flow) flip = !flip
+		} else if (key === "params") flip = !flip
 		if (parent.type === "TSTypeAliasDeclaration" || parent.type === "TSInterfaceDeclaration")
 			return { alias: parent.id.name, flip }
 	}
@@ -54,20 +105,17 @@ function placeOf(path) {
 
 /** Every named type reference in `program`, by name, with where each sits */
 function referencesIn(program) {
-	const found = []
-	const visit = (node, path) => {
-		if (node.type === "TSTypeReference" && node.typeName.type === "Identifier") {
-			found.push({ name: node.typeName.name, node, place: placeOf(path) })
-		}
-		for (const [key, value] of Object.entries(node)) {
-			if (key === "parent") continue
-			for (const child of Array.isArray(value) ? value : [value]) {
-				if (typeof child === "object" && child !== null && typeof child.type === "string")
-					visit(child, [...path, { key, node: child }])
-			}
-		}
+	const generics = new Map()
+	for (const node of program.body) {
+		const declared = node.type === "ExportNamedDeclaration" ? node.declaration : node
+		const generic = declared?.type === "TSTypeAliasDeclaration" || declared?.type === "TSInterfaceDeclaration"
+		if (generic && declared.typeParameters) generics.set(declared.id.name, declared)
 	}
-	visit(program, [{ key: null, node: program }])
+	const found = []
+	walk(program, [{ key: null, node: program }], (node, path) => {
+		const name = namedBy(node)
+		if (name !== null) found.push({ name, node, place: placeOf(path, { generics, seen: new Set() }) })
+	})
 	return found
 }
 
@@ -122,12 +170,18 @@ export const rule = {
 		const root = filename.slice(0, filename.length - file.length)
 		/** Reports an optional member whose declared type refuses undefined; one with no type is any */
 		const check = (node) => {
-			if (node.optional !== true) return
+			if (node.optional !== true || (node.type === "PropertyDefinition" && ownField(node))) return
 			if (
 				node.type === "TSMethodSignature" ||
 				(node.typeAnnotation && !admitsUndefined(node.typeAnnotation.typeAnnotation))
 			)
 				context.report({ message: MESSAGE, node })
+		}
+		/** Reports an optional mapped key whose type refuses undefined; `-?` makes it required */
+		const mapped = (node) => {
+			const optional = node.optional === true || node.optional === "+"
+			if (optional && node.typeAnnotation && !admitsUndefined(node.typeAnnotation))
+				context.report({ message: MAPPED, node })
 		}
 		/** Reports a Partial<…> an input reaches: this file's references read afresh, every other file's from disk */
 		const partials = (program) => {
@@ -148,6 +202,12 @@ export const rule = {
 					context.report({ message: PARTIAL, node })
 			}
 		}
-		return { Program: partials, PropertyDefinition: check, TSMethodSignature: check, TSPropertySignature: check }
+		return {
+			Program: partials,
+			PropertyDefinition: check,
+			TSMappedType: mapped,
+			TSMethodSignature: check,
+			TSPropertySignature: check,
+		}
 	},
 }

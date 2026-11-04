@@ -65,6 +65,17 @@ expectTypeOf(built.extras).toEqualTypeOf<ListExtras>()
 // @ts-expect-error extensions keep one type through parsing
 createListQuerySchema({ extend: { archived: z.coerce.boolean().optional() }, sort: ["created_at"] })
 
+/* D2-6 of the area D round-two review: a reserved name is refused as an extension, set to a schema
+   or to undefined alike, as assertNotReserved refuses the key whatever it holds */
+// @ts-expect-error limit is the list schema's own
+createListQuerySchema({ extend: { limit: z.string() }, sort: ["created_at"] })
+// @ts-expect-error limit is the list schema's own, set to undefined too
+createListQuerySchema({ extend: { limit: undefined }, sort: ["created_at"] })
+// @ts-expect-error select is the retrieve schema's own
+createRetrieveQuerySchema({ extend: { select: z.string() } })
+// @ts-expect-error select is the retrieve schema's own, set to undefined too
+createRetrieveQuerySchema({ extend: { select: undefined } })
+
 /* keysetSQL's one argument has a name a consumer can import from the subpath that exports keysetSQL */
 expectTypeOf(keysetSQL).parameter(0).toEqualTypeOf<KeysetPosition>()
 

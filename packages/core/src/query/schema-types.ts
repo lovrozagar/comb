@@ -35,7 +35,7 @@ type ListQueryConfig<
 	TSortFields extends readonly string[] = readonly string[],
 > = {
 	/** Extra params, validated and returned as they are; a name the schema owns is refused */
-	extend?: (T & { [K in ReservedListKey]?: never }) | undefined
+	extend?: (T & { [K in ReservedListKey]?: never | undefined }) | undefined
 	fields?: FieldsConfig | undefined
 	/** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
 	filter?: Record<string, FieldType> | undefined
@@ -54,7 +54,7 @@ type ListQueryConfig<
 
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
 	/** Extra params, validated and returned as they are; a name the schema owns is refused */
-	extend?: (T & { [K in ReservedRetrieveKey]?: never }) | undefined
+	extend?: (T & { [K in ReservedRetrieveKey]?: never | undefined }) | undefined
 	fields: FieldsConfig
 	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
 	lang?: true | undefined

@@ -43,7 +43,7 @@ const RANGES: Readonly<Record<Peer, string>> = { ...OPTIONAL_PEER_RANGES, atlas:
 const BIN_PEERS: Readonly<Record<BinPeer, "comb" | "node">> = { "drizzle-kit": "comb", wrangler: "node" }
 
 /** The bin peers a command resolved, each the one package it checked and runs */
-type Peers = { readonly [P in BinPeer]?: ProjectBin }
+type Peers = { readonly [P in BinPeer]?: ProjectBin | undefined }
 
 const isBinPeer = (peer: OptionalPeer): peer is BinPeer => Object.hasOwn(BIN_PEERS, peer)
 
@@ -200,7 +200,7 @@ type Finders = {
 function requirePeers(command: Command, provider: Provider, { atlas, cwd, fts = false, locate }: Finders): Peers {
 	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
-	const peers: { [P in BinPeer]?: ProjectBin } = {}
+	const peers: { [P in BinPeer]?: ProjectBin | undefined } = {}
 	let cause: unknown
 	for (const need of needsOf(command, provider, fts)) {
 		if (need.peer === "atlas") {
