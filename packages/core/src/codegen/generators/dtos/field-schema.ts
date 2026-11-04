@@ -7,6 +7,7 @@ import { type Base, type Build, keyed, metaOf, plain } from "./build-types.ts"
 import type { SchemaType, SharedName } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { CIDR, pgWriteRule } from "./pg-types.ts"
+import { sqliteWriteRule } from "./sqlite-types.ts"
 import { isMutative, isRead } from "./schema-type.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import {
@@ -138,13 +139,15 @@ function numberBase({ annotations, dialect, element, field, schemaType }: Build)
 }
 
 /**
- * A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65). A
- * cidr's host-bit rule is its keys, so finish puts it beside a nullable field's anyOf and elementOf
- * on items, as §2.1 places every key (AA3 of area A's review)
+ * A plain column's write rule by its data type, Postgres's (F50) or SQLite's (A2-12 of r22); a read
+ * keeps the plain type (F65). A cidr's host-bit rule is its keys, so finish puts it beside a
+ * nullable field's anyOf and elementOf on items, as §2.1 places every key (AA3 of area A's review)
  */
-function pgTypeBase({ dialect, field, schemaType }: Build): Built {
+function plainTypeBase({ dialect, field, schemaType }: Build): Built {
 	const rule =
-		dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
+		field.combKind === null && isMutative(schemaType)
+			? (dialect === "postgres" ? pgWriteRule : sqliteWriteRule)(field)
+			: undefined
 	return rule === undefined
 		? undefined
 		: rule === CIDR
@@ -152,7 +155,7 @@ function pgTypeBase({ dialect, field, schemaType }: Build): Built {
 			: plain(rule)
 }
 
-const BUILDERS = [enumBase, jsonBase, pgTypeBase, numberBase]
+const BUILDERS = [enumBase, jsonBase, plainTypeBase, numberBase]
 
 /* SQLite fills an INTEGER PRIMARY KEY, the rowid's alias, when a create body leaves it out */
 const isRowid = (field: FieldMeta, dialect: Build["dialect"]) =>
