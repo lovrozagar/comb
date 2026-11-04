@@ -20,6 +20,7 @@ import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { pauses, waitFor } from "../support/pg-pause.ts"
+import { leavesStale } from "../support/stale-replay.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -193,6 +194,7 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 })
 
 describe("the replay's sweep", () => {
+	leavesStale()
 	it("drops what a killed 0.19 run left an hour ago, and keeps a younger run's and every untagged role", async () => {
 		const hourAgo = Date.now() - 61 * 60_000
 		/* 0.19 named a replay database for its run's start and eight hex digits */

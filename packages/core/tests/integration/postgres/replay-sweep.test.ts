@@ -21,6 +21,7 @@ import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { pauses, waitFor } from "../support/pg-pause.ts"
 import { dropRoles as dropOnly, query, roleOf, unique } from "../support/pg-roles.ts"
+import { leavesStale, needsNothingStale } from "../support/stale-replay.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -115,6 +116,20 @@ async function dropRoles(...roles: string[]): Promise<void> {
 	await dropOnly(...roles)
 }
 
+/**
+ * A stale replay's database `name` (pid 1 is no backend, so its replay is over), made a template, which no
+ * sweep may drop: every other file's apply and check sweeps this server, and took a plain one, or its
+ * tagged role, while the test still set it up ("tuple concurrently deleted" in a GRANT on it)
+ */
+const plantHeld = (name: string, clause = ""): Promise<unknown> =>
+	query(pgUrl(), `CREATE DATABASE ${name} ${clause} IS_TEMPLATE true`)
+
+/** `name`, planted held, handed to any sweep; a template no sweep could drop, so only one still held */
+async function release(name: string): Promise<void> {
+	const held = await query(pgUrl(), `SELECT 1 FROM pg_database WHERE datname = '${name}' AND datistemplate`)
+	if (held.length > 0) await query(pgUrl(), `ALTER DATABASE ${name} IS_TEMPLATE false`)
+}
+
 /** The replay databases on the server that hold `role` by a grant, as a replay holds each role it made */
 const replayDatabases = async (role: string): Promise<string[]> =>
 	(
@@ -172,8 +187,12 @@ describe("a check killed mid-replay", () => {
 		},
 		60_000,
 	)
+})
 
-	it("by SIGKILL is swept by the next check at once", async () => {
+describe("a check killed by SIGKILL mid-replay", () => {
+	leavesStale()
+
+	it("is swept by the next check at once", async () => {
 		const [made, resume] = [unique("comb_t_killed"), unique("comb_t_resume")]
 		try {
 			await withScratchDb((dev) =>
@@ -188,7 +207,7 @@ describe("a check killed mid-replay", () => {
 		}
 	}, 60_000)
 
-	it("by SIGKILL is swept by an apply, whose CREATE ROLE of its role then passes", async () => {
+	it("is swept by an apply, whose CREATE ROLE of its role then passes", async () => {
 		const [made, resume] = [unique("comb_t_killed"), unique("comb_t_resume")]
 		try {
 			await withScratchDb((dev) =>
@@ -226,6 +245,7 @@ async function untilSleeping(ended: Promise<string[]>): Promise<void> {
 
 /* P4 of r22: a SIGKILL left the replay's statement running, which held its database and its role until it ended */
 describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
+	leavesStale()
 	it("leaves nothing that stops the next apply's CREATE ROLE of its role, which passes at once", async () => {
 		const made = unique("comb_t_orphan")
 		try {
@@ -261,6 +281,7 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 
 /* PR7 of r22b: apply connected to devUrl's server before every apply, waiting 30 s on one the deploy cannot reach */
 describe("an apply whose devUrl does not answer (PR7 of r22b)", () => {
+	needsNothingStale()
 	it("opens no devUrl connection when the target's server holds nothing a replay left", async () => {
 		const accepted: Socket[] = []
 		const silent = createServer((socket) => void accepted.push(socket))
@@ -283,22 +304,26 @@ describe("an apply whose devUrl does not answer (PR7 of r22b)", () => {
 
 /* PR8 of r22b: the sweep dropped only its own role's databases, so another devUrl role's leftover held its role */
 describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () => {
+	leavesStale()
 	it("drops that replay's database and role, so apply's CREATE ROLE of it passes", async () => {
 		const [made, other] = [unique("comb_t_left"), unique("comb_t_ci")]
 		/* pid 1 is no backend, so the replay that made it is over */
 		const left = `comb_replay_1_1_${unique("pr8").slice(-8)}`
 		try {
 			await query(pgUrl(), `CREATE ROLE ${other} CREATEDB`)
-			await query(pgUrl(), `CREATE DATABASE ${left} OWNER ${other}`)
+			await plantHeld(left, `OWNER ${other}`)
 			await query(pgUrl(), `CREATE ROLE ${made} NOLOGIN`)
-			await query(pgUrl(), `COMMENT ON ROLE ${made} IS 'comb_replay 1_1'`)
 			await query(pgUrl(), `GRANT CONNECT ON DATABASE ${left} TO ${made}`)
+			/* the tag last, as it makes the role a sweep's, and then the database */
+			await query(pgUrl(), `COMMENT ON ROLE ${made} IS 'comb_replay 1_1'`)
+			await release(left)
 			write([`${UNSAFE}CREATE ROLE ${made};\n`])
 			await withScratchDb((dev) => withScratchDb((target) => applyWithAtlas(options(dev, target))))
 			/* the role there now is apply's own, made as the file says: the sweep dropped the replay's tagged one first */
 			const tag = `SELECT shobj_description(oid, 'pg_authid') AS tag FROM pg_roles WHERE rolname = '${made}'`
 			expect([await holds(left), await query(pgUrl(), tag)]).toEqual([false, [{ tag: null }]])
 		} finally {
+			await release(left)
 			await query(pgUrl(), `DROP DATABASE IF EXISTS ${left}`)
 			await dropRoles(made, other)
 		}
@@ -306,6 +331,7 @@ describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () =
 })
 
 describe("a sweep beside a live replay and a database someone is in", () => {
+	leavesStale()
 	it("leaves a live replay's database and role, which then passes", async () => {
 		const [made, resume] = [unique("comb_t_live"), unique("comb_t_resume")]
 		try {
@@ -335,7 +361,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 	it("skips a stale replay database with a session in it, keeps the verdict, and the next run takes it", async () => {
 		/* pid 1 is no backend, so the replay that made it is over */
 		const stale = `comb_replay_1_1_${unique("busy").slice(-8)}`
-		await query(pgUrl(), `CREATE DATABASE ${stale}`)
+		await plantHeld(stale)
 		/* a person's psql, by its application_name, as P4 of r22 ends only a replay's own backends */
 		const session = new pg.Client({
 			application_name: "psql",
@@ -343,6 +369,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 		})
 		try {
 			await session.connect()
+			await release(stale)
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
 					write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
@@ -355,6 +382,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 			)
 		} finally {
 			await session.end().catch(() => undefined)
+			await release(stale)
 			await query(pgUrl(), `DROP DATABASE IF EXISTS ${stale}`)
 		}
 	}, 60_000)
