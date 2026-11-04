@@ -117,4 +117,10 @@ describe("insertedColumns", () => {
 		expect(insertedColumns(undefined)).toBeUndefined()
 		expect(insertedColumns("INSERT INTO t (a, b")).toEqual(["a", "b"])
 	})
+
+	/* gate fix for 5bd746b8: a piece naming no column is read as none, so the classifier never throws on it */
+	it("reads an empty list, or one holding an empty piece, as the columns it names", () => {
+		expect(insertedColumns("INSERT INTO t () VALUES ()")).toEqual([])
+		expect(insertedColumns("INSERT INTO t (a, , b) VALUES (1, 2)")).toEqual(["a", "b"])
+	})
 })
