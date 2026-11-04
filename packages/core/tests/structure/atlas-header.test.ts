@@ -6,6 +6,9 @@
  * reads the header the same on every dialect (sql/migrate/dir.go), so SQLite, which needs no server,
  * is the oracle for Postgres too. comb runs on every Atlas in ATLAS_RANGE, so each shape is read by
  * the pinned v1.2.0 floor and by the Atlas on PATH alike, and one they read apart fails naming both.
+ * Atlas locks a SQLite apply with a file in TMPDIR (atlas_migrate_execute.lock), one per machine
+ * whatever the database, so each run takes its own TMPDIR: under another process's apply, the
+ * shared one failed the run with "lock on atlas_migrate_execute already taken" (A's AA7 landing).
  */
 import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -47,8 +50,8 @@ const ATLASES: Readonly<Record<string, string>> = {
 		"atlas",
 }
 
-/** How the Atlas `binary` ran `head` before a VACUUM, as a txmode */
-function atlasRead(head: string, binary: string): Txmode | "unrun" {
+/** How the Atlas `binary` ran `head` before a VACUUM, as a txmode; any other failure throws Atlas's words */
+function atlasRead(head: string, binary: string): Txmode {
 	const dir = mkdtempSync(path.join(os.tmpdir(), "comb-atlas-header-"))
 	try {
 		const migrations = path.join(dir, "m")
@@ -56,16 +59,19 @@ function atlasRead(head: string, binary: string): Txmode | "unrun" {
 		writeFileSync(path.join(migrations, "20260101000000_t.sql"), "CREATE TABLE t (x int);\n")
 		writeFileSync(path.join(migrations, "20260102000000_v.sql"), `${head}VACUUM;\n`)
 		const at = ["--dir", `file://${migrations}`]
-		expect(spawnSync(binary, ["migrate", "hash", ...at]).status).toBe(0)
+		const env = { ...process.env, TMPDIR: dir }
+		expect(spawnSync(binary, ["migrate", "hash", ...at], { env }).status).toBe(0)
 		const apply = spawnSync(binary, ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], {
 			encoding: "utf8",
+			env,
 		})
 		const said = `${apply.stdout}${apply.stderr}`
 		if (!said.includes("Error")) return "none"
 		if (said.includes("cannot VACUUM from within a transaction")) return "file"
 		/* Atlas names the file, which comb's refusal leaves to the line that reports it */
 		const refused = /^Error: (.*txmode.*)$/m.exec(said)?.[1]?.replace(' "20260102000000_v.sql"', "")
-		return refused === undefined ? "unrun" : { refused }
+		if (refused === undefined) throw new Error(`${binary} failed the file outside its header: ${said}`)
+		return { refused }
 	} finally {
 		rmSync(dir, { force: true, recursive: true })
 	}
