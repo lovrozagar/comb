@@ -180,20 +180,23 @@ const NUMERIC_TEXT = /^(?:-?\d+(?:\.\d+)?|NaN|-?Infinity)$/
 
 /**
  * Whether `column` is a Postgres `customType` column, which carries its text where Postgres's own type
- * of it is a numeric (AB2 of area B), as an expression key does: its mapper may read one as a number
+ * of it is a numeric (AB2 of area B), as an expression key does: its mapper may read one as a number.
+ * Carried, the text binds as itself, typed as the column; as read, a value goes through its `toDriver`
  */
 const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
 	is(column, Column) && column.dataType === "custom" && !is(column, SQLiteColumn)
 
 /**
- * A cursor value as a key that carries its text binds it: a key that reads rounded, its text cast to
- * numeric past the number mapper; a Postgres custom column, a numeric's text as itself, past its
- * `toDriver`, which Postgres reads as the column's own type
+ * A cursor value as its key binds it. Stored text the list carried (`carried`, the cursor's flag)
+ * binds as itself, past the column's mapper: cast to numeric on a key that reads rounded, and on a
+ * Postgres custom column as a parameter Postgres types as the column it is compared with, its own type. A value as read binds through the mapper, so a custom
+ * column's `toDriver` writes it as it writes the column (comb-9d's AB2 ruling), a text value that looks
+ * like a number included; a cursor with no flag, as every released comb minted, holds only those
  */
-function boundCarried(column: SQLWrapper | undefined, value: unknown): unknown {
-	if (typeof value !== "string") return value
+function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
+	if (!carried || typeof value !== "string" || !NUMERIC_TEXT.test(value)) return value
 	if (readsRounded(column)) return sql`${value}::numeric`
-	return carriesOpaque(column) && NUMERIC_TEXT.test(value) ? sql`${value}` : value
+	return carriesOpaque(column) ? sql`${value}` : value
 }
 
 /** Whether `column` is a seconds-mode SQLite timestamp: drizzle binds a Date there floored to the second */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { malformed, typedKeys } from "./list-extras.ts"
+import { carriedTexts, malformed, typedKeys } from "./list-extras.ts"
 import type { SortField } from "./types.ts"
 
 const SORT: SortField[] = [
@@ -125,5 +125,19 @@ describe("typedKeys with a carried text (QL3 of r22b; sibling: a time key's stor
 			name: "x",
 		}
 		expect(typedKeys(row, SORT)["k"]).toBe("0.1000000000000000001")
+	})
+})
+
+/* comb-9d's AB2 ruling: the cursor flags each key whose value is a carried text, which binds as itself */
+describe("carriedTexts (comb-9d's AB2 ruling; sibling: typedKeys' carried text)", () => {
+	it("names a key whose value typedKeys took from the carried text, and no key read as its text already", () => {
+		expect(carriedTexts({ _combId: 1, _combKeyTexts: "0.1000000000000000001,", k: 0.1, name: 0.5 }, SORT)).toEqual(
+			new Set(["k"]),
+		)
+		expect(carriedTexts({ _combId: 1, _combKeyTexts: "0.25,", k: "0.25", name: "12" }, SORT)).toEqual(new Set())
+	})
+
+	it("names none on a row that carries no texts", () => {
+		expect(carriedTexts({ _combId: 1, k: "12", name: "x" }, SORT)).toEqual(new Set())
 	})
 })

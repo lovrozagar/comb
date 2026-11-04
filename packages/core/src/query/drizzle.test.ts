@@ -187,6 +187,7 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 		expect(resultItems).toEqual([{ name: "C" }, { name: "B" }])
 		expect(pagination.hasMore).toBe(true)
 		expect(openCursor(pagination.nextCursor as string, SEALED)).toEqual({
+			carried: [false],
 			id: "b",
 			sort: "createdAt.desc.nullsfirst",
 			values: ["2024-01-02"],
@@ -291,7 +292,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 		expect(pagination.nextCursor).toBeTruthy()
 
 		const decoded = openCursor(pagination.nextCursor as string, SEALED)
-		expect(decoded).toEqual({ id: "b", sort: "createdAt.desc.nullsfirst", values: ["2024-01-02"] })
+		expect(decoded).toEqual({ carried: [false], id: "b", sort: "createdAt.desc.nullsfirst", values: ["2024-01-02"] })
 	})
 
 	it("returns page=null when cursor is present in query", () => {

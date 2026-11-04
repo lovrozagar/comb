@@ -12,7 +12,7 @@ import { combErrorKeys } from "../types.ts"
 import { type DecodedCursor, readCursor } from "./cursor.ts"
 import { createCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { COMB_ID, malformed, typedKeys, unencoded } from "./list-extras.ts"
+import { carriedTexts, COMB_ID, malformed, typedKeys, unencoded } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
 import type { paginationResponseSchema } from "./schema.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
@@ -189,8 +189,10 @@ function mintFrom(
 	},
 ): string {
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
-	return createCursor(typedKeys(row as Record<string, unknown>, parsedSort), parsedSort, {
+	const read = row as Record<string, unknown>
+	return createCursor(typedKeys(read, parsedSort), parsedSort, {
 		...options,
+		carried: carriedTexts(read, parsedSort),
 		idField: COMB_ID,
 	})
 }

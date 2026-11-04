@@ -124,4 +124,19 @@ function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Re
 	return typed.length === 0 ? row : { ...row, ...Object.fromEntries(typed) }
 }
 
-export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded }
+/**
+ * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` carried in
+ * place of the value as read (comb-9d's AB2 ruling), which a cursor binds as itself, past the
+ * column's mapper; every other key binds through it, a text key that looks like a number included
+ */
+function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]): Set<string> {
+	const texts = row["_combKeyTexts"]
+	if (typeof texts !== "string") return new Set()
+	const carried = texts.split(",")
+	const typed = typedKeys(row, sort)
+	return new Set(
+		sort.map(({ field }) => field).filter((field, i) => typed[field] !== row[field] && typed[field] === carried[i]),
+	)
+}
+
+export { carriedTexts, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded }

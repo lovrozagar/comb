@@ -47,12 +47,16 @@ const MAX_CURSOR_LENGTH = 8192
  * the exact sort that produced it.
  */
 type CursorPayload = {
+	/* per key, whether its value is the stored text the list carried rather than the value as read; left out when none is (comb-9d's AB2 ruling) */
+	c?: boolean[] | undefined
 	i: CursorId
 	s: string
 	v: unknown[]
 }
 
 type DecodedCursor = {
+	/* per key, whether its value is carried stored text, bound as itself; else as read, bound through the column's mapper */
+	carried: boolean[]
 	id: CursorId
 	sort: string
 	values: CursorValue[]
@@ -85,18 +89,25 @@ function encodeCursor(payload: CursorPayload, options: CursorOptions): string {
 	return seal(new TextEncoder().encode(json), options)
 }
 
+/** Each key's carried flag from the wire; none is every key as read, as every cursor a released comb minted holds */
+function carriedOf(c: unknown, count: number): boolean[] | undefined {
+	if (c === undefined) return Array.from({ length: count }, () => false)
+	return Array.isArray(c) && c.length === count && c.every((flag) => typeof flag === "boolean") ? c : undefined
+}
+
 /** The opened payload's cursor, or null when it is not one this version minted */
 function decodePayload(bytes: Uint8Array): DecodedCursor | null {
 	try {
 		const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)) as unknown
 		if (typeof parsed !== "object" || parsed === null) return null
-		const { i, s, v } = parsed as Partial<Record<keyof CursorPayload, unknown>>
+		const { c, i, s, v } = parsed as Partial<Record<keyof CursorPayload, unknown>>
 		const id = decodeId(i)
 		if (id === undefined || typeof s !== "string" || !Array.isArray(v)) return null
 		const values = v.map(decodeValue)
+		const flags = carriedOf(c, v.length)
 		/* a value the database cannot compare would reach the driver and fail there with a 500 */
-		if (values.includes(undefined)) return null
-		return { id, sort: s, values: values as CursorValue[] }
+		if (values.includes(undefined) || flags === undefined) return null
+		return { carried: flags, id, sort: s, values: values as CursorValue[] }
 	} catch {
 		// reason: bytes that are not UTF-8 JSON are not a cursor; callers answer with invalid_cursor
 		return null
@@ -183,14 +194,20 @@ function refuseUncarried(record: Record<string, unknown>, parsedSort: readonly S
 function mintCursor(
 	record: Record<string, unknown>,
 	parsedSort: readonly SortField[],
-	options: CursorOptions & { idField?: string | undefined },
+	options: CursorOptions & { carried?: ReadonlySet<string> | undefined; idField?: string | undefined },
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
+	const flags = parsedSort.map(({ field }) => options?.carried?.has(field) ?? false)
 	refuseComputedSort(parsedSort)
 	refuseRoundedId(record, idField)
 	refuseUncarried(record, parsedSort, idField)
 	return encodeCursor(
-		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
+		{
+			...(flags.includes(true) && { c: flags }),
+			i: record[idField] as CursorId,
+			s: sortSignature(parsedSort),
+			v: parsedSort.map(({ field }) => record[field]),
+		},
 		options,
 	)
 }

@@ -144,7 +144,9 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		/* a value the keyset reads from the row is anchored; the others bind as their keys compare them */
 		const values = anchored(
 			keys,
-			cursor.values.map((value, i) => bindableOn(keys[i]?.column, boundCarried(keys[i]?.column, value))),
+			cursor.values.map((value, i) =>
+				bindableOn(keys[i]?.column, boundCarried(keys[i]?.column, value, cursor.carried[i] ?? false)),
+			),
 			{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 		)
 		return { id, keys, tiebreak, values }

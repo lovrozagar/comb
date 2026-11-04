@@ -61,6 +61,8 @@ function createCursor(
 		asRead?: ReadonlySet<string> | undefined
 		/* the sort fields whose keys read a reference back (refersBack); every one when not given */
 		byReference?: ReadonlySet<string> | undefined
+		/* the sort fields whose values are the stored text the list carried, bound as themselves (comb-9d's AB2 ruling) */
+		carried?: ReadonlySet<string> | undefined
 		idField?: string | undefined
 		keyset?: KeysetKind | undefined
 	},

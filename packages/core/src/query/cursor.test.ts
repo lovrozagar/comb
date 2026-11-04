@@ -51,6 +51,7 @@ describe("cursor encode/decode", () => {
 			SEALED,
 		)
 		expect(decoded(encoded)).toEqual({
+			carried: [false, false, false],
 			id: "usr_abc123",
 			sort: "created_at.desc.nullsfirst",
 			values: ["2024-01-01", 42, null],
@@ -153,7 +154,7 @@ describe("mintCursor", () => {
 			{ direction: "desc", field: "created_at" },
 		]
 		const cursor = mintCursor({ created_at: 5, id: "abc", name: "x" }, sort, SEALED)
-		expect(decoded(cursor)).toEqual({ id: "abc", sort: sortSignature(sort), values: ["x", 5] })
+		expect(decoded(cursor)).toEqual({ carried: [false, false], id: "abc", sort: sortSignature(sort), values: ["x", 5] })
 	})
 
 	it("reads the id from a custom field", () => {
@@ -192,6 +193,7 @@ describe("cursorProblem / readCursor", () => {
 describe("openCursor — what a cursor may carry (Q-M3, Q-H4)", () => {
 	it("keeps a numeric id a number and decodes a tagged date", () => {
 		expect(decoded(wire(payload([{ $date: 5 }], 7)))).toEqual({
+			carried: [false],
 			id: 7,
 			sort: "created_at.desc.nullsfirst",
 			values: [new Date(5)],
@@ -327,5 +329,29 @@ describe("a minted cursor is one comb reads (QL5 of r22b; sibling: what openCurs
 			cause: "the next cursor is minted from each row's _id; select them, and the built query's extras",
 			errorKey: "sort_not_wired",
 		})
+	})
+})
+
+/* comb-9d's AB2 ruling: a per-key flag says a value is carried text; a cursor without it holds every value as read */
+describe("the carried flag a cursor holds per key (comb-9d's AB2 ruling; sibling: the 0.20.1 cursor, custom-keys.test.ts)", () => {
+	const BY_TWO: SortField[] = [
+		{ direction: "asc", field: "k" },
+		{ direction: "asc", field: "n" },
+	]
+
+	it("writes the flag only for a cursor carrying a text, and reads one without it as every key as read", () => {
+		const flagged = mintCursor({ id: 1, k: "0.1000000000000000001", n: "12" }, BY_TWO, {
+			...SEALED,
+			carried: new Set(["k"]),
+		})
+		expect(decoded(flagged)?.carried).toEqual([true, false])
+		const plain = mintCursor({ id: 1, k: "12", n: "3" }, BY_TWO, SEALED)
+		expect(decoded(plain)?.carried).toEqual([false, false])
+		expect(decoded(wire(payload(["12"])))?.carried).toEqual([false])
+	})
+
+	it("refuses a flag that is no list of booleans, one a key", () => {
+		for (const c of [[1], ["true"], [true, false], true, null])
+			expect(decoded(wire({ ...payload(["12"]), c })), JSON.stringify(c)).toBeNull()
 	})
 })

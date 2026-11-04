@@ -241,10 +241,10 @@ describe("a key that reads its number rounded (QL3 of r22b; sibling: a time key'
 	})
 
 	it("binds the carried text cast to numeric, and any other value as before", () => {
-		const bound = boundCarried(amounts.n, "0.1000000000000000001") as SQL
+		const bound = boundCarried(amounts.n, "0.1000000000000000001", true) as SQL
 		expect(new PgDialect().sqlToQuery(bound)).toEqual({ params: ["0.1000000000000000001"], sql: "$1::numeric" })
-		expect(boundCarried(amounts.n, 0.1)).toBe(0.1)
-		expect(boundCarried(amounts.exact, "0.1")).toBe("0.1")
+		expect(boundCarried(amounts.n, 0.1, false)).toBe(0.1)
+		expect(boundCarried(amounts.exact, "0.1", true)).toBe("0.1")
 	})
 })
 
@@ -298,10 +298,16 @@ describe("a customType key's cursor value (AB2 of area B; sibling: QL5's blob)",
 	})
 
 	it("binds a numeric's text past the mapper on a Postgres custom column, and any other value as before", () => {
-		const bound = boundCarried(pgItems.a, "0.1000000000000000001") as SQL
+		const bound = boundCarried(pgItems.a, "0.1000000000000000001", true) as SQL
 		expect(new PgDialect().sqlToQuery(bound)).toEqual({ params: ["0.1000000000000000001"], sql: "$1" })
-		expect(boundCarried(pgItems.a, "a,b")).toBe("a,b")
-		expect(boundCarried(pgItems.a, 0.1)).toBe(0.1)
-		expect(boundCarried(columns.blobby, "1")).toBe("1")
+		expect(boundCarried(pgItems.a, "a,b", true)).toBe("a,b")
+		expect(boundCarried(pgItems.a, 0.1, true)).toBe(0.1)
+		expect(boundCarried(columns.blobby, "1", true)).toBe("1")
+	})
+
+	/* comb-9d's AB2 ruling: a value as read, one that looks like a number too, binds through the column's toDriver */
+	it("binds a value as read, a numeric-looking text included, through the mapper on every column", () => {
+		expect(boundCarried(pgItems.a, "12", false)).toBe("12")
+		expect(boundCarried(pgItems.n, "0.1000000000000000001", false)).toBe("0.1000000000000000001")
 	})
 })

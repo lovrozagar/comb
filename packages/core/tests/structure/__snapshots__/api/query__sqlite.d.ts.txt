@@ -684,11 +684,13 @@ declare const MAX_CURSOR_LENGTH = 8192;
  * the exact sort that produced it.
  */
 type CursorPayload = {
+    c?: boolean[] | undefined;
     i: CursorId;
     s: string;
     v: unknown[];
 };
 type DecodedCursor = {
+    carried: boolean[];
     id: CursorId;
     sort: string;
     values: CursorValue[];
@@ -722,6 +724,7 @@ declare const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a 
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried)
  */
 declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
+    carried?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
 }): string;
 /**
@@ -753,6 +756,7 @@ type KeysetKind = "derived" | "merged" | "table";
 declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
     asRead?: ReadonlySet<string> | undefined;
     byReference?: ReadonlySet<string> | undefined;
+    carried?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;
 }): string;
@@ -825,7 +829,13 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  * text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
-export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded };
+/**
+ * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` carried in
+ * place of the value as read (comb-9d's AB2 ruling), which a cursor binds as itself, past the
+ * column's mapper; every other key binds through it, a text key that looks like a number included
+ */
+declare function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]): Set<string>;
+export { carriedTexts, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded };
 
 // query/schema.d.ts
 /**
