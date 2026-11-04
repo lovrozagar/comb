@@ -1176,7 +1176,7 @@ What changes for a project on 0.20. Before deploying it:
 
 39. **Key a hand-written constraint map as codegen does.** README's example keyed a unique and a foreign key by constraint name, which only the Postgres handler matches; on libsql, bun:sqlite and D1 both entries went unused, and the violation got the generic `unique_constraint_violation` or `foreign_key_violation`. The example now keys a unique by its columns and a foreign key by its first column, as codegen writes them, and states each kind's key. **Fix:** a hand-written map copied from the old example keys its `unique` and `foreignKey` entries by column SQL name.
 
-37. **Publish a derived list's tiebreak.** The list schema published `stableTiebreak: "id"` whatever column the list broke ties on, so a derived list keyed by `_id` told a page walker the wrong column. `createListQuerySchema` takes `tiebreak` and publishes it, `id` by default. **Fix:** a derived list whose `idColumn` is not `id` sets `tiebreak` to its name; regenerate a manifest that reads it.
+40. **Publish a derived list's tiebreak.** The list schema published `stableTiebreak: "id"` whatever column the list broke ties on, so a derived list keyed by `_id` told a page walker the wrong column. `createListQuerySchema` takes `tiebreak` and publishes it, `id` by default. **Fix:** a derived list whose `idColumn` is not `id` sets `tiebreak` to its name; regenerate a manifest that reads it.
 
 ## Upgrading to 0.20.1
 
