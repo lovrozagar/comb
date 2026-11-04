@@ -70,7 +70,9 @@ const CASES: Case[] = [
 	["t", "24:00:00", false, true],
 	/* stricter than Postgres, listed since 0.15 (F11): a leap second, which Postgres reads as the next minute */
 	["t", "23:59:60", false, true],
-	["tt", "10:00:00+02", true, true],
+	/* an offset as RFC 3339 writes it, as a timestamptz's, though Postgres takes more (CD11 of r22b) */
+	["tt", "10:00:00+02", false, true],
+	["tt", "10:00:00+02:00", true, true],
 	["tt", "10:00Z", true, true],
 	["tt", "10:00:00+02:30", true, true],
 	["tt", "10:61:00+02", false, false],
