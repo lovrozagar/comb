@@ -21,6 +21,7 @@ const RESERVED = [
 	"q",
 	"select",
 	"sortOrderBy",
+	"tiebreak",
 	"validated",
 ]
 
