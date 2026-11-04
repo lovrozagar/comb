@@ -219,3 +219,53 @@ describe("parseFieldConstraints: a text's kind", () => {
 		expect(parsed(options)).not.toThrow()
 	})
 })
+
+/*
+ * CD9 of r22b: a helper takes the keys its own constraint type names and no other, so a JavaScript
+ * caller's key, or a cast one, that the helper's type does not take fails codegen naming the
+ * helper, where 0.20 took one known to any helper and dropped its rule, or published an example
+ * the field refused
+ */
+describe("each c helper takes only the keys its constraint type names (CD9 of r22b; siblings: an unknown key, c.enum's flags)", () => {
+	it.each([
+		['c.integer("f", { email: true })', "c.integer takes no email"],
+		['c.real("f", { url: true, trim: true })', "c.real takes no url"],
+		['c.timestamp("f", { pattern: "/^x$/" })', "c.timestamp takes no pattern"],
+		['c.timestamp("f", { password: true })', "c.timestamp takes no password"],
+		['c.createdAt("created_at", { lowercase: true })', "c.createdAt takes no lowercase"],
+		['c.text("f", { maxBytes: 4 })', "c.text takes no maxBytes"],
+		['c.ref("f", { maxBytes: 4 })', "c.ref takes no maxBytes"],
+		['c.json("f", schema, { trim: true })', "c.json takes no trim"],
+		['c.json("f", schema, { min: 1 })', "c.json takes no min"],
+	])("refuses %s", (source, message) => {
+		expect(() => parseFieldConstraints(source)).toThrow(`fixture.f: ${message}`)
+	})
+
+	it("takes every key of its own type, and still names a key no helper takes", () => {
+		expect(parseFieldConstraints('c.integer("f", { min: 1, max: 2, nomutate: true, private: true })')).toMatchObject({
+			max: 2,
+			min: 1,
+			nomutate: true,
+			private: true,
+		})
+		expect(parseFieldConstraints('c.timestamp("f", { min: 0, autogenerate: true })').min).toBe(0)
+		expect(parseFieldConstraints('c.json("f", schema, { maxBytes: 9, tenant: false })').maxBytes).toBe(9)
+		expect(parseFieldConstraints('c.enum("f", ["a"], { tenant: true })').tenant).toBe(true)
+		expect(() => parseFieldConstraints('c.integer("f", { colour: true })')).toThrow(
+			"fixture.f: comb reads no constraint named colour",
+		)
+	})
+
+	it("refuses, from a direct call, a key on a drizzle column and a helper comb has none of", () => {
+		const options = { fieldName: "f", filled: false, measure: "value", place: "t.f" } as const
+		expect(() => fieldConstraintsOf({ min: 1 }, { ...options, helper: null })).toThrow(
+			"t.f: a drizzle column takes no min",
+		)
+		expect(() =>
+			fieldConstraintsOf(
+				{},
+				{ ...options, helper: "bigint" as unknown as Parameters<typeof fieldConstraintsOf>[1]["helper"] },
+			),
+		).toThrow("t.f: comb has no helper c.bigint")
+	})
+})

@@ -175,6 +175,7 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 	const constraints = fieldConstraintsOf(column.comb?.constraints ?? {}, {
 		fieldName: column.key,
 		filled,
+		helper: kind,
 		measure: measuredBy(column, kind),
 		place,
 	})

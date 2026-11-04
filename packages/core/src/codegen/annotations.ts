@@ -3,20 +3,32 @@
  * types allow, a pattern one comb can emit, and `autogenerate` defaulting to true on a column
  * something other than the caller fills.
  */
+import type { CombColumnKind } from "../meta/column.ts"
 import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts"
 import { patternLiteral } from "./utils/pattern.ts"
 
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta
 
-// lookup-table: every constraint key the column types allow (src/sqlite/constraints.ts); a state machine is c.enum's own
-const KNOWN = /* @__PURE__ */ new Set([
+/* the keys of each constraint type in src/sqlite/constraints.ts, which tests/types/constraint-keys.typetest.ts holds them to */
+export const NUMBER_KEYS = [
+	"autogenerate",
+	"max",
+	"min",
+	"mutable",
+	"nomutate",
+	"private",
+	"relation",
+	"tenant",
+] as const
+export const JSON_KEYS = ["autogenerate", "maxBytes", "mutable", "nomutate", "private", "relation", "tenant"] as const
+export const ENUM_KEYS = ["nomutate", "private", "tenant"] as const
+export const TEXT_KEYS = [
 	"autogenerate",
 	"email",
 	"imageUri",
 	"lowercase",
 	"max",
-	"maxBytes",
 	"min",
 	"mutable",
 	"name",
@@ -29,7 +41,61 @@ const KNOWN = /* @__PURE__ */ new Set([
 	"trim",
 	"uppercase",
 	"url",
-])
+] as const
+
+type Keys = typeof NUMBER_KEYS
+type None = readonly []
+
+/** The constraint keys each c helper takes, its constraint type's; a state machine is c.enum's own (CD9 of r22b) */
+export type ConstraintKeys = {
+	readonly boolean: None
+	readonly createdAt: Keys
+	readonly deletedAt: Keys
+	readonly enum: typeof ENUM_KEYS
+	readonly id: None
+	readonly integer: Keys
+	readonly json: typeof JSON_KEYS
+	readonly real: Keys
+	readonly ref: typeof TEXT_KEYS
+	readonly serialId: None
+	readonly text: typeof TEXT_KEYS
+	readonly timestamp: Keys
+	readonly updatedAt: Keys
+}
+
+// lookup-table: the constraint keys each c helper takes
+export const CONSTRAINT_KEYS: ConstraintKeys = {
+	boolean: [],
+	createdAt: NUMBER_KEYS,
+	deletedAt: NUMBER_KEYS,
+	enum: ENUM_KEYS,
+	id: [],
+	integer: NUMBER_KEYS,
+	json: JSON_KEYS,
+	real: NUMBER_KEYS,
+	ref: TEXT_KEYS,
+	serialId: [],
+	text: TEXT_KEYS,
+	timestamp: NUMBER_KEYS,
+	updatedAt: NUMBER_KEYS,
+}
+
+/* every key any helper takes, so a key none takes is named as one comb does not read */
+const KNOWN: readonly string[] = [...TEXT_KEYS, "maxBytes"]
+
+/** Refuses a key the helper's constraint type does not take, naming the helper: its rule would be dropped without a word (CD9 of r22b) */
+function refuseForeignKeys(
+	constraints: Readonly<Record<string, ConstantValue>>,
+	{ helper, place }: { helper: CombColumnKind | null; place: string },
+): void {
+	if (helper !== null && !Object.hasOwn(CONSTRAINT_KEYS, helper))
+		throw new Error(`${place}: comb has no helper c.${helper}`)
+	const allowed: readonly string[] = helper === null ? [] : CONSTRAINT_KEYS[helper]
+	const key = Object.keys(constraints).find((each) => !allowed.includes(each))
+	if (key === undefined) return
+	if (!KNOWN.includes(key)) throw new Error(`${place}: comb reads no constraint named ${key}`)
+	throw new Error(`${place}: ${helper === null ? "a drizzle column" : `c.${helper}`} takes no ${key}`)
+}
 
 /* the keys no field takes together, and why: either would win without a word (C8 of r18 for the
    casing); a tenant column moving on update would move the row to another tenant (CD1 of r22b) */
@@ -93,12 +159,11 @@ function refuseEmptyBounds(
 /** Refuses what no field can be declared with: an unknown measure or constraint, a contradiction, a bad relation, empty bounds */
 function refuseMalformed(
 	constraints: Readonly<Record<string, ConstantValue>>,
-	{ measure, place }: { measure: "length" | "value"; place: string },
+	{ helper, measure, place }: { helper: CombColumnKind | null; measure: "length" | "value"; place: string },
 ): void {
 	/* a JavaScript caller's measure reaches here unchecked by tsc (K7 of r18) */
 	if (measure !== "length" && measure !== "value") throw new Error(`${place}: measure must be "length" or "value"`)
-	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
-	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
+	refuseForeignKeys(constraints, { helper, place })
 	const contradiction = CONTRADICTIONS.find(([a, b]) => constraints[a] === true && constraints[b] === true)
 	if (contradiction !== undefined) {
 		const [a, b, why] = contradiction
@@ -117,11 +182,19 @@ export function fieldConstraintsOf(
 	{
 		fieldName,
 		filled,
+		helper,
 		measure,
 		place,
-	}: { fieldName: string; filled: boolean; measure: "length" | "value"; place: string },
+	}: {
+		fieldName: string
+		filled: boolean
+		/** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
+		helper: CombColumnKind | null
+		measure: "length" | "value"
+		place: string
+	},
 ): FieldConstraints {
-	refuseMalformed(constraints, { measure, place })
+	refuseMalformed(constraints, { helper, measure, place })
 	const relation = constraints["relation"]
 
 	const autogenerate = filled ? constraints["autogenerate"] !== false : constraints["autogenerate"] === true

@@ -272,15 +272,42 @@ export type { ConstantValue, ExpressionIndexMeta, ImportRef, AnalysisResult, Che
  * types allow, a pattern one comb can emit, and `autogenerate` defaulting to true on a column
  * something other than the caller fills.
  */
+import type { CombColumnKind } from "../meta/column.ts";
 import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts";
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta;
-export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, measure, place, }: {
+export declare const NUMBER_KEYS: readonly ["autogenerate", "max", "min", "mutable", "nomutate", "private", "relation", "tenant"];
+export declare const JSON_KEYS: readonly ["autogenerate", "maxBytes", "mutable", "nomutate", "private", "relation", "tenant"];
+export declare const ENUM_KEYS: readonly ["nomutate", "private", "tenant"];
+export declare const TEXT_KEYS: readonly ["autogenerate", "email", "imageUri", "lowercase", "max", "min", "mutable", "name", "nomutate", "password", "pattern", "private", "relation", "tenant", "trim", "uppercase", "url"];
+type Keys = typeof NUMBER_KEYS;
+type None = readonly [];
+/** The constraint keys each c helper takes, its constraint type's; a state machine is c.enum's own (CD9 of r22b) */
+export type ConstraintKeys = {
+    readonly boolean: None;
+    readonly createdAt: Keys;
+    readonly deletedAt: Keys;
+    readonly enum: typeof ENUM_KEYS;
+    readonly id: None;
+    readonly integer: Keys;
+    readonly json: typeof JSON_KEYS;
+    readonly real: Keys;
+    readonly ref: typeof TEXT_KEYS;
+    readonly serialId: None;
+    readonly text: typeof TEXT_KEYS;
+    readonly timestamp: Keys;
+    readonly updatedAt: Keys;
+};
+export declare const CONSTRAINT_KEYS: ConstraintKeys;
+export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, helper, measure, place, }: {
     fieldName: string;
     filled: boolean;
+    /** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
+    helper: CombColumnKind | null;
     measure: "length" | "value";
     place: string;
 }): FieldConstraints;
+export {};
 
 // codegen/entity-meta.d.ts
 /**
