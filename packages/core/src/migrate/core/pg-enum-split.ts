@@ -8,7 +8,8 @@
 import { nextVersion } from "./atlas-dir.ts"
 import { codeOf, QNAME } from "./sql-code.ts"
 import { withDirectivesFirst } from "./pg-objects.ts"
-import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
+import { atlasFile, pgStatements } from "./pg-split.ts"
+import { atlasHeader } from "./atlas-header.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const ADD_VALUE = /* @__PURE__ */ new RegExp(`^ALTER TYPE (?:IF EXISTS )?${QNAME} ADD VALUE\\b`, "i")
@@ -24,7 +25,7 @@ function splitEnumValues(name: string, file: string): Array<[string, string]> {
 	return [
 		[`${version}${suffix}_enum_values.sql`, atlasFile(values)],
 		/* comb's file: its directives honored, a blank line after them (withDirectivesFirst) */
-		[`${nextVersion(version)}${suffix}.sql`, atlasFile(rest, withDirectivesFirst(atlasDirectives(file), ""))],
+		[`${nextVersion(version)}${suffix}.sql`, atlasFile(rest, withDirectivesFirst(atlasHeader(file).text, ""))],
 	]
 }
 

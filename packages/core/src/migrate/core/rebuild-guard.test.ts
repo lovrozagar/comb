@@ -242,7 +242,7 @@ CREATE TABLE \`bare\` (\`id\` text PRIMARY KEY, \`c1\` text) WITHOUT ROWID;`)
 })
 
 describe("a rebuild in a file that opts out of its transaction", () => {
-	const txmodeNone = `-- atlas:txmode none\n${REBUILD}`
+	const txmodeNone = `-- atlas:txmode none\n\n${REBUILD}`
 
 	it("is refused by the guard: defer_foreign_keys and the refill need the file's transaction", () => {
 		expect(() => guardRebuilds(txmodeNone, BEFORE, FTS)).toThrow(
@@ -252,7 +252,7 @@ describe("a rebuild in a file that opts out of its transaction", () => {
 	})
 
 	it("rates unsafe, guarded or not, on SQLite, and leaves Postgres txmode files cautious", () => {
-		const guarded = `-- atlas:txmode none\n${guardRebuilds(REBUILD, BEFORE, FTS)}`
+		const guarded = `-- atlas:txmode none\n\n${guardRebuilds(REBUILD, BEFORE, FTS)}`
 		expect(classify(guarded).unsafeStatements).toEqual([
 			"DROP TABLE `u` (rebuilds u: a rebuild needs the file's transaction, which -- atlas:txmode none gives up)",
 		])

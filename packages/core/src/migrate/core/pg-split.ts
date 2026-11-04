@@ -7,6 +7,7 @@
  * trees beside the schema it leaves (recordRead), which the history's facts read. A
  * file comb writes from such statements (atlasFile) is one Atlas sends each of alone.
  */
+import { atlasHeader } from "./atlas-header.ts"
 import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import type { Dialect } from "../types.ts"
@@ -63,14 +64,15 @@ function readChunk(chunk: Chunk): Read {
 	return { statements: read }
 }
 
-/** A migration file's leading `atlas:` directive lines, with the blank lines after them */
-const atlasDirectives = (file: string): string => /^(?:--[ \t]*atlas:[^\n]*\n)+\n*/.exec(file)?.[0] ?? ""
-
-/** The chunks of `sql`, the file's directives, which are no statement's comments, off the first one's lead */
+/**
+ * The chunks of `sql`, the file's header (atlasHeader), which is no statement's comments, off the
+ * first one's lead; a first-line delimiter directive the scan already read past
+ */
 function chunksOf(sql: string): Chunk[] {
 	const chunks = atlasChunks(sql)
 	const [first] = chunks
-	if (first !== undefined) first.lead = first.lead.replace(/^(?:--[ \t]*atlas:[^\n]*(?:\n|$))+/, "").trim()
+	const own = atlasHeader(sql).text.replace(DELIMITER_DIRECTIVE, "").trim()
+	if (first !== undefined && own !== "" && first.lead.startsWith(own)) first.lead = first.lead.slice(own.length).trim()
 	return chunks
 }
 
@@ -144,7 +146,7 @@ function freeDelimiter(statements: readonly string[]): string {
  * the file's own, which its first line sets
  */
 function atlasFile(statements: readonly string[], head = ""): string {
-	const rest = head.replace(DELIMITER_DIRECTIVE, "").replace(/^\n+$/, "")
+	const rest = head.replace(DELIMITER_DIRECTIVE, "").replace(/^\s+$/, "")
 	const plain = `${rest}${statements.map((statement) => `${statement};\n`).join("")}`
 	if (sendsAlone(plain, statements)) return plain
 	const delim = freeDelimiter(statements)
@@ -155,7 +157,6 @@ function atlasFile(statements: readonly string[], head = ""): string {
 }
 
 export {
-	atlasDirectives,
 	atlasFile,
 	type FileRead,
 	fileRead,

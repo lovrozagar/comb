@@ -30,7 +30,8 @@ import { splitEnumValues } from "./pg-enum-split.ts"
 import { extractSchema } from "./schema.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
-import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
+import { atlasFile, pgStatements } from "./pg-split.ts"
+import { atlasHeader } from "./atlas-header.ts"
 import { type Run, run } from "./process.ts"
 
 export type MigrateDiffOptions = {
@@ -185,7 +186,7 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		const history = emptyPgObjects()
 		const plain = sqlFiles(migrationsDir).map((file) => {
 			const sql = readFileSync(join(migrationsDir, file), "utf8")
-			return { file, head: atlasDirectives(sql), plain: separatePgObjects(sql, history, file).replay }
+			return { file, head: atlasHeader(sql).text, plain: separatePgObjects(sql, history, file).replay }
 		})
 		const target = separatePgObjects(options.targetSchema)
 		/* the dev database gets the sequences and extensions a table may need first, in the copy's first file and the target */

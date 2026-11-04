@@ -23,7 +23,8 @@ import { viewReplay } from "./pg-atlas-replay.ts"
 import { extrasAfter, followExtra } from "./pg-extras.ts"
 import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
 import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
-import { atlasDirectives, pgStatements } from "./pg-split.ts"
+import { pgStatements } from "./pg-split.ts"
+import { atlasHeader } from "./atlas-header.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 type PgObjectKind = "extension" | "materialized view" | "policy" | "role" | "sequence" | "view"
@@ -270,19 +271,18 @@ function devPrelude(...states: PgObjects[]): string {
 }
 
 /**
- * `body` under the directive lines of `head`, with exactly one blank line between: Atlas honors a
- * file directive such as `-- atlas:txmode none` only when a blank line follows it, and otherwise
- * runs the file in one transaction without a word
+ * `body` under the file header `head` (atlasHeader), one blank line between: Atlas honors a directive
+ * such as `-- atlas:txmode none` only in a header a blank line closes, else runs the file in one transaction
  */
 function withDirectivesFirst(head: string, body: string): string {
-	const directives = head.replace(/\n+$/, "")
+	const directives = head.trimEnd()
 	return directives === "" ? body : `${directives}\n\n${body.replace(/^\n+/, "")}`
 }
 
-/** Atlas's migration file with comb's statements around its own, under its leading `atlas:` directives */
+/** Atlas's migration file with comb's statements around its own, under its header */
 function wrapAtlasFile(file: string, { after, before }: Delta): string {
 	if (after.length === 0 && before.length === 0) return file
-	const head = atlasDirectives(file)
+	const head = atlasHeader(file).text
 	/* asSql writes nothing for no statements, so an empty side adds no blank line */
 	const parts = [asSql(before), file.slice(head.length), asSql(after)]
 	return withDirectivesFirst(head, parts.filter((part) => part !== "").join("\n"))

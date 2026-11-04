@@ -44,10 +44,10 @@
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
-import { outsideTransaction } from "./classify-file.ts"
 import { onceCleanup, onSignals } from "./cleanup.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { asTarget } from "./pg-live-catalog.ts"
+import { outsideTransaction } from "./atlas-header.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-transaction.ts"

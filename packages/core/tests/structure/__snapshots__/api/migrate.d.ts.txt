@@ -806,8 +806,6 @@ type FileRead = {
     read: PgRead;
     sql: string;
 };
-/** A migration file's leading `atlas:` directive lines, with the blank lines after them */
-declare const atlasDirectives: (file: string) => string;
 /** The Postgres file `sql` read once: its statements in the order Postgres runs them, with their trees; throws for a file Atlas cannot split */
 declare function pgRead(sql: string): PgRead;
 /** `sql` as `dialect` reads it, a Postgres file parsed here */
@@ -827,7 +825,7 @@ declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefi
  * the file's own, which its first line sets
  */
 declare function atlasFile(statements: readonly string[], head?: string): string;
-export { atlasDirectives, atlasFile, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
+export { atlasFile, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
 
 // migrate/core/schema.d.ts
 import { type FileRead } from "./pg-split.ts";
@@ -1092,8 +1090,6 @@ declare function preview(stmt: string): string;
  * such a table holds only an index of rows kept elsewhere
  */
 declare function reindexedOf(statements: readonly string[]): Set<string>;
-/** Whether `sql` runs outside a transaction: it starts with `-- atlas:txmode none` and a blank line, which Atlas needs */
-declare const outsideTransaction: (sql: string) => boolean;
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 /** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
 /** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
@@ -1117,4 +1113,9 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  * overrides this
  */
 declare function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
-export { ftsCommandFindings, outsideTransaction, preview, PROCESS_PRAGMAS, type ReadStatement, refuseUnrunnable, reindexedOf, };
+/**
+ * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
+ * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
+ */
+declare function refuseHeader(sql: string, dialect: Dialect): void;
+export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseUnrunnable, reindexedOf };

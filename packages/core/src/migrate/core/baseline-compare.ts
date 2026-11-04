@@ -21,9 +21,10 @@ import { COMPARED, liveDrift, readLiveObjects } from "./pg-live-objects.ts"
 import type { ReadyDev } from "./pg-dev-schema.ts"
 import type { LiveObjects, LiveRead } from "./pg-live-types.ts"
 import { extensionReplay, viewReplay } from "./pg-atlas-replay.ts"
+import { atlasHeader } from "./atlas-header.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
-import { atlasDirectives, atlasFile, pgRead } from "./pg-split.ts"
+import { atlasFile, pgRead } from "./pg-split.ts"
 import type { Run } from "./process.ts"
 import { asciiFold, codeOf } from "./sql-code.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
@@ -130,7 +131,7 @@ function replayableHistory(exec: Run, copy: string): string {
 			const block = viewReplay(stmt, code) ?? extensionReplay(stmt, code)
 			return block === undefined ? [] : [block]
 		})
-		writeFileSync(join(plain, name), atlasFile(replayed, atlasDirectives(sql)))
+		writeFileSync(join(plain, name), atlasFile(replayed, atlasHeader(sql).text))
 	}
 	hashDir(exec, plain)
 	return plain

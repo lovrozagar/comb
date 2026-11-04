@@ -16,7 +16,7 @@
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { ftsCommandFindings, reindexedOf } from "./classify-file.ts"
+import { ftsCommandFindings, refuseHeader, reindexedOf } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
 import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
@@ -28,7 +28,8 @@ import { type Facts, historyFacts, tableOf } from "./pg-history.ts"
 import { blockAfter, insideOnly, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import { extractSchema } from "./schema.ts"
-import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
+import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
+import { outsideTransaction } from "./atlas-header.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { type PgRead, pgRead } from "./pg-split.ts"
@@ -207,6 +208,7 @@ function readFile(
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
 	read: PgRead | undefined,
 ): Read[] {
+	refuseHeader(sql, dialect)
 	const naming = namingOf(dialect, schema)
 	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), each tree kept */
 	/* on Postgres, each as Atlas sends it, its chunk's lead left off: a lead never reaches a rating (N1) */
@@ -232,7 +234,7 @@ function readFile(
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),
-		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
+		txmodeNone: dialect === "sqlite" && outsideTransaction(sql),
 		prepared,
 		drops: new Map(),
 		fired: guards.fired,

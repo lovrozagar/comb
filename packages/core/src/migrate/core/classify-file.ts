@@ -7,7 +7,7 @@
 import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
-import { atlasDirectives } from "./pg-split.ts"
+import { atlasHeader, outsideTransaction } from "./atlas-header.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -72,12 +72,6 @@ function reindexedOf(statements: readonly string[]): Set<string> {
 		}
 	}
 	return out
-}
-
-/** Whether `sql` runs outside a transaction: it starts with `-- atlas:txmode none` and a blank line, which Atlas needs */
-const outsideTransaction = (sql: string): boolean => {
-	const head = atlasDirectives(sql)
-	return /^--[ \t]*atlas:txmode[ \t]+none\b/im.test(head) && head.endsWith("\n\n")
 }
 
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
@@ -187,12 +181,16 @@ function refuseUnrunnable(
 	}
 }
 
-export {
-	ftsCommandFindings,
-	outsideTransaction,
-	preview,
-	PROCESS_PRAGMAS,
-	type ReadStatement,
-	refuseUnrunnable,
-	reindexedOf,
+/**
+ * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
+ * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
+ */
+function refuseHeader(sql: string, dialect: Dialect): void {
+	const { txmode } = atlasHeader(sql)
+	if (dialect !== "postgres" || typeof txmode === "string") return
+	throw new Error(
+		`Atlas refuses this file's txmode (${JSON.stringify(txmode.refused)}); write "-- atlas:txmode none" to run it outside a transaction, or leave the line out`,
+	)
 }
+
+export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseUnrunnable, reindexedOf }

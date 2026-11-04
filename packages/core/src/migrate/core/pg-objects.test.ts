@@ -157,10 +157,10 @@ describe("withDirectivesFirst", () => {
 		expect(withDirectivesFirst("", "SELECT 1;\n")).toBe("SELECT 1;\n")
 	})
 
-	it("gives a rewritten file whose directive had no blank line after it the blank line", () => {
+	it("keeps a directive with no blank line after it in the body, which Atlas reads as no header (PA3 of r22b)", () => {
 		const file = '-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n'
 		expect(wrapAtlasFile(file, { after: [], before: ["SELECT 1"] })).toBe(
-			'-- atlas:txmode none\n\nSELECT 1;\n\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n',
+			'SELECT 1;\n\n-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n',
 		)
 	})
 })

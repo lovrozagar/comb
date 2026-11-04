@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { explainAtlasFailure } from "./atlas-failure.ts"
 import { json, type Ran } from "./atlas-status.ts"
-import { outsideTransaction } from "./classify-file.ts"
+import { outsideTransaction } from "./atlas-header.ts"
 
 const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 

@@ -391,8 +391,8 @@ describe("migrate apply on Postgres: one history per schema", () => {
 /** --yes: a txmode none file is cautious */
 const approveWithYes = (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true })
 
-/* each writer, given a file whose directive has no blank line after it, as a person may write one */
-const TIGHT = '-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "a_x" ON "a" ("x");\n'
+/* each writer, given a txmode none file, keeps its header first with the blank line Atlas needs */
+const HEADED = '-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY "a_x" ON "a" ("x");\n'
 
 describe("migrate apply on Postgres: files comb rewrites keep their directives", () => {
 	describe("with Atlas v1.3.0", () => {
@@ -405,11 +405,11 @@ describe("migrate apply on Postgres: files comb rewrites keep their directives",
 				await applyWithAtlas(command(url, { approve: approveWithYes }))
 				writeFileSync(
 					join(dir, "20260102000000_wrapped.sql"),
-					wrapAtlasFile(TIGHT, { after: [], before: ["SELECT 1"] }),
+					wrapAtlasFile(HEADED, { after: [], before: ["SELECT 1"] }),
 				)
 				const split = splitEnumValues(
 					"20260103000000_enum.sql",
-					`-- atlas:txmode none\nALTER TYPE "s" ADD VALUE 'b';\nCREATE INDEX CONCURRENTLY "a_y" ON "a" ("y");\n`,
+					`-- atlas:txmode none\n\nALTER TYPE "s" ADD VALUE 'b';\nCREATE INDEX CONCURRENTLY "a_y" ON "a" ("y");\n`,
 				)
 				for (const [name, sql] of split) writeFileSync(join(dir, name), sql)
 				migrations({})

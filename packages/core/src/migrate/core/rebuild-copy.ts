@@ -9,8 +9,6 @@ import { IDENT, lastPart, nameKey, QNAME, topLevel } from "./sql-code.ts"
 import { affinityOf, definitionAffinity } from "./sqlite-affinity.ts"
 import { normalizeSql, segments } from "./sql-scan.ts"
 
-/* Atlas's directive to run a file outside a transaction, where the guard's deferred keys and refill fail */
-const TXMODE_NONE: RegExp = /^\s*--\s*atlas:txmode\s+none\b/im
 const NO_TRANSACTION: string = "a rebuild needs the file's transaction, which -- atlas:txmode none gives up"
 
 /** A rebuild's copy: the table it fills, the table it reads, its target columns, and what may lose data */
@@ -259,4 +257,4 @@ function renamedCopy(code: string, copies: ReadonlyMap<string, Copy>): { copy: C
 	return copy !== undefined && copy.from === nameKey(to, "sqlite") ? { copy, temp: key } : undefined
 }
 
-export { type Copy, NO_TRANSACTION, readCopy, type Rebuilds, rebuildsOf, TXMODE_NONE }
+export { type Copy, NO_TRANSACTION, readCopy, type Rebuilds, rebuildsOf }

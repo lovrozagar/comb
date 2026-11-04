@@ -8,7 +8,7 @@ import type { MigrationClassification } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
-import { TXMODE_NONE } from "./rebuild-copy.ts"
+import { outsideTransaction } from "./atlas-header.ts"
 
 /** A statement read, with what each rule found in it */
 type Read = ReadStatement & { findings: Finding[] }
@@ -43,7 +43,8 @@ function classificationOf(
 			),
 		),
 	]
-	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
+	if (outsideTransaction(sql))
+		cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
 	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
 	return {
 		cautiousStatements,

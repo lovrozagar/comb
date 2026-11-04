@@ -59,8 +59,6 @@ describe("atlasFile: statements written so Atlas sends each one alone", () => {
 		expect(atlasFile(["SELECT 1 -- x"], "-- atlas:txmode none\n\n")).toMatch(
 			/^-- atlas:delimiter (\S+)\n-- atlas:txmode none\n\nSELECT 1 -- x\n\1\n$/,
 		)
-		/* a directive with no blank line after it, which Atlas does not honor, stays so */
-		expect(atlasFile(["SELECT 1"], "-- atlas:txmode none\n")).toBe("-- atlas:txmode none\nSELECT 1;\n")
 		expect(atlasFile([], "-- atlas:txmode none\n\n")).toBe("-- atlas:txmode none\n\n")
 	})
 

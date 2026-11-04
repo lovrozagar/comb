@@ -34,8 +34,10 @@ describe("splitEnumValues", () => {
 		expect(values?.[1].startsWith("-- atlas")).toBe(false)
 		expect(rest?.[0]).toBe("20270101000000_x.sql")
 		expect(rest?.[1].startsWith("-- atlas:txmode none\n\n-- Modify")).toBe(true)
-		const tight = splitEnumValues("20261231235959_x.sql", `-- atlas:txmode none\n${ATLAS}`)[1]
-		expect(tight?.[1].startsWith("-- atlas:txmode none\n\n-- Modify")).toBe(true)
+		/* with no blank line after it the line is no header, as Atlas reads it (PA3 of r22b): the comment of the statement it heads */
+		const [tightValues, tightRest] = splitEnumValues("20261231235959_x.sql", `-- atlas:txmode none\n${ATLAS}`)
+		expect(tightValues?.[1].startsWith('-- atlas:txmode none\n-- Add value to enum type: "status"\nALTER')).toBe(true)
+		expect(tightRest?.[1].startsWith("-- Modify")).toBe(true)
 	})
 
 	/* M75: the statements Postgres runs, read over the whole file, a delimiter directive in place */

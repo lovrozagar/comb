@@ -1,0 +1,69 @@
+/**
+ * PA3 of r22b: comb reads a migration file's header by Atlas's rule, held here to the pinned Atlas
+ * itself. Each shape heads a file whose one statement is VACUUM, which SQLite refuses inside a
+ * transaction: Atlas runs it when it reads `txmode none`, fails it in the file's transaction when it
+ * reads no directive or `file`, and refuses the file, naming the txmode, for any other value. Atlas
+ * reads the header the same on every dialect (sql/migrate/dir.go), so SQLite, which needs no server,
+ * is the oracle for Postgres too.
+ */
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { describe, expect, it } from "vitest"
+import { atlasHeader, type Txmode } from "../../src/migrate/core/atlas-header.ts"
+
+/* each header shape r22b's t-txmode-header.ts ran, and what it shows; the file's VACUUM follows it */
+const SHAPES: Readonly<Record<string, string>> = {
+	canonical: "-- atlas:txmode none\n\n",
+	"a comment line first": "-- Build the index without blocking writes\n-- atlas:txmode none\n\n",
+	"a comment line after": "-- atlas:txmode none\n-- Build the index without blocking writes\n\n",
+	"blank line holding spaces": "-- atlas:txmode none\n \t \n",
+	CRLF: "-- atlas:txmode none\r\n\r\n",
+	"no space after --": "--atlas:txmode none\n\n",
+	"tab after --": "--\tatlas:txmode none\n\n",
+	"two spaces before none": "-- atlas:txmode  none\n\n",
+	"value none-ish": "-- atlas:txmode none-ish\n\n",
+	"upper NONE": "-- atlas:txmode NONE\n\n",
+	"no blank line": "-- atlas:txmode none\n",
+	"comb:allow-unsafe line first": "-- comb:allow-unsafe: vacuum online\n-- atlas:txmode none\n\n",
+	"comb:allow-unsafe line after": "-- atlas:txmode none\n-- comb:allow-unsafe: vacuum online\n\n",
+	"txmode file": "-- atlas:txmode file\n\n",
+	"txmode all": "-- atlas:txmode all\n\n",
+	/* a # line, which SQLite cannot run, read for a value Atlas refuses before it runs anything */
+	"hash comment": "# atlas:txmode bogus\n\n",
+	"two txmode lines": "-- atlas:txmode none\n-- atlas:txmode none\n\n",
+	"many blank lines": "-- atlas:txmode none\n\n\n\n",
+	"txmode with no value": "-- atlas:txmode\n\n",
+	"an indented statement right after": "-- atlas:txmode none\n   ",
+}
+
+/** How the pinned Atlas ran `head` before a VACUUM, as a txmode */
+function atlasRead(head: string): Txmode | "unrun" {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "comb-atlas-header-"))
+	try {
+		const migrations = path.join(dir, "m")
+		mkdirSync(migrations)
+		writeFileSync(path.join(migrations, "20260101000000_t.sql"), "CREATE TABLE t (x int);\n")
+		writeFileSync(path.join(migrations, "20260102000000_v.sql"), `${head}VACUUM;\n`)
+		const at = ["--dir", `file://${migrations}`]
+		expect(spawnSync("atlas", ["migrate", "hash", ...at]).status).toBe(0)
+		const apply = spawnSync("atlas", ["migrate", "apply", "--url", `sqlite://${path.join(dir, "db")}`, ...at], {
+			encoding: "utf8",
+		})
+		const said = `${apply.stdout}${apply.stderr}`
+		if (!said.includes("Error")) return "none"
+		if (said.includes("cannot VACUUM from within a transaction")) return "file"
+		/* Atlas names the file, which comb's refusal leaves to the line that reports it */
+		const refused = /^Error: (.*txmode.*)$/m.exec(said)?.[1]?.replace(' "20260102000000_v.sql"', "")
+		return refused === undefined ? "unrun" : { refused }
+	} finally {
+		rmSync(dir, { force: true, recursive: true })
+	}
+}
+
+describe("comb reads a txmode header as Atlas does (PA3; sibling: comb's own -- comb:allow-unsafe: line)", () => {
+	it.each(Object.entries(SHAPES))("%s", (_, head) => {
+		expect(atlasHeader(`${head}VACUUM;\n`).txmode).toEqual(atlasRead(head))
+	})
+})
