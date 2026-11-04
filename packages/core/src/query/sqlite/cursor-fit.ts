@@ -14,8 +14,8 @@ import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
 
 /**
- * Whether `value` is what a column of this drizzle `dataType` holds; json and blobs hold nothing a
- * cursor carries. A number column holds a bigint too where the driver returns integers as one
+ * Whether `value` is what a column of this drizzle `dataType` holds; a json column holds nothing a
+ * cursor carries, a buffer-mode blob its bytes (QL5 of r22b). A number column holds a bigint too where the driver returns integers as one
  * (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string (libsql's intMode
  * "string", Q2 of r19), and a cursor minted from its row carries it.
  */
@@ -34,7 +34,10 @@ function fitsDataType(dataType: string, value: unknown): boolean {
 		case "bigint":
 			return typeof value === "bigint"
 		case "object":
-			return dataType === "object date" && value instanceof Date
+			return (
+				(dataType === "object date" && value instanceof Date) ||
+				(dataType === "object buffer" && value instanceof Uint8Array)
+			)
 		default:
 			return false
 	}

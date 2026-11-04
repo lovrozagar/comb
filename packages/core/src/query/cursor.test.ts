@@ -161,8 +161,8 @@ describe("mintCursor", () => {
 		expect(decoded(cursor)?.id).toBe("row1")
 	})
 
-	it("records a missing sort value as null", () => {
-		expect(decoded(mintCursor({ id: "abc" }, BY_CREATED, SEALED))?.values).toEqual([null])
+	it("records a null sort value as null", () => {
+		expect(decoded(mintCursor({ created_at: null, id: "abc" }, BY_CREATED, SEALED))?.values).toEqual([null])
 	})
 })
 
@@ -257,8 +257,10 @@ describe("sealed and scoped cursors (R1, R2)", () => {
 	it("throws a 500 on a secret under 32 bytes or no scope, minting or reading", () => {
 		const unwired = expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 })
 		expect(() => readCursor(minted, bySalary, { ...SEALED, cursorSecret: "short" })).toThrow(unwired)
-		expect(() => mintCursor({ id: "abc" }, BY_CREATED, { ...SEALED, cursorScope: "" })).toThrow(unwired)
-		expect(() => mintCursor({ id: "abc" }, BY_CREATED, undefined as unknown as typeof SEALED)).toThrow(unwired)
+		expect(() => mintCursor({ created_at: 1, id: "abc" }, BY_CREATED, { ...SEALED, cursorScope: "" })).toThrow(unwired)
+		expect(() => mintCursor({ created_at: 1, id: "abc" }, BY_CREATED, undefined as unknown as typeof SEALED)).toThrow(
+			unwired,
+		)
 	})
 
 	it("lets the schema check only the shape, which needs no secret", () => {
@@ -281,5 +283,35 @@ describe("readCursor on options that cannot seal", () => {
 			expect(() => readCursor(long, sort, options)).toThrow(
 				expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 }),
 			)
+	})
+})
+
+/* QL5 of r22b: the codec is closed over what a mint takes, so every cursor comb mints is one it reads */
+describe("a minted cursor is one comb reads (QL5 of r22b; sibling: what openCursor refuses)", () => {
+	const BY_K: SortField[] = [{ direction: "asc", field: "k" }]
+
+	it.each([
+		["a JSON object", { n: 1 }],
+		["an array", [1, 2]],
+		["a function", () => 1],
+		["a symbol", Symbol("k")],
+		["a bigint past 20 digits", 10n ** 25n],
+	])("refuses %s as sort_not_wired naming its field, a 500 on the page that reads it", (_label, value) => {
+		expect(thrown(() => mintCursor({ id: "a", k: value }, BY_K, SEALED))).toMatchObject({
+			cause: expect.stringContaining("k"),
+			errorKey: "sort_not_wired",
+			status: 500,
+		})
+	})
+
+	it("refuses a row without a sort field or without its id, naming each", () => {
+		expect(thrown(() => mintCursor({ id: "a" }, BY_K, SEALED))).toMatchObject({
+			cause: "the next cursor is minted from each row's k; select them, and the built query's extras",
+			errorKey: "sort_not_wired",
+		})
+		expect(thrown(() => mintCursor({ k: 1 }, BY_K, { ...SEALED, idField: "_id" }))).toMatchObject({
+			cause: "the next cursor is minted from each row's _id; select them, and the built query's extras",
+			errorKey: "sort_not_wired",
+		})
 	})
 })

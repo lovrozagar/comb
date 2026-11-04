@@ -177,7 +177,7 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 /**
  * The next cursor, minted from the last row of the page: its sort keys, and the tiebreak the
  * builder selected as `_combId`. A row without one would mint a cursor that repeats or ends the
- * list, so that is a wiring mistake. Any id, 0 and "" included, carries the next page.
+ * list, a wiring mistake mintCursor refuses (QL5 of r22b). Any id, 0 and "" included, carries the next page.
  */
 function mintFrom(
 	row: object,
@@ -188,14 +188,6 @@ function mintFrom(
 		keyset: KeysetKind
 	},
 ): string {
-	const missing = [...parsedSort.map(({ field }) => field), COMB_ID].filter((key) => !Object.hasOwn(row, key))
-	if (missing.length > 0) {
-		throw new CombError({
-			cause: `paginate mints the next cursor from each row's ${missing.join(", ")}; select them, and the built query's extras`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
 	return createCursor(typedKeys(row as Record<string, unknown>, parsedSort), parsedSort, {
 		...options,

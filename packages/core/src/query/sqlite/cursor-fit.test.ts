@@ -250,3 +250,15 @@ describe("boundForKeys by the list's dialect (QL4 of r22b; sibling: SQLite's bin
 		expect(boundForKeys("sqlite", keys, values)).toEqual([sql`9e999`, sql`-9e999`, 7, 9007199254740993n, 5])
 	})
 })
+
+/* QL5 of r22b: a blob key's cursor carries its bytes, which it fits and binds */
+describe("a blob key's cursor value (QL5 of r22b; sibling: a json key, which no cursor carries)", () => {
+	const files = sqliteTable("files", { b: blob("b", { mode: "buffer" }), j: text("j", { mode: "json" }) })
+
+	it("fits bytes on a buffer-mode blob, and nothing on a json column", () => {
+		expect(() => assertCursorFits([files.b], [new Uint8Array([1])])).not.toThrow()
+		expect(() => assertCursorFits([files.b], ["01"])).toThrow()
+		expect(() => assertCursorFits([files.j], [new Uint8Array([1])])).toThrow()
+		expect(boundForKeys("sqlite", [files.b], [new Uint8Array([1])])).toEqual([new Uint8Array([1])])
+	})
+})

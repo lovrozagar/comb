@@ -47,7 +47,8 @@ describe("createCursor", () => {
 		expect(() => createCursor({ id: 1, title: "長".repeat(3000) }, BY_TITLE, derived)).toThrow(
 			expect.objectContaining({ cause: expect.stringContaining("a derived list reads no row"), status: 500 }),
 		)
-		const huge = BigInt(`1${"0".repeat(7000)}`)
+		/* a long key that is no string, which no reference carries: a blob's bytes */
+		const huge = new Uint8Array(7000)
 		expect(() => createCursor({ id: 1, title: huge }, BY_TITLE, SEALED)).toThrow(
 			expect.objectContaining({ cause: expect.stringContaining("the other keys leave no room"), status: 500 }),
 		)
@@ -130,5 +131,22 @@ describe("createCursor on a key the list binds as read (QL1 of r22b; sibling: a 
 			createCursor({ ...row, score: 1 }, BY_SCORE, { ...SEALED, idField: "_id", keyset: "derived" }),
 		).toThrow(expect.objectContaining({ cause: expect.stringMatching(/a derived list having none/) }))
 		expect(readCursor(createCursor(row, BY_SCORE, table), BY_SCORE, SEALED)?.id).toBe("a")
+	})
+})
+
+/* QL5 of r22b: createCursor mints as paginate does, so it refuses the rows paginate refuses */
+describe("createCursor on a row without a sort field or its id (QL5 of r22b; sibling: paginate's)", () => {
+	const sort = [{ direction: "asc" as const, field: "title" }]
+
+	it.each([
+		["its sort field", { id: "a" }, "title"],
+		["its id", { title: "A" }, "id"],
+	])("refuses a row without %s as sort_not_wired", (_label, row, missing) => {
+		expect(() => createCursor(row, sort, SEALED)).toThrow(
+			expect.objectContaining({
+				cause: `the next cursor is minted from each row's ${missing}; select them, and the built query's extras`,
+				errorKey: "sort_not_wired",
+			}),
+		)
 	})
 })

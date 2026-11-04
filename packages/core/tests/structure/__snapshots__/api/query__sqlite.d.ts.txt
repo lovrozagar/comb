@@ -655,6 +655,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
 export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/cursor.d.ts
+import { CursorRef, type CursorId, type CursorValue } from "./cursor-codec.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import type { SortDirection, SortField, SortNulls } from "./types.ts";
 /**
@@ -685,25 +686,11 @@ type CursorPayload = {
     s: string;
     v: unknown[];
 };
-/** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
-type CursorId = bigint | number | string;
 type DecodedCursor = {
     id: CursorId;
     sort: string;
     values: CursorValue[];
 };
-/**
- * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
- * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
- * rest is read from the row while it still has that prefix and length
- */
-declare class CursorRef {
-    readonly length: number;
-    readonly prefix: string;
-    constructor(prefix: string, length: number);
-}
-/** What a sort key can hold and its database can compare, or a long one carried by reference */
-type CursorValue = bigint | boolean | CursorRef | Date | number | string | null;
 type PaginationMeta = {
     /** Rows the filter matches across all pages; null when the response cannot know */
     count: number | null;
@@ -727,7 +714,8 @@ declare const lossy: (value: unknown) => value is number;
 declare function refuseRoundedId(record: Record<string, unknown>, idField: string): void;
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
- * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
+ * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried)
  */
 declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
     idField?: string | undefined;
@@ -855,6 +843,30 @@ export { createRetrieveQuerySchema, type RetrieveQuerySchema } from "./retrieve-
 export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts";
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, RetrieveQueryConfig, RetrieveQueryOutput, } from "./schema-types.ts";
 export { paginationResponseSchema };
+
+// query/cursor-codec.d.ts
+/** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
+type CursorId = bigint | number | string;
+/**
+ * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
+ * rest is read from the row while it still has that prefix and length
+ */
+declare class CursorRef {
+    readonly length: number;
+    readonly prefix: string;
+    constructor(prefix: string, length: number);
+}
+/** What a sort key can hold and its database can compare, or a long one carried by reference */
+type CursorValue = bigint | boolean | CursorRef | Date | number | string | Uint8Array | null;
+declare function encodeValue(value: unknown): unknown;
+/** A sort value from the wire, or undefined when it is not one a cursor can carry */
+declare function decodeValue(value: unknown): CursorValue | undefined;
+/** The tiebreak id from the wire: a string, a finite number, or a tagged bigint */
+declare function decodeId(value: unknown): CursorId | undefined;
+/** Whether a cursor carries `value` as itself: `decode` reads its encoding back as it */
+declare function carried(value: unknown, decode: (wire: unknown) => unknown): boolean;
+export { carried, CursorRef, decodeId, decodeValue, encodeValue, type CursorId, type CursorValue };
 
 // query/list-schema.d.ts
 /**

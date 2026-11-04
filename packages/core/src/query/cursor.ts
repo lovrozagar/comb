@@ -9,6 +9,15 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
+import {
+	carried,
+	CursorRef,
+	decodeId,
+	decodeValue,
+	encodeValue,
+	type CursorId,
+	type CursorValue,
+} from "./cursor-codec.ts"
 import { assertCursorWired, type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
@@ -43,32 +52,11 @@ type CursorPayload = {
 	v: unknown[]
 }
 
-/** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
-type CursorId = bigint | number | string
-
 type DecodedCursor = {
 	id: CursorId
 	sort: string
 	values: CursorValue[]
 }
-
-/**
- * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
- * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
- * rest is read from the row while it still has that prefix and length
- */
-class CursorRef {
-	readonly length: number
-	readonly prefix: string
-
-	constructor(prefix: string, length: number) {
-		this.prefix = prefix
-		this.length = length
-	}
-}
-
-/** What a sort key can hold and its database can compare, or a long one carried by reference */
-type CursorValue = bigint | boolean | CursorRef | Date | number | string | null
 
 type PaginationMeta = {
 	/** Rows the filter matches across all pages; null when the response cannot know */
@@ -89,60 +77,6 @@ function sortSignature(parsedSort: readonly SortField[]): string {
 	return parsedSort
 		.map(({ direction, field, nulls }) => `${field}.${direction}.nulls${effectiveNulls(direction, nulls)}`)
 		.join(",")
-}
-
-/* Dates survive JSON as tagged epoch ms so a timestamp column compares as one, a bigint as its
-   decimal digits, and a number JSON has none for (±Infinity, NaN) as its name, not as null */
-const DATE_TAG = "$date"
-const BIGINT_TAG = "$bigint"
-const NUM_TAG = "$num"
-const REF_TAG = "$ref"
-const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
-
-function encodeValue(value: unknown): unknown {
-	/* a Date no JS Date holds, a date-mode ±infinity, stays a Date: null under the tag, never the null group (3.24) */
-	if (value instanceof Date) return { [DATE_TAG]: Number.isNaN(value.getTime()) ? null : value.getTime() }
-	if (value instanceof CursorRef) return { [REF_TAG]: [value.prefix, value.length] }
-	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
-	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
-}
-
-const isPlain = (value: unknown): value is number | string =>
-	typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
-
-/** A reference from the wire: its prefix, and a whole length the prefix fits in; a 0.12 reference, a bare prefix, is none */
-function decodeRef(ref: unknown): CursorRef | undefined {
-	if (!Array.isArray(ref) || ref.length !== 2) return undefined
-	const [prefix, length] = ref as [unknown, unknown]
-	if (typeof prefix !== "string" || !Number.isSafeInteger(length)) return undefined
-	return (length as number) >= Array.from(prefix).length ? new CursorRef(prefix, length as number) : undefined
-}
-
-/** A tagged value from the wire: a Date a JS Date can hold, a bigint of decimal digits, ±Infinity or NaN, or a reference */
-function decodeTagged(value: Record<string, unknown>): CursorRef | Date | bigint | number | undefined {
-	if (Object.hasOwn(value, REF_TAG)) return decodeRef(value[REF_TAG])
-	const named = value[NUM_TAG]
-	if (typeof named === "string") return NON_FINITE.includes(named) ? Number(named) : undefined
-	const time = value[DATE_TAG]
-	/* an infinity read in date mode: its bound is read from its row (cursor-ref.ts), never bound itself */
-	if (time === null) return new Date(Number.NaN)
-	/* a forged time a Date cannot hold reads as Invalid Date, which no driver binds */
-	if (typeof time === "number") return Number.isNaN(new Date(time).getTime()) ? undefined : new Date(time)
-	const digits = value[BIGINT_TAG]
-	return typeof digits === "string" && /^-?\d{1,20}$/.test(digits) ? BigInt(digits) : undefined
-}
-
-/** A sort value from the wire, or undefined when it is not one a cursor can carry */
-function decodeValue(value: unknown): CursorValue | undefined {
-	if (value === null || typeof value === "boolean" || isPlain(value)) return value
-	if (typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1) return undefined
-	return decodeTagged(value as Record<string, unknown>)
-}
-
-/** The tiebreak id from the wire: a string, a finite number, or a tagged bigint */
-function decodeId(value: unknown): CursorId | undefined {
-	const id = decodeValue(value)
-	return typeof id === "bigint" || isPlain(id) ? id : undefined
 }
 
 /** A sealed cursor for `payload`, opened only under the same `options` */
@@ -186,9 +120,48 @@ function refuseRoundedId(record: Record<string, unknown>, idField: string): void
 	})
 }
 
+/** What a value no cursor carries is, for the 500 that names it */
+function kindOf(value: unknown): string {
+	if (Array.isArray(value)) return "an array"
+	return typeof value === "bigint" ? "an integer past 20 digits" : `a ${typeof value}`
+}
+
+/**
+ * Throw a 500 naming the field for a row a cursor cannot resume after (QL5 of r22b): one without a
+ * sort field or its id (a key set to undefined is one left out), or one whose value the cursor
+ * would not read back as itself, a JSON object, an array or a function, which would mint a cursor
+ * the next page refused as invalid
+ */
+function refuseUncarried(record: Record<string, unknown>, parsedSort: readonly SortField[], idField: string): void {
+	const fields = [...parsedSort.map(({ field }) => field), idField]
+	const missing = fields.filter((field) => record[field] === undefined)
+	if (missing.length > 0) {
+		throw new CombError({
+			cause: `the next cursor is minted from each row's ${missing.join(", ")}; select them, and the built query's extras`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	const key = parsedSort.find(({ field }) => !carried(record[field], decodeValue))
+	if (key !== undefined) {
+		throw new CombError({
+			cause: `the sort by ${key.field} reads ${kindOf(record[key.field])}, which no cursor carries: sort by a column of text, numbers, booleans, times or bytes`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	if (carried(record[idField], decodeId)) return
+	throw new CombError({
+		cause: `the tiebreak id ${idField} reads ${kindOf(record[idField])}, which no cursor carries: key the table by text or an integer`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
- * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
+ * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried)
  */
 function mintCursor(
 	record: Record<string, unknown>,
@@ -197,6 +170,7 @@ function mintCursor(
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
 	refuseRoundedId(record, idField)
+	refuseUncarried(record, parsedSort, idField)
 	return encodeCursor(
 		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
 		options,

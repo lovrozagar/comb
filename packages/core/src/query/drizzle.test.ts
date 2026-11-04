@@ -208,14 +208,14 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	it("refuses to mint a cursor from rows without a sort key or the id, a wiring mistake (Q-D7)", () => {
 		expect(onePage([{ id: "1" }, { id: "2" }])).toThrow(
 			expect.objectContaining({
-				cause: "paginate mints the next cursor from each row's createdAt; select them, and the built query's extras",
+				cause: "the next cursor is minted from each row's createdAt; select them, and the built query's extras",
 				errorKey: "sort_not_wired",
 				status: 500,
 			}),
 		)
 		expect(onePage([{ createdAt: "2" }, { createdAt: "1" }])).toThrow(
 			expect.objectContaining({
-				cause: "paginate mints the next cursor from each row's _combId; select them, and the built query's extras",
+				cause: "the next cursor is minted from each row's _combId; select them, and the built query's extras",
 			}),
 		)
 		expect(onePage([{ createdAt: "1", id: "1" }])).not.toThrow()
