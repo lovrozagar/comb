@@ -125,6 +125,18 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 	})
 }
 
+/**
+ * The schema's limits over the defaults, each a whole number from 0, and maxSortKeys from 1: no
+ * order could meet a cap of 0 sort keys, while the published pattern admits one (QL7 of r22b)
+ */
+function listLimitsOf(given: ListQueryConfig["limits"]): ListQueryLimits {
+	const limits = limitsOver("createListQuerySchema", LIST_QUERY_LIMITS, given)
+	if (limits.maxSortKeys >= 1) return limits
+	throw new TypeError(
+		`createListQuerySchema: limits.maxSortKeys must be a whole number from 1; got ${limits.maxSortKeys}`,
+	)
+}
+
 function createListQuerySchema<
 	T extends OutputStableShape<T> = Record<never, never>,
 	const TSortFields extends readonly string[] = readonly string[],
@@ -133,7 +145,7 @@ function createListQuerySchema<
 	type ExtendedOutput = ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
 	/* a whole number from 0 each (C3 of r17): the query stamp publishes them, and its reader refuses any other */
-	const limits = limitsOver("createListQuerySchema", LIST_QUERY_LIMITS, config.limits)
+	const limits = listLimitsOf(config.limits)
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
 	assertNotReserved("createListQuerySchema", extensions, RESERVED_LIST_KEYS)
 

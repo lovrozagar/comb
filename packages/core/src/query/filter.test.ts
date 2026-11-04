@@ -76,17 +76,12 @@ describe("parseOrder — multiple and computed fields", () => {
 		])
 	})
 
-	it("skips empty comma parts", () => {
-		const result = parseOrder(",name.asc,,")
-		expect(result).toHaveLength(1)
-		expect(result[0]?.field).toBe("name")
+	it("refuses empty comma parts (QL7 of r22b)", () => {
+		expect(parseOrder(",name.asc,,")).toBeNull()
 	})
 
 	it("trims whitespace around parts", () => {
-		const result = parseOrder(" col1.desc , col2.asc ")
-		expect(result).toHaveLength(2)
-		expect(result[0]?.field).toBe("col1")
-		expect(result[1]?.field).toBe("col2")
+		expect(parseOrder(" col1.desc , col2.asc ")?.map(({ field }) => field)).toEqual(["col1", "col2"])
 	})
 
 	/* computed fields (anyrow @ prefix) */
@@ -130,15 +125,14 @@ describe("parseOrder — malformed input", () => {
 		expect(parseOrder(undefined)).toEqual([])
 	})
 
-	it("skips empty segments between commas", () => {
-		expect(parseOrder("created_at.desc,,title.asc")).toHaveLength(2)
-	})
-
-	it("skips a segment that names no field", () => {
-		expect(parseOrder(".desc")).toEqual([])
-		/* a bare direction is consumed as the direction, leaving no field behind */
-		expect(parseOrder("asc")).toEqual([])
-	})
+	/* QL7 of r22b: the parser refuses rather than widen, as parseFilter does; a dropped entry let
+	   `order=asc` sort by the default, descending */
+	it.each(["asc", "desc", ".desc", ",", "title.asc,", "created_at.desc,,title.asc", " , title"])(
+		"refuses %j, an entry empty or naming no field, as null",
+		(order) => {
+			expect(parseOrder(order)).toBeNull()
+		},
+	)
 
 	it("defaults to ascending when no direction is given", () => {
 		expect(parseOrder("title")).toEqual([{ direction: "asc", field: "title" }])

@@ -4,7 +4,7 @@
  */
 import type * as z from "zod"
 
-import { type FilterLimits, parseOrder, validateFilter } from "./filter.ts"
+import { type FilterLimits, orderEntries, validateFilter } from "./filter.ts"
 import type { FieldType, FilterAST, SortDirection, SortField } from "./types.ts"
 
 type FilterParam = { fields: Record<string, FieldType>; limits: FilterLimits }
@@ -30,7 +30,12 @@ function parsedSortOf<TSortField extends string>(
 	{ maxSortKeys, sort }: SortParam<TSortField>,
 	ctx: z.RefinementCtx,
 ): Array<SortField<TSortField>> {
-	const rawSort = parseOrder(order)
+	const entries = orderEntries(order)
+	/* an entry empty or naming no field is refused, as the published pattern refuses it (QL7 of r22b) */
+	for (const malformed of new Set(entries.filter((entry) => typeof entry === "string"))) {
+		ctx.addIssue({ code: "custom", message: `Malformed sort entry: ${JSON.stringify(malformed)}`, path: ["order"] })
+	}
+	const rawSort = entries.filter((entry) => typeof entry !== "string")
 	if (rawSort.length > maxSortKeys) {
 		ctx.addIssue({
 			code: "custom",

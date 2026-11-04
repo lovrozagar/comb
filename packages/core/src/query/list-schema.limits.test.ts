@@ -190,9 +190,9 @@ describe("createListQuerySchema's limits", () => {
 		)
 	})
 
-	it("takes a large whole number for a limit with no cap, and 0", () => {
+	it("takes a large whole number for a limit with no cap, and 0 where it means none (maxSortKeys takes 1 up, QL7)", () => {
 		expect(() =>
-			createListQuerySchema({ limits: { maxPatternBytes: 1_000_000, maxSortKeys: 0 }, sort: ["a"] }),
+			createListQuerySchema({ limits: { maxFilterLength: 0, maxPatternBytes: 1_000_000 }, sort: ["a"] }),
 		).not.toThrow()
 	})
 })
@@ -255,6 +255,42 @@ describe("the pagination config is checked when the schema is built (QL6 of r22b
 			expect(builtWith(pagination), JSON.stringify(pagination)).not.toThrow()
 		expect(createListQuerySchema({ pagination: { defaultLimit: 3, maxLimit: 10 }, sort: ["id"] }).parse({}).limit).toBe(
 			3,
+		)
+	})
+})
+
+/* QL7 of r22b: a malformed order entry was dropped, so `order=asc` was a 200 sorted by the default, descending */
+describe("a malformed order is an issue on order (QL7 of r22b; sibling: the published pattern)", () => {
+	const schema = createListQuerySchema({ sort: ["created_at", "title"] })
+	const pattern = new RegExp(
+		String(z.toJSONSchema(schema, { io: "input" }).properties?.["order"]?.["pattern" as never]),
+	)
+
+	it.each([
+		["asc", '"asc"'],
+		["desc", '"desc"'],
+		[".desc", '".desc"'],
+		[",", '""'],
+		["title.asc,", '""'],
+	])("refuses %j, naming the entry, as the published pattern does", (order, named) => {
+		const result = schema.safeParse({ order })
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({ message: `Malformed sort entry: ${named}`, path: ["order"] }),
+		])
+		expect(pattern.test(order)).toBe(false)
+	})
+
+	it("takes a well-formed order, as the pattern does", () => {
+		expect(schema.parse({ order: "title.asc,created_at.desc" }).parsedSort).toEqual([
+			{ direction: "asc", field: "title" },
+			{ direction: "desc", field: "created_at" },
+		])
+		expect(pattern.test("title.asc,created_at.desc")).toBe(true)
+	})
+
+	it("refuses maxSortKeys 0 at build, which no order could meet while the pattern admits one key", () => {
+		expect(() => createListQuerySchema({ limits: { maxSortKeys: 0 }, sort: ["title"] })).toThrow(
+			new TypeError("createListQuerySchema: limits.maxSortKeys must be a whole number from 1; got 0"),
 		)
 	})
 })

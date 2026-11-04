@@ -34,18 +34,24 @@ import type { SortDirection, SortField } from "./types.ts"
  *   "col1.desc,col2.asc.nullsfirst"
  *     → [{field:"col1",direction:"desc"}, {field:"col2",direction:"asc",nulls:"first"}]
  *
- * Malformed entries are dropped silently — downstream schema validator
- * rejects unknown fields, which catches most mistakes.
+ * An entry that is empty or names no field (`asc`, `.desc`, a trailing comma) refuses the whole
+ * order as null, as parseFilter refuses a filter, rather than drop it and widen the request to the
+ * default order (QL7 of r22b).
  */
-function parseOrder(input: string | null | undefined): SortField[] {
+function parseOrder(input: string | null | undefined): SortField[] | null {
+	const entries = orderEntries(input)
+	return entries.every((entry) => typeof entry !== "string") ? entries : null
+}
+
+/** Each entry of `order` read as a sort field, or kept as its trimmed text when it is empty or names no field */
+function orderEntries(input: string | null | undefined): Array<SortField | string> {
 	if (!input || input.trim() === "") return []
 
-	const fields: SortField[] = []
+	const fields: Array<SortField | string> = []
 	const parts = input.split(",")
 
 	for (const part of parts) {
 		const trimmed = part.trim()
-		if (!trimmed) continue
 
 		const tokens = trimmed.split(".")
 
@@ -69,7 +75,10 @@ function parseOrder(input: string | null | undefined): SortField[] {
 		}
 
 		const field = tokens.join(".")
-		if (!field) continue
+		if (!field) {
+			fields.push(trimmed)
+			continue
+		}
 
 		const entry: SortField = { direction, field }
 		if (nulls) entry.nulls = nulls
@@ -85,6 +94,7 @@ export {
 	OPERATORS_BY_TYPE,
 	parseFilter,
 	parseFilterNumber,
+	orderEntries,
 	parseOrder,
 	validateFilter,
 	type FilterField,

@@ -374,11 +374,14 @@ import type { SortField } from "./types.ts";
  *   "col1.desc,col2.asc.nullsfirst"
  *     → [{field:"col1",direction:"desc"}, {field:"col2",direction:"asc",nulls:"first"}]
  *
- * Malformed entries are dropped silently — downstream schema validator
- * rejects unknown fields, which catches most mistakes.
+ * An entry that is empty or names no field (`asc`, `.desc`, a trailing comma) refuses the whole
+ * order as null, as parseFilter refuses a filter, rather than drop it and widen the request to the
+ * default order (QL7 of r22b).
  */
-declare function parseOrder(input: string | null | undefined): SortField[];
-export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, };
+declare function parseOrder(input: string | null | undefined): SortField[] | null;
+/** Each entry of `order` read as a sort field, or kept as its trimmed text when it is empty or names no field */
+declare function orderEntries(input: string | null | undefined): Array<SortField | string>;
+export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, orderEntries, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, };
 
 // query/like.d.ts
 /**
