@@ -136,6 +136,7 @@ describe("toAnalysis: a schema a package exports", () => {
 			key: "prefs",
 			length: null,
 			notNull: false,
+			nullElements: false,
 			onUpdate: false,
 			primary: false,
 			sqlName: "prefs",

@@ -34,6 +34,8 @@ type ManifestColumn = {
 	sqlType: string
 	/** An array column's dimensions, 0 for a column of one value: its `sqlType` is its element's (A2-5 of r22) */
 	dimensions: number
+	/** Whether a written array's element may be null, as the column's drizzle type declares; false for a column of one value (A2-9 of r22) */
+	nullElements: boolean
 	notNull: boolean
 	primaryKey: boolean
 	/** Declared values for an enum column, or null when not an enum or the list is a const reference */
@@ -138,6 +140,7 @@ function toColumn(field: FieldMeta, dialect: GeneratorContext["dialect"]): Manif
 		private: constraints.private,
 		sqlType: field.sqlType,
 		dimensions: field.dimensions ?? 0,
+		nullElements: field.nullElements === true,
 		states: field.states
 			? {
 					initial: field.states.initial,

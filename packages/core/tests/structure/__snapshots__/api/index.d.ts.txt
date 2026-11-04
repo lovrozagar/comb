@@ -636,6 +636,8 @@ type FieldMeta = {
     schemaImports: ImportRef[];
     /** a Postgres array's declared dimensions; 0 or absent for a column of one value (F49) */
     dimensions?: number | undefined;
+    /** whether a Postgres array's element takes null, as its drizzle type declares; false or absent otherwise (A2-9 of r22) */
+    nullElements?: boolean | undefined;
     /** the column's own length, drizzle's `length` (a varchar(n), a SQLite text({ length })); a declared max is the constraints' (F65) */
     length: number | null;
     /** Field name as defined in the table schema object */

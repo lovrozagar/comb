@@ -40,6 +40,11 @@ function write(files: Record<string, string>): string {
 	return path.join(dir, "db.core.tables.ts")
 }
 
+/* these tables hold no array column, so the reader asks no element type */
+const noArrays = (): boolean => {
+	throw new Error("asked for an array column's element")
+}
+
 describe("exportsHolding: where a value is exported, in a stable order", () => {
 	it("puts a module other than the tables file first, then the shorter path, then the name (the A tie)", () => {
 		const value = {}
@@ -258,7 +263,7 @@ describe("snapshotOf: an error the reader did not mean", () => {
 				throw new TypeError("chunk.inlineParams is not a function")
 			},
 		})
-		expect(() => snapshotOf([{ external: false, module: "/p/db.core.tables.ts", namespace: { t } }])).toThrow(
+		expect(() => snapshotOf([{ external: false, module: "/p/db.core.tables.ts", namespace: { t } }], noArrays)).toThrow(
 			"comb could not read table t: chunk.inlineParams is not a function",
 		)
 	})

@@ -6,6 +6,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { elementNullsOf } from "./element-types.ts"
 import { moduleGraph } from "./module-graph.ts"
 import { type Loaded, type Namespace, snapshotOf } from "./read-tables.ts"
 import type { Snapshot } from "./snapshot-types.ts"
@@ -47,7 +48,7 @@ async function readTables(
 			unloaded.push(module)
 		}
 	}
-	return snapshotOf(loaded, unloaded)
+	return snapshotOf(loaded, elementNullsOf(first), unloaded)
 }
 
 /* comb's own source, whose frames are the loader's and never the project's */

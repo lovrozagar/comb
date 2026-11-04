@@ -18,16 +18,24 @@ type Dialect = "postgres" | "sqlite"
 /** Where a fixture's tables "live": its exports' module, which no file holds */
 export const FIXTURE_TABLES = "/fixture/db.core.tables.ts"
 
-/** The analysis of every table `namespace` exports, as a tables module exporting them would get */
+/**
+ * The analysis of every table `namespace` exports, as a tables module exporting them would get. A
+ * source evaluated here is JavaScript, which writes no `$type<E>()`, so each array element is what
+ * drizzle types it without one, NOT NULL, unless `nullElements` stands in for a declared `| null`
+ */
 export function analyzeNamespace(
 	namespace: Record<string, unknown>,
 	extra: Record<string, unknown> = {},
+	nullElements = false,
 ): AnalysisResult {
 	const loaded = [
 		{ external: false, module: FIXTURE_TABLES, namespace },
 		{ external: false, module: "/fixture/schemas.ts", namespace: extra },
 	]
-	return toAnalysis(snapshotOf(loaded), FIXTURE_TABLES)
+	return toAnalysis(
+		snapshotOf(loaded, () => nullElements),
+		FIXTURE_TABLES,
+	)
 }
 
 /** The value `source` spells, with the column builders of `dialect`, `sql`, `z` and `scope` in scope */
@@ -37,7 +45,12 @@ export function evaluate(source: string, dialect: Dialect = "sqlite", scope: Rec
 	return new Function(...Object.keys(names), `return (${source})`)(...Object.values(names))
 }
 
-type FieldOptions = { dialect?: Dialect | undefined; scope?: Record<string, unknown> | undefined }
+type FieldOptions = {
+	dialect?: Dialect | undefined
+	/** an array's element as a declared `$type<E | null>()` types it, which a JavaScript source cannot write */
+	nullElements?: boolean | undefined
+	scope?: Record<string, unknown> | undefined
+}
 
 /** The names fixture sources reference without defining: tables a key points at, and schemas a column is given */
 function defaultScope(dialect: Dialect): Record<string, unknown> {
@@ -60,7 +73,7 @@ function defaultScope(dialect: Dialect): Record<string, unknown> {
 export function tableOf(
 	name: string,
 	columns: Record<string, string>,
-	{ dialect = "sqlite", scope: own = {} }: FieldOptions = {},
+	{ dialect = "sqlite", nullElements = false, scope: own = {} }: FieldOptions = {},
 ): TableMeta {
 	const scope = { ...defaultScope(dialect), ...own }
 	const built = Object.fromEntries(
@@ -72,7 +85,7 @@ export function tableOf(
 	) => unknown
 	const tables = Object.fromEntries(Object.entries(scope).filter(([, value]) => typeof value === "object"))
 	const exported = { ...tables, [name]: define(name, built as never) }
-	return analyzeNamespace(exported, scope).tables.find((table) => table.varName === name) as TableMeta
+	return analyzeNamespace(exported, scope, nullElements).tables.find((table) => table.varName === name) as TableMeta
 }
 
 /** The FieldMeta of one column written as `source`, under the property `key` */

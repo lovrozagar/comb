@@ -3,7 +3,7 @@
  * stand-ins, not the table's own columns, where sqlite-core passes the columns themselves. Every
  * constraint the third argument names by column is read by the column's SQL name on both.
  */
-import { foreignKey, index, integer, pgTable, primaryKey, unique, uniqueIndex } from "drizzle-orm/pg-core"
+import { foreignKey, index, integer, pgTable, primaryKey, text, unique, uniqueIndex } from "drizzle-orm/pg-core"
 import { index as sqliteIndex, integer as sqliteInteger, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { FIXTURE_TABLES } from "../__fixtures__/runtime.ts"
@@ -18,9 +18,14 @@ const child = pgTable("child", { a: integer("a").notNull(), b: integer("bee").no
 	foreignKey({ columns: [t.p], foreignColumns: [parent.id] }),
 ])
 
+/* these tables hold no array column, so the reader asks no element type */
+const noArrays = (): boolean => {
+	throw new Error("asked for an array column's element")
+}
+
 /** The snapshot of `namespace`'s tables, as the runtime reader reads a tables module exporting them */
 const tablesOf = (namespace: Record<string, unknown>) =>
-	snapshotOf([{ external: false, module: FIXTURE_TABLES, namespace }]).tables
+	snapshotOf([{ external: false, module: FIXTURE_TABLES, namespace }], noArrays).tables
 
 /** The child table as the reader reads it */
 const read = () => tablesOf({ child, parent }).find((table) => table.exportName === "child")
@@ -71,5 +76,27 @@ describe("a SQLite table's third argument naming another table's column", () => 
 		expect(() => tablesOf({ owner, stray })).toThrow(
 			"stray: its third argument names the column id, which is no column of stray",
 		)
+	})
+})
+
+describe("an array column's element, as its drizzle type declares it (A2-9 of r22)", () => {
+	it("asks the type of each array column alone, by its table's export, key and dimensions, and records it", () => {
+		const row = pgTable("row", {
+			grid: integer("grid").array("[][]"),
+			id: text("id").primaryKey(),
+			tags: text("tags").array(),
+		})
+		const asked: string[] = []
+		const elementNulls = (table: string, key: string, dimensions: number): boolean => {
+			asked.push(`${table}.${key}:${dimensions}`)
+			return key === "grid"
+		}
+		const [table] = snapshotOf([{ external: false, module: FIXTURE_TABLES, namespace: { row } }], elementNulls).tables
+		expect(asked.toSorted()).toEqual(["row.grid:2", "row.tags:1"])
+		expect(Object.fromEntries((table?.columns ?? []).map((column) => [column.key, column.nullElements]))).toEqual({
+			grid: true,
+			id: false,
+			tags: false,
+		})
 	})
 })

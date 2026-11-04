@@ -60,8 +60,8 @@ export const kinds = pgTable("kinds", {
 	level: c.integer("level", { min: 1, max: 9 }),
 	on: c.boolean("on"),
 	at: c.timestamp("at"),
-	createdAt: c.createdAt(),
-	updatedAt: c.updatedAt(),
+	createdAt: c.createdAt("createdAt"),
+	updatedAt: c.updatedAt("updatedAt"),
 })
 export const child = pgTable("child", { id: c.id("chd"), kindsId: c.ref("kinds_id").references(() => kinds.id) })
 `
@@ -78,8 +78,8 @@ export const note = sqliteTable("note", {
 	state: c.enum("state", ["done", "queued"], { initial: "queued", terminal: ["done"] }).notNull(),
 	score: c.real("score"),
 	on: c.boolean("on"),
-	createdAt: c.createdAt(),
-	deletedAt: c.deletedAt(),
+	createdAt: c.createdAt("createdAt"),
+	deletedAt: c.deletedAt("deletedAt"),
 })
 `
 

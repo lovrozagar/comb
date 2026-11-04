@@ -77,8 +77,11 @@ describe("a written c.json's rules", () => {
 })
 
 /** The generated Postgres schema of a c.json array column of Profile written as `raw`, evaluated */
-function profiles(raw: string, schemaType: SchemaType): z.ZodType {
-	const field = { ...fieldOf("p", raw, { dialect: "postgres", scope: { Profile } }), jsonSchemaName: "Profile" }
+function profiles(raw: string, schemaType: SchemaType, nullElements = false): z.ZodType {
+	const field = {
+		...fieldOf("p", raw, { dialect: "postgres", nullElements, scope: { Profile } }),
+		jsonSchemaName: "Profile",
+	}
 	const code = generateFieldSchema(field, schemaType, {
 		dialect: "postgres",
 		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
@@ -87,22 +90,26 @@ function profiles(raw: string, schemaType: SchemaType): z.ZodType {
 	return new Function("z", "Profile", ts.transpile(`return ${code}`))(z, Profile) as z.ZodType
 }
 
-/* C1 of r19: an array's element takes null as Postgres stores it, and the array takes null by its own column alone */
+/*
+ * C1 of r19: the array takes null by its own column alone; its element takes null only where its
+ * drizzle type declares it (A2-9 of r22)
+ */
 describe("a written nullable c.json array (C1)", () => {
 	it.each([
 		["one dimension", 'c.json("p", Profile).array()', [{ bio: "a" }, null]],
 		["two dimensions", 'c.json("p", Profile).array("[][]")', [[{ bio: "a" }, null]]],
 	])("takes null for the column on create and update, in %s, and publishes it beside the array", (_, raw, value) => {
 		for (const type of ["create", "update"] as const) {
-			const written = profiles(raw, type)
+			const written = profiles(raw, type, true)
 			expect([written.safeParse(null).success, written.safeParse(value).success], type).toEqual([true, true])
+			expect(profiles(raw, type).safeParse(value).success, type).toBe(false)
 			const { p } = published(written)
 			expect(p["anyOf"], type).toEqual([expect.objectContaining({ type: "array" }), { type: "null" }])
 		}
 	})
 
-	it("refuses null for a NOT NULL array, its elements still taking null", () => {
-		const written = profiles('c.json("p", Profile).array().notNull()', "create")
+	it("refuses null for a NOT NULL array, its declared elements still taking null", () => {
+		const written = profiles('c.json("p", Profile).array().notNull()', "create", true)
 		expect([written.safeParse(null).success, written.safeParse([null]).success]).toEqual([false, true])
 	})
 })

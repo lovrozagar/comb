@@ -1,7 +1,8 @@
 /**
  * F49 of the 0.13.0 round: a Postgres array column carries its element's data type and its
- * dimensions, so codegen types it as its element in an array per dimension, each element nullable
- * as Postgres stores it, and every DTO agrees with what Postgres takes and gives back.
+ * dimensions, so codegen types it as its element in an array per dimension, a written element
+ * nullable where its drizzle type declares it (A2-9 of r22), and every DTO agrees with what Postgres
+ * takes and gives back.
  */
 import { drizzle } from "drizzle-orm/node-postgres"
 import { integer, pgTable, text } from "drizzle-orm/pg-core"
@@ -12,11 +13,11 @@ import { usePg } from "../support/pg.ts"
 
 afterAll(() => cleanGeneratedDtos())
 
-const COLUMNS = `{ id: c.id("bag"), tags: text("tags").array().notNull(), scores: integer("scores").array(), grid: integer("grid").array("[][]") }`
+const COLUMNS = `{ id: c.id("bag"), tags: text("tags").array().notNull(), scores: integer("scores").array().$type<number | null>(), grid: integer("grid").array("[][]").$type<number | null>() }`
 const bag = pgTable("bag", {
-	grid: integer("grid").array("[][]"),
+	grid: integer("grid").array("[][]").$type<number | null>(),
 	id: text("id").primaryKey(),
-	scores: integer("scores").array(),
+	scores: integer("scores").array().$type<number | null>(),
 	tags: text("tags").array().notNull(),
 })
 const BODY = {
@@ -53,6 +54,8 @@ describe("a Postgres array column's write DTO (F49)", () => {
 			{ grid: [[1], [2, 3]] },
 			{ scores: [1.5] },
 			{ tags: ["a\u0000"] },
+			/* an element its type declares no null for */
+			{ tags: ["a", null] },
 		])
 			expect(create.safeParse({ ...BODY, ...bad }).success, JSON.stringify(bad)).toBe(false)
 	})
@@ -77,7 +80,7 @@ describe("a Postgres array column, stored and read back (F49)", () => {
 	const rowOf = async (id: string) => (await sessions.pg().query("SELECT * FROM bag WHERE id = $1", [id])).rows[0]
 
 	it("stores what it takes, and reads back what Postgres stores, NULL and empty elements included", async () => {
-		const values = create.parse(BODY) as { grid: number[][]; scores: number[]; tags: string[] }
+		const values = create.parse(BODY) as { grid: (number | null)[][]; scores: (number | null)[]; tags: string[] }
 		const [row] = await drizzle({ client: sessions.pg() })
 			.insert(bag)
 			.values({ id: "bag_1", ...values })

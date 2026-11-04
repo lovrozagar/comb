@@ -11,6 +11,7 @@ import { byCodeUnit } from "../utils/order.ts"
 import { combColumnMeta } from "../../meta/column.ts"
 import { dimensionsOf, filledByDefault, type ReadColumn, unnamedUnique } from "./read-column.ts"
 import { constraintsOf, refuseJsonDocument, statesOf, STRING_LIST } from "./read-comb.ts"
+import type { ElementNulls } from "./element-types.ts"
 import type {
 	ModuleExport,
 	Snapshot,
@@ -42,6 +43,8 @@ function exportsHolding(value: unknown, loaded: readonly Loaded[], tablesPath: s
 
 /** What the whole read shares: the loaded modules, the tables file, and each table it exports by its name */
 type Context = {
+	/** what an array column's element takes, as its drizzle type declares it */
+	elementNulls: ElementNulls
 	loaded: readonly Loaded[]
 	tables: ReadonlyMap<Table, string>
 	tablesPath: string
@@ -77,13 +80,15 @@ function combOf(column: ReadColumn, at: string, context: Context): SnapshotComb 
 	}
 }
 
-function columnOf([key, column]: [string, ReadColumn], at: string, context: Context): SnapshotColumn {
+function columnOf([key, column]: [string, ReadColumn], table: string, context: Context): SnapshotColumn {
+	const at = `${table}.${key}`
+	const dimensions = dimensionsOf(column, at)
 	return {
 		autoIncrement: column.autoIncrement === true,
 		comb: combOf(column, at, context),
 		columnType: column.columnType,
 		dataType: column.dataType,
-		dimensions: dimensionsOf(column, at),
+		dimensions,
 		enumValues: column.enumValues === undefined ? null : [...column.enumValues],
 		foreignKey: null,
 		generated: column.generated !== undefined,
@@ -92,6 +97,7 @@ function columnOf([key, column]: [string, ReadColumn], at: string, context: Cont
 		key,
 		length: typeof column.length === "number" ? column.length : null,
 		notNull: column.notNull,
+		nullElements: dimensions > 0 && context.elementNulls(table, key, dimensions),
 		onUpdate: column.onUpdateFn !== undefined,
 		primary: column.primary,
 		sqlName: column.name,
@@ -181,7 +187,7 @@ function tableOf([table, exportName]: [Table, string], context: Context): Snapsh
 			`${exportName}: its third argument names the column ${column.name}, which is no column of ${config.name}`,
 		)
 	}
-	const columns = entries.map((entry) => columnOf(entry, `${exportName}.${entry[0]}`, context))
+	const columns = entries.map((entry) => columnOf(entry, exportName, context))
 	for (const fk of config.foreignKeys) {
 		const reference = referenceOf(fk, exportName)
 		const target = reference.foreignTable as Table
@@ -220,10 +226,10 @@ function tableOf([table, exportName]: [Table, string], context: Context): Snapsh
 }
 
 /**
- * The snapshot of every table the first loaded module exports. A table exported under two names
- * is read once, under the first by name.
+ * The snapshot of every table the first loaded module exports, each array column's element read by
+ * `elementNulls`. A table exported under two names is read once, under the first by name.
  */
-function snapshotOf(loaded: readonly Loaded[], unloaded: readonly string[] = []): Snapshot {
+function snapshotOf(loaded: readonly Loaded[], elementNulls: ElementNulls, unloaded: readonly string[] = []): Snapshot {
 	const first = loaded[0] as Loaded
 	const tables = new Map<Table, string>()
 	for (const name of Object.keys(first.namespace).sort()) {
@@ -236,7 +242,7 @@ function snapshotOf(loaded: readonly Loaded[], unloaded: readonly string[] = [])
 				`${name}: a column named __proto__ replaced this table's prototype, so drizzle cannot use it; rename the column`,
 			)
 	}
-	const context: Context = { loaded, tables, tablesPath: first.module, unloaded }
+	const context: Context = { elementNulls, loaded, tables, tablesPath: first.module, unloaded }
 	return { tables: [...tables].map((entry) => readTable(entry, context)) }
 }
 

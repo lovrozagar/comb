@@ -51,6 +51,8 @@ type SnapshotColumn = {
 	key: string
 	/** a Postgres array's declared dimensions, 0 for a column of one value */
 	dimensions: number
+	/** whether a Postgres array's element takes null, as its drizzle type declares; false for a column of one value (A2-9 of r22) */
+	nullElements: boolean
 	length: number | null
 	notNull: boolean
 	onUpdate: boolean

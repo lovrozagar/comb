@@ -197,10 +197,13 @@ export function fieldSchemaOf(
 		const base = baseOf(build)
 		return { code: finish(build, base), uses: base.uses }
 	}
-	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
+	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49), so it
+	   takes no rule of a NOT NULL column's: no write base takes null itself, and arrayBase adds it where
+	   the column's drizzle type declares it, on a read always (A2-9 of r22) */
 	const one: Build = { ...build, element: true, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
-	return { code: finish(build, arrayBase(dimensions, schemaType, element)), uses: element.uses }
+	const shape = { dimensions, nullable: !isMutative(schemaType) || field.nullElements === true, schemaType }
+	return { code: finish(build, arrayBase(element, shape)), uses: element.uses }
 }
 
 /** The Zod expression for `field` in a `schemaType` DTO, as fieldSchemaOf gives it, or null */

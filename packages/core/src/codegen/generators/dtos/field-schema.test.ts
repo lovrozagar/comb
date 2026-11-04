@@ -432,18 +432,25 @@ describe("generateFieldSchema: the rule no engine stores", () => {
 })
 
 /** The schema of a Postgres column `a` written as `raw` */
-const array = (raw: string, type: SchemaType) =>
-	generateFieldSchema(parseField("a", raw, { dialect: "postgres" }), type, { dialect: "postgres", imports: imports() })
+const array = (raw: string, type: SchemaType, nullElements = false) =>
+	generateFieldSchema(parseField("a", raw, { dialect: "postgres", nullElements }), type, {
+		dialect: "postgres",
+		imports: imports(),
+	})
 
 /*
  * F49 of the 0.13.0 round: a Postgres array is its element in an array per declared dimension on a
- * write, rectangular past one, and in any depth Postgres holds on a read; each element nullable
+ * write, rectangular past one, and in any depth Postgres holds on a read; a written element takes
+ * null only where its drizzle type declares it (A2-9 of r22)
  */
 describe("generateFieldSchema: a Postgres array column (F49)", () => {
-	it("writes its element, nullable and with no min(1), in an array per dimension, and no example", () => {
-		expect(array('text("a").array().notNull()', "create")).toBe("z.array(z.string().nullable())")
-		expect(array('integer("a").array("[][]")', "update")).toMatch(
-			/^z\.array\(z\.array\(z\.number\(\)\.int\(\)\.min\(-2147483648\)\.max\(2147483647\)\.nullable\(\)\)\)\.refine\(/,
+	it.each([
+		[false, ""],
+		[true, ".nullable()"],
+	])("writes its element, no min(1), in an array per dimension, no example; declared null %s", (declared, end) => {
+		expect(array('text("a").array().notNull()', "create", declared)).toBe(`z.array(z.string()${end})`)
+		expect(array('integer("a").array("[][]")', "update", declared)).toContain(
+			`z.array(z.array(z.number().int().min(-2147483648).max(2147483647)${end})).refine(`,
 		)
 	})
 

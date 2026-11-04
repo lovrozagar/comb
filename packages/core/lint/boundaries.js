@@ -47,6 +47,7 @@ const OPTIONAL_PEERS = new Set(
 /* modules that import an optional peer by name: the codegen child's ts-morph readers, which run only
  * after codegen/runtime/load.ts resolved ts-morph through resolvePeer, and test fixtures */
 const PEER_MODULES = new Set([
+	"codegen/runtime/element-types.ts",
 	"codegen/runtime/module-graph.ts",
 	"codegen/runtime/node-hooks.mjs",
 	"codegen/runtime/ts-options.mjs",
