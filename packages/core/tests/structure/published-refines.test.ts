@@ -166,3 +166,27 @@ export const row = pgTable("row", {
 		expect(Object.keys(published["$defs"] as Node)).toContain("CombJsonValue")
 	})
 })
+
+/* A3-4 of r23: an app's recursive schema under its own id, in a written c.json, publishes one document
+   per DTO, whatever the process converted before it: comb's refine sits outside the lazy */
+describe("a written c.json of a getter-recursive schema under its own id", () => {
+	const TABLES = `import * as z from "zod"
+export type Tree = { name: string; kids: Tree[] }
+export const Tree: z.ZodType<Tree> = z.object({ name: z.string(), get kids() { return z.array(Tree) } }).meta({ id: "AppTree" })
+export const row = pgTable("row", { id: c.id("row"), tree: c.json("tree", Tree).notNull() })`
+
+	/** The update DTO's $defs, its entity's create DTO converted first or not, in modules of their own */
+	async function updateDefs(createFirst: boolean): Promise<string[]> {
+		const dtos = await generatedDtos(`published-tree-${createFirst}`, TABLES, { dialect: "postgres" })
+		const entity = dtos["row"] as Record<string, z.ZodObject>
+		if (createFirst) z.toJSONSchema(entity["rowDtoCreateSchema"] as z.ZodObject, { io: "input" })
+		const published = z.toJSONSchema(entity["rowDtoUpdateSchema"] as z.ZodObject, { io: "input" }) as Node
+		return Object.keys((published["$defs"] ?? {}) as Node)
+	}
+
+	it("publishes the update DTO's definitions alike, alone or after the create DTO", async () => {
+		const alone = await updateDefs(false)
+		expect(alone).toEqual(["AppTree"])
+		expect(await updateDefs(true)).toEqual(alone)
+	})
+})

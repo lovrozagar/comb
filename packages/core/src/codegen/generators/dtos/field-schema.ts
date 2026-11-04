@@ -70,11 +70,12 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
 	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }
-	const refined = `${schema}${jsonChecks(limit)}`
 	/* keep the lazy: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
-	   a nullable column wraps it as every nullable base is, so `.unwrap()` keeps the keys (C2 of r21) */
+	   the refine on the lazy, not inside it, where an app's getter-recursive schema converted after
+	   another DTO published a positional definition (A3-4 of r23); a nullable column wraps it as every
+	   nullable base is, so `.unwrap()` keeps the keys (C2 of r21) */
 	const uses: SharedName[] = declared ? [] : ["jsonValueSchema"]
-	return { code: `z.lazy(() => ${refined})`, keys, takesNull: false, uses }
+	return { code: `z.lazy(() => ${schema})${jsonChecks(limit)}`, keys, takesNull: false, uses }
 }
 
 /**
