@@ -2,13 +2,11 @@
  * Comb CLI: database codegen and the migration toolkit, run in process by `runCli(argv, io)`.
  * The binary (src/bin.ts) hands it the process's argv and IO.
  */
-import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { optionsHelp, refuseFurther } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
 import { CliError, type CliContext, type CliDeps, type CliIo, Reported, ShowHelp } from "./output.ts"
+import { version } from "./version.ts"
 
 const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen [db...]", "Run codegen for the databases in comb.config.ts (all, or those named)"],
@@ -32,17 +30,6 @@ export const help = (): string =>
 		"OPTIONS:",
 		...optionsHelp(),
 	].join("\n")
-
-/**
- * comb's version, read from its package.json by a path: no global URL, which a project with Workers'
- * types and Node's but no DOM gives Workers' type of (K1 of r18)
- */
-const version = (): string =>
-	(
-		JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf8")) as {
-			version: string
-		}
-	).version
 
 async function dispatch(argv: readonly string[], io: CliContext): Promise<void> {
 	const [command, ...rest] = argv
