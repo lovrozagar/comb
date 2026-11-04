@@ -7,7 +7,7 @@
  * Postgres's suites' case.
  */
 import { afterEach, describe, expect, it } from "vitest"
-import { type JoinedKey, SEED, SERVED, servedBy } from "../support/joined-keys.ts"
+import { type JoinedKey, SEED, SERVED, SERVED_NULLS, servedBy } from "../support/joined-keys.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
 let harness: LibsqlHarness | undefined
@@ -31,6 +31,16 @@ describe("a list key is read back exactly or treated as anchorless (QL1, QL2; si
 		for (const direction of ["asc", "desc"] as const) {
 			expect(await servedBy(db, { direction, key, shape: "anchored own" })).toEqual(SERVED[direction])
 			expect(await servedBy(db, { direction, key, shape: "anchored joined" })).toEqual(SERVED[direction])
+		}
+	})
+
+	/* AB5 of area B: QL1's guard keeps a joined key's NULL from the anchor row's max(), a SQL error there */
+	it("pages a joined REAL holding NULL on a list anchored on post, nulls first and last, every row once", async () => {
+		const db = await seeded()
+		for (const [order, served] of Object.entries(SERVED_NULLS)) {
+			const [direction, nulls] = order.split(" ") as ["asc" | "desc", "first" | "last"]
+			expect(await servedBy(db, { direction, key: "n", nulls, shape: "anchored joined" }), order).toEqual(served)
+			expect(await servedBy(db, { direction, key: "n", nulls, shape: "anchored own" }), order).toEqual(served)
 		}
 	})
 
