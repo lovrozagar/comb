@@ -1,31 +1,21 @@
 /**
  * Each pending D1 file proven on D1's own engine (SD1 and SD2 of r22): after the bun:sqlite proof, the
- * files run in order on a scratch local D1 that the checked wrangler's own Miniflare opens
- * (`getPlatformProxy({ persist: false })`), holding the live schema and the proof's seed rows
- * (proof-copy.ts), each as wrangler sends it: the file and the history row it appends, through
- * wrangler's `splitSqlQuery`, in one batch. D1 resolves a function in a trigger body, a view or a
- * generated column only when a statement uses it, so EXPLAIN then compiles each view, and each
- * table's INSERT, UPDATE and DELETE, the file made or changed. What D1 refuses is refused, naming D1's
- * error, with no override: D1's authorizer, functions, modules and limits are the engine's, with no list
- * of comb's to keep. A file whose text wrangler would rewrite is refused before anything runs.
+ * files run in order on a scratch local D1 that the checked wrangler's own Miniflare opens, holding the
+ * live schema and the proof's seed rows (proof-copy.ts). Miniflare runs on node, as wrangler's apply runs
+ * it, whatever runtime comb runs on: the proof is a node child (d1-engine-child.mjs) started through
+ * process.ts, handed its input as JSON in the proof's scratch directory, and answering D1's refusal in
+ * D1's words. What D1 refuses is refused, with no override: D1's authorizer, functions, modules and
+ * limits are the engine's, with no list of comb's to keep. A file whose text wrangler would rewrite is
+ * refused before anything runs.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { importBin } from "./optional-peer.ts"
-import type { ProjectBin } from "./process.ts"
-import { copyScript, creatable, type LiveObject } from "./proof-copy.ts"
+import type { ProofInput, ProofResult } from "./d1-engine-child.mjs"
+import { binEntry } from "./optional-peer.ts"
+import { type ProjectBin, type Run, run } from "./process.ts"
+import { copyScript, type LiveObject } from "./proof-copy.ts"
 import { quote } from "./proof-seed.ts"
-
-type D1Statement = { all(): Promise<{ results?: Array<Record<string, unknown>> | undefined }> }
-type D1Database = { batch(statements: D1Statement[]): Promise<unknown>; prepare(sql: string): D1Statement }
-type PlatformProxy = { dispose(): Promise<void>; env: Record<string, unknown> }
-
-/** The surface of wrangler comb calls for the proof */
-type Wrangler = {
-	getPlatformProxy(options: { configPath: string; persist: false }): Promise<PlatformProxy>
-	unstable_splitSqlQuery(sql: string): string[]
-}
 
 /** A pending file: its name, and its text as the migrations directory holds it */
 type File = { name: string; sql: string }
@@ -42,6 +32,14 @@ const TRIMMED = "BEGIN TRANSACTION"
 
 /* a literal, a quoted name or a comment, as SQLite reads each */
 const NOT_CODE = /'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g
+
+/* what node runs, as a module file in the proof's scratch directory: it imports the child module and writes its
+   answer to a file, as Miniflare may print to stdout. Not \`node -e\`: wrangler 4's getPlatformProxy never resolves
+   in an evaluated module */
+const SHIM = `const [child, input, output] = process.argv.slice(2)
+const { main } = await import(child)
+const { writeFileSync } = await import("node:fs")
+writeFileSync(output, JSON.stringify(await main(input)))`
 
 /** The literal, quoted name or comment of `sql` that holds `at`, as the file writes it */
 function enclosing(sql: string, at: number): string {
@@ -64,111 +62,59 @@ function refuseRewritten({ name, sql }: File): void {
 	)
 }
 
-/** D1's own words for a failure: the cause wrangler's client wraps, when there is one */
-function d1Error(error: unknown): string {
-	const { cause, message } = error as Error
-	return cause instanceof Error ? cause.message : message
-}
-
-/** `statements` in one batch, as wrangler sends a file's */
-async function run(db: D1Database, statements: readonly string[]): Promise<void> {
-	await db.batch(statements.map((sql) => db.prepare(sql)))
-}
-
 /**
- * The scratch D1's schema, each object by type and name: a virtual table's shadow tables left out,
- * which its module alone writes (D1: "may not be modified")
+ * What the proof's child runs: the scratch worker's config, written to `dir`; the copy of the live schema
+ * `live` and the history table `table` as the seed batch; each of `files` with the history row wrangler
+ * appends to it; and the entry of the checked wrangler `bin`
  */
-async function master(db: D1Database): Promise<Map<string, LiveObject>> {
-	const { results = [] } = await db
-		.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL")
-		.all()
-	const objects = results.map((row) => ({
-		name: String(row["name"]),
-		sql: String(row["sql"]),
-		table: String(row["tbl_name"]),
-		type: String(row["type"]),
-	}))
-	return new Map(creatable(objects).map((object) => [`${object.type} ${object.name}`, object]))
-}
-
-/** The EXPLAINs that compile what a file made or changed: each view's read, and each table's writes, triggers and generated columns with them */
-async function probes(db: D1Database, before: ReadonlyMap<string, LiveObject>): Promise<string[]> {
-	const changed = [...(await master(db))].filter(([key, object]) => before.get(key)?.sql !== object.sql)
-	const views = changed.filter(([, object]) => object.type === "view").map(([, object]) => object.table)
-	const tables = new Set(
-		changed
-			.filter(([, object]) => object.type === "table" || object.type === "trigger")
-			.map(([, object]) => object.table),
-	)
-	const writes: string[] = []
-	for (const table of tables) {
-		const { results = [] } = await db.prepare(`PRAGMA table_xinfo(${quote(table)})`).all()
-		const columns = results.filter((row) => row["hidden"] === 0).map((row) => quote(String(row["name"])))
-		writes.push(
-			`EXPLAIN INSERT INTO ${quote(table)} DEFAULT VALUES`,
-			`EXPLAIN UPDATE ${quote(table)} SET ${columns.map((column) => `${column} = ${column}`).join(", ")}`,
-			`EXPLAIN DELETE FROM ${quote(table)}`,
-		)
-	}
-	return [...views.map((view) => `EXPLAIN SELECT * FROM ${quote(view)}`), ...writes]
-}
-
-/** The scratch D1, the checked wrangler, and the binding's history table */
-type Scratch = { db: D1Database; table: string; wrangler: Wrangler }
-
-/** Runs `file` on the scratch D1 as wrangler sends it, then its probes; throws what D1 refuses, naming D1's error */
-async function proveFile({ db, table, wrangler }: Scratch, file: File): Promise<void> {
-	const query = `${file.sql}\nINSERT INTO ${quote(table)} (name)\nvalues ('${file.name.replaceAll("'", "''")}');`
-	const before = await master(db)
-	try {
-		await run(db, wrangler.unstable_splitSqlQuery(query))
-	} catch (error) {
-		throw new Error(
-			`${file.name}: D1 refuses this file on its own engine, as wrangler's apply would: ${d1Error(error)}; leave out what D1 does not run`,
-			{ cause: error },
-		)
-	}
-	for (const probe of await probes(db, before)) {
-		try {
-			await run(db, [probe])
-		} catch (error) {
-			throw new Error(
-				`${file.name}: D1 applies this file, then refuses ${probe.replace(/^EXPLAIN /, "")}: ${d1Error(error)}, so it would fail on the live database once applied; leave out what D1 does not run`,
-				{ cause: error },
-			)
-		}
+async function proofInput(
+	live: readonly LiveObject[],
+	files: readonly File[],
+	{ bin, dir, table }: { bin: ProjectBin; dir: string; table: string },
+): Promise<ProofInput> {
+	const configPath = join(dir, "wrangler.json")
+	writeFileSync(configPath, JSON.stringify(CONFIG))
+	const history = `CREATE TABLE IF NOT EXISTS ${quote(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`
+	return {
+		configPath,
+		files: files.map(({ name, sql }) => ({
+			name,
+			query: `${sql}\nINSERT INTO ${quote(table)} (name)\nvalues ('${name.replaceAll("'", "''")}');`,
+		})),
+		seed: [...(await copyScript(live, files, table)), history],
+		wrangler: binEntry(bin),
 	}
 }
 
 /**
  * Proves `files`, in order, on a scratch D1 of the checked wrangler `bin` holding the copy of the live
- * schema `live`; `table` is the binding's migration history, which each file's appended row goes to
+ * schema `live`, in a child on wrangler's runtime that `exec` starts; `table` is the binding's migration
+ * history, which each file's appended row goes to. Throws D1's refusal, or how the child failed
  */
 async function proveOnD1(
 	live: readonly LiveObject[],
 	files: readonly File[],
-	{ bin, table }: { bin: ProjectBin; table: string },
+	{ bin, exec = run, table }: { bin: ProjectBin; exec?: Run | undefined; table: string },
 ): Promise<void> {
 	for (const file of files) refuseRewritten(file)
-	const wrangler = await importBin<Wrangler>(bin)
-	const script = await copyScript(live, files, table)
 	const dir = mkdtempSync(join(tmpdir(), "comb-d1-proof-"))
 	try {
-		const configPath = join(dir, "wrangler.json")
-		writeFileSync(configPath, JSON.stringify(CONFIG))
-		const proxy = await wrangler.getPlatformProxy({ configPath, persist: false })
-		try {
-			const db = proxy.env["DB"] as D1Database
-			const history = `CREATE TABLE IF NOT EXISTS ${quote(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`
-			await run(db, [...script, history])
-			for (const file of files) await proveFile({ db, table, wrangler }, file)
-		} finally {
-			await proxy.dispose()
-		}
+		const input = join(dir, "input.json")
+		const output = join(dir, "result.json")
+		writeFileSync(input, JSON.stringify(await proofInput(live, files, { bin, dir, table })))
+		const child = new URL("./d1-engine-child.mjs", import.meta.url).href
+		const shim = join(dir, "proof.mjs")
+		writeFileSync(shim, SHIM)
+		const ran = exec(bin.runtime, [shim, child, input, output], { peer: bin.peer })
+		if (!existsSync(output))
+			throw new Error(
+				`check could not prove the pending files on D1's engine: the proof on ${bin.runtime} ended with code ${ran.code} and no answer: ${ran.stderr.trim() || "it printed nothing"}`,
+			)
+		const { refused } = JSON.parse(readFileSync(output, "utf8")) as ProofResult
+		if (refused !== undefined) throw new Error(refused)
 	} finally {
 		rmSync(dir, { force: true, recursive: true })
 	}
 }
 
-export { enclosing, proveOnD1, refuseRewritten }
+export { enclosing, proofInput, proveOnD1, refuseRewritten }

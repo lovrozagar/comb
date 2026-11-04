@@ -182,7 +182,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
-		engine: (proving, live) => proveOnD1(live, proving, { bin: target.wrangler, table }),
+		engine: (proving, live) => proveOnD1(live, proving, { bin: target.wrangler, exec: target.exec, table }),
 		kind: "d1",
 		/* the binding's own history table, and comb's records of hashes and intents */
 		historyTables: [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE],

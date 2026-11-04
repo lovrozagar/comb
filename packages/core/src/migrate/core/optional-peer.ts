@@ -233,13 +233,16 @@ function binOf(peers: Peers, peer: BinPeer): ProjectBin {
 	return bin
 }
 
-/** The module of the package `bin` is from, by its entry: the one package comb checked and spawns */
+/** The entry module of the package `bin` is from: the one package comb checked and spawns */
+const binEntry = (bin: ProjectBin): string => createRequire(bin.manifest).resolve(dirname(bin.manifest))
+
+/** The module of the package `bin` is from, by its entry */
 async function importBin<T>(bin: ProjectBin): Promise<T> {
-	const entry = createRequire(bin.manifest).resolve(dirname(bin.manifest))
-	return (await import(pathToFileURL(entry).href)) as T
+	return (await import(pathToFileURL(binEntry(bin)).href)) as T
 }
 
 export {
+	binEntry,
 	binOf,
 	importBin,
 	MissingPeerError,

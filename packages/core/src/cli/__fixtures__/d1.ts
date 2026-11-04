@@ -14,7 +14,7 @@ import { localD1Path } from "../../migrate/core/d1-binding.ts"
 import { projectBin } from "../../migrate/core/optional-peer.ts"
 import { WRANGLER } from "../../migrate/core/peer-needs.ts"
 import { wranglerOrder } from "../../migrate/core/plan-apply.ts"
-import type { ProjectBin, Run, RunResult } from "../../migrate/core/process.ts"
+import { type ProjectBin, type Run, type RunOptions, type RunResult, run as spawn } from "../../migrate/core/process.ts"
 
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
 
@@ -29,9 +29,18 @@ export function asCalled(cmd: string, args: readonly string[], peer: string | un
 	return peer === undefined ? [cmd, args] : [peer, args.slice(1)]
 }
 
-/** A runner for a test that reads each call as asCalled gives it, a bin peer's spawn as `wrangler d1 …` */
+/* the D1 proof's spawn (d1-engine.ts): a node child that drives wrangler's library rather than its bin, which no
+   fake models, so it runs as a command runs it */
+const isProof = (args: readonly string[], options: RunOptions | undefined): boolean =>
+	options?.peer === "wrangler" && args[0] !== wranglerBin().bin
+
+/**
+ * A runner for a test that reads each call as asCalled gives it, a bin peer's spawn as `wrangler d1 …`;
+ * the D1 proof's spawn runs for real
+ */
 export function asWrangler(inner: Run): Run {
 	return (cmd, args, options) => {
+		if (isProof(args, options)) return spawn(cmd, args, options)
 		if (options?.peer === undefined) return inner(cmd, args, options)
 		const { peer, ...rest } = options
 		return inner(...asCalled(cmd, args, peer), rest)
@@ -79,7 +88,7 @@ type D1Options = {
 
 export type FakeD1 = Run & { calls: string[][]; db: DatabaseSync }
 
-/** wrangler on an in-memory D1, with atlas faked alongside */
+/** wrangler on an in-memory D1, with atlas faked alongside; the D1 proof's spawn runs for real */
 export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 	const db = new DatabaseSync(":memory:")
 	const calls: string[][] = []
@@ -110,6 +119,7 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 		return ok()
 	}
 	const run: Run = (spawned, argv, spawnOptions) => {
+		if (isProof(argv, spawnOptions)) return spawn(spawned, argv, spawnOptions)
 		const [cmd, args] = asCalled(spawned, argv, spawnOptions?.peer)
 		calls.push([cmd, ...args])
 		if (cmd === "atlas") return atlas(cmd, args)
