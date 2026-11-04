@@ -1,6 +1,7 @@
-import { defineConfig } from "vitest/config"
+import { configDefaults, defineConfig } from "vitest/config"
 import { LOAD_TIMEOUT_MS } from "./src/codegen/runtime/load.ts"
-import { OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "./tests/support/off-utc.ts"
+import { OFF_UTC_INTEGRATION, OFF_UTC_POSTGRES, OFF_UTC_UNIT, OFF_UTC_ZONE } from "./tests/support/off-utc.ts"
+import { PG_INTEGRATION } from "./tests/support/pg-suites.ts"
 import { MAX_WORKERS } from "./tests/support/workers.ts"
 
 /* every test run is in UTC, as CI's runners are, so a local stamp vouches for what CI sees; the
@@ -32,7 +33,18 @@ export default defineConfig({
 				test: {
 					name: "integration",
 					include: ["tests/integration/**/*.test.ts"],
+					exclude: [...configDefaults.exclude, ...PG_INTEGRATION],
 					globalSetup: ["tests/integration/support/global-setup.ts"],
+					testTimeout: CODEGEN_BUDGET_MS,
+					hookTimeout: 60_000,
+				},
+			},
+			/* the suites on the shared Postgres test server, one run at a time on it (tests/support/pg-suites.ts) */
+			{
+				test: {
+					name: "postgres",
+					include: PG_INTEGRATION,
+					globalSetup: ["tests/integration/support/pg-run-lock.ts"],
 					testTimeout: CODEGEN_BUDGET_MS,
 					hookTimeout: 60_000,
 				},
@@ -54,6 +66,16 @@ export default defineConfig({
 					hookTimeout: 60_000,
 					include: OFF_UTC_INTEGRATION,
 					name: `integration (${OFF_UTC_ZONE})`,
+					testTimeout: 60_000,
+				},
+			},
+			{
+				test: {
+					env: { TZ: OFF_UTC_ZONE },
+					globalSetup: ["tests/integration/support/pg-run-lock.ts"],
+					hookTimeout: 60_000,
+					include: OFF_UTC_POSTGRES,
+					name: `postgres (${OFF_UTC_ZONE})`,
 					testTimeout: 60_000,
 				},
 			},

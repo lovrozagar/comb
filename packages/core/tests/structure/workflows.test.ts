@@ -9,7 +9,7 @@ import { availableParallelism, homedir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { ATLAS_FLOOR_PATH, ATLAS_FLOOR_SHA256, ATLAS_FLOOR_VERSION } from "../support/atlas-floor.ts"
-import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
+import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_POSTGRES, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
 import { POSIX_EXCLUDE, POSIX_INTEGRATION, POSIX_UNIT } from "../support/posix.ts"
 import { SQLD_ARCHIVE, SQLD_PATH, SQLD_VERSION } from "../support/sqld.ts"
 import { workers } from "../support/workers.ts"
@@ -318,7 +318,7 @@ describe("the pass of the Date-key suites off UTC", () => {
 		const scanned = [...testFiles("src"), ...testFiles("tests/integration")]
 			.filter((file) => DATE_KEYS.test(readFileSync(join(CORE, file), "utf8")))
 			.toSorted()
-		expect([...OFF_UTC_UNIT, ...OFF_UTC_INTEGRATION].toSorted()).toEqual(scanned)
+		expect([...OFF_UTC_UNIT, ...OFF_UTC_INTEGRATION, ...OFF_UTC_POSTGRES].toSorted()).toEqual(scanned)
 	})
 
 	/* a function whose name ends in timestamp, as Postgres's clock_timestamp(), is no comb timestamp column */
@@ -330,15 +330,16 @@ describe("the pass of the Date-key suites off UTC", () => {
 		expect(DATE_KEYS.test("$timestamp(")).toBe(false)
 	})
 
-	it("runs them in a zone whose offset is a fraction of an hour, in both projects of the config", () => {
+	it("runs them in a zone whose offset is a fraction of an hour, in each of the config's three projects", () => {
 		const offset = new Intl.DateTimeFormat("en-US", { timeZone: OFF_UTC_ZONE, timeZoneName: "longOffset" })
 			.formatToParts(new Date(2000, 0, 1))
 			.find((part) => part.type === "timeZoneName")?.value
 		expect(offset).toMatch(/^GMT[+-]\d{2}:(?!00)\d{2}$/)
 		const config = readFileSync(join(CORE, "vitest.config.ts"), "utf8")
-		expect(config.match(/env: \{ TZ: OFF_UTC_ZONE \}/g)).toHaveLength(2)
+		expect(config.match(/env: \{ TZ: OFF_UTC_ZONE \}/g)).toHaveLength(3)
 		expect(config).toContain("include: OFF_UTC_UNIT")
 		expect(config).toContain("include: OFF_UTC_INTEGRATION")
+		expect(config).toContain("include: OFF_UTC_POSTGRES")
 	})
 })
 

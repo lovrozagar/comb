@@ -47,24 +47,28 @@ export const OFF_UTC_UNIT = [
 	"src/sqlite/columns.test.ts",
 ]
 
-/** The integration suites that page or read Date keys */
+/** The integration suites that page or read Date keys, but for the Postgres ones below */
 export const OFF_UTC_INTEGRATION = [
 	"tests/integration/codegen/dtos-read-bounds.test.ts",
 	"tests/integration/codegen/dtos-timestamps.test.ts",
-	"tests/integration/codegen/pg-types.test.ts",
-	"tests/integration/codegen/pg-typmods.test.ts",
 	"tests/integration/codegen/shared-imports.test.ts",
 	"tests/integration/codegen/zod-builders.test.ts",
 	"tests/integration/d1/list-query-nonfinite.test.ts",
 	"tests/integration/libsql/date-filter.test.ts",
 	"tests/integration/libsql/iso-date-filter.test.ts",
+	"tests/integration/sqlite/filter-parity.test.ts",
+	"tests/integration/sqlite/list-query-filters.test.ts",
+	"tests/integration/sqlite/list-query-seconds.test.ts",
+	"tests/integration/sqlite/merged-seconds.test.ts",
+]
+
+/** The ones of them on the shared Postgres server, in the Postgres project off UTC (tests/support/pg-suites.ts) */
+export const OFF_UTC_POSTGRES = [
+	"tests/integration/codegen/pg-types.test.ts",
+	"tests/integration/codegen/pg-typmods.test.ts",
 	"tests/integration/postgres/columns.test.ts",
 	"tests/integration/postgres/derived-list.test.ts",
 	"tests/integration/postgres/keyset-infinity-date.test.ts",
 	"tests/integration/postgres/keyset-nonfinite.test.ts",
 	"tests/integration/postgres/keyset.test.ts",
-	"tests/integration/sqlite/filter-parity.test.ts",
-	"tests/integration/sqlite/list-query-filters.test.ts",
-	"tests/integration/sqlite/list-query-seconds.test.ts",
-	"tests/integration/sqlite/merged-seconds.test.ts",
 ]
