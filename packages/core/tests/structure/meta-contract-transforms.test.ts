@@ -42,7 +42,7 @@ function trimmedByEcmaScript(): number[] {
 
 describe("meta-contract §2.1's transforms", () => {
 	it("defines every transform comb can emit, codegen's and passwordText's nfc, and no other", () => {
-		const defined = [...FIELD_KEYS.matchAll(/^ {2}- `"(\w+)"`:/gm)].map(([, name]) => name)
+		const defined = [...FIELD_KEYS.matchAll(/^ {2}- `"([\w-]+)"`:/gm)].map(([, name]) => name)
 		expect(defined.toSorted()).toEqual(EMITTED.toSorted())
 	})
 
@@ -60,6 +60,7 @@ describe("meta-contract §2.1's transforms", () => {
 		const operations: Record<string, (value: string) => string> = {
 			lowercase: (value) => value.toLowerCase(),
 			nfc: (value) => value.normalize("NFC"),
+			"strip-tab-newline": (value) => value.replace(/[\t\n\r]/g, ""),
 			trim: (value) => value.trim(),
 			uppercase: (value) => value.toUpperCase(),
 		}

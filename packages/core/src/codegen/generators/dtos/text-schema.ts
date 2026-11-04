@@ -11,6 +11,8 @@ const TEXT_GUARD = `.refine(comb.isStorableText, { message: "Must not contain U+
 
 /* the key that says what TEXT_GUARD refuses */
 const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
+/* z.url()'s check, the WHATWG parse, which no standard keyword states (A3-3 of r23, meta-contract §2.1) */
+const URL_KEY = { "x-comb-url": "whatwg" }
 
 /** A written text's length bounds as comb holds them, declared and its own together; null where none */
 type TextRange = { max: number | null; min: number | null }
@@ -74,21 +76,27 @@ function refuseEmptyRange(field: FieldMeta, { max, min }: TextRange): void {
 }
 
 /** Every transform codegen can emit, each defined in meta-contract §2.1, which a test holds them to */
-export const TRANSFORMS = ["lowercase", "trim", "uppercase"] as const
+export const TRANSFORMS = ["lowercase", "strip-tab-newline", "trim", "uppercase"] as const
 
 /** A rewrite a written text takes before its checks, by its published name */
 type Transform = (typeof TRANSFORMS)[number]
 
-const CHAIN: Record<Transform, string> = { lowercase: ".toLowerCase()", trim: ".trim()", uppercase: ".toUpperCase()" }
+const CHAIN: Record<Transform, string> = {
+	lowercase: ".toLowerCase()",
+	"strip-tab-newline": '.overwrite((value) => value.replace(/[\\t\\n\\r]/g, ""))',
+	trim: ".trim()",
+	uppercase: ".toUpperCase()",
+}
 
 /**
  * A written text's transforms, in the order the chain applies them: an email's and a url's are
- * comb's own normalization, the url's the trim z.url() would do unpublished (C2 of r19). The
+ * comb's own normalization, the url's the trim and the tab, LF and CR strip z.url() would do
+ * unpublished (C2 of r19, A3-3 of r23). The
  * manifest projects this list too (C8), so the channels cannot disagree
  */
 export function transformsOf(annotations: FieldConstraints, mutative: boolean): Transform[] {
 	if (!mutative) return []
-	if (annotations.url) return ["trim"]
+	if (annotations.url) return ["trim", "strip-tab-newline"]
 	if (annotations.email) return ["trim", "lowercase"]
 	const casing: Transform[] = annotations.lowercase ? ["lowercase"] : annotations.uppercase ? ["uppercase"] : []
 	return [...(annotations.trim ? (["trim"] as const) : []), ...casing]
@@ -146,7 +154,8 @@ function textKeys(build: Build): Record<string, unknown> {
 	const transform = transformKey(annotations, mutative)
 	if (isIdText(annotations, field)) return mutative ? { ...transform, ...GUARD_KEY } : stated(ID_LENGTH)
 	if (!mutative) return readKeys(build)
-	return annotations.email ? transform : { ...transform, ...GUARD_KEY }
+	if (annotations.email) return transform
+	return annotations.url ? { ...transform, ...URL_KEY, ...GUARD_KEY } : { ...transform, ...GUARD_KEY }
 }
 
 /** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
@@ -193,7 +202,7 @@ export function textBase(build: Build): Base {
 	const range = textRules(annotations, field)
 	if (mutative) refuseEmptyRange(field, range)
 	/* an email or a url is normalized first, then validated: z.email() would refuse the padded input,
-	 * and z.url() trims it unpublished. Checks run in chain order, and unlike a pipe the chain still
+	 * and z.url() trims it and strips its tabs and newlines unpublished. Checks run in chain order, and unlike a pipe the chain still
 	 * publishes the format and bounds */
 	if ((annotations.email || annotations.url) && mutative) {
 		const format = annotations.email ? "z.email()" : "z.url()"

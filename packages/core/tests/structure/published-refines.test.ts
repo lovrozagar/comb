@@ -1,8 +1,9 @@
 /**
  * CS8, CS9 of r22b: a write rule zod holds in a refine is a rule the published document states, so
  * a client that validates from the spec sends nothing the server refuses. int64's range and real's
- * underflow are standard JSON Schema; a cidr's host bits and a multidimensional array's shape are
- * `x-comb-cidr` and `x-comb-rectangular` (meta-contract §2.1), which the contract reader applies.
+ * underflow are standard JSON Schema; a cidr's host bits, a multidimensional array's shape and a
+ * url's WHATWG parse are `x-comb-cidr`, `x-comb-rectangular` and `x-comb-url` (meta-contract §2.1),
+ * which the contract reader applies.
  * And a written plain JSON value publishes its recursive definition once.
  */
 import { Ajv2020 } from "ajv/dist/2020.js"
@@ -24,6 +25,8 @@ export const row = pgTable("row", {
 	nets: cidr("nets").array(),
 	gridn: integer("gridn").array("[][]"),
 	raw: jsonb("raw"),
+	site: c.text("site", { url: true }).notNull(),
+	siten: c.text("siten", { url: true }),
 })`
 
 const create = async (): Promise<z.ZodObject> =>
@@ -89,11 +92,28 @@ const EDGES: Record<string, unknown[]> = {
 	gridn: [null, [[1, 2], [3]], [[1], [2]]],
 	netn: [null, "10.0.0.0/8", "10.0.0.1/8", "fe80::1/10"],
 	nets: [null, ["10.0.0.0/8"], ["10.0.0.1/8"], ["10.0.0.0/8", "192.168.1.1/24"]],
+	/* A3-3 of r23: a written url's WHATWG parse, as x-comb-url states it; https:a.co parses, and the pattern refuses it */
+	site: [
+		"https://ex.co/a",
+		"https://ex.co:99999",
+		"https://ex.co:65536",
+		"https://[::1",
+		"https://a b",
+		"https://%zz",
+		"https://ex.co:abc",
+		"https://:80",
+		"https://a@",
+		"https://1.2.3.4.5",
+		"https://999.1.1.1",
+		"https://a\tb.co/x",
+		"https:a.co",
+	],
+	siten: [null, "https://ex.co/a", "https://a b", "https://:80"],
 	net: ["10.0.0.0/8", "10.0.0.1/8", "10.0.0.1", "192.168.1.0/24", "192.168.1.1/24", "::1", "fe80::/10", "fe80::1/10"],
 	ratio: [0, 1.5, -1.5, 1e-50, -1e-50, 7.006492321624085e-46, 7.1e-46, -7.1e-46, 1e-45, 3.4028235e38, 3.5e38],
 }
 
-describe("the rules comb's refines hold, as the published document states them (CS8, AA3; siblings: int64, real, cidr, a rectangular array, nullable)", () => {
+describe("the rules comb's refines hold, as the published document states them (CS8, AA3; siblings: int64, real, cidr, a rectangular array, url, nullable)", () => {
 	it.each(Object.keys(EDGES))(
 		"%s: a reader of the published field reaches zod's verdict on every edge",
 		async (key) => {
@@ -105,6 +125,14 @@ describe("the rules comb's refines hold, as the published document states them (
 			expect(disagree).toEqual([])
 		},
 	)
+})
+
+/* A3-3 of r23: the WHATWG parser's own rewrite is a transform the url publishes, which a reader applies before x-comb-url */
+describe("a written url's published rewrites", () => {
+	it.each(["site", "siten"])("%s publishes trim, then strip-tab-newline", async (key) => {
+		const field = (z.toJSONSchema(await create(), { io: "input" }).properties as Record<string, Node>)[key] as Node
+		expect(field["x-comb-transform"]).toEqual(["trim", "strip-tab-newline"])
+	})
 })
 
 describe("a written plain JSON value (CS9)", () => {

@@ -11,6 +11,7 @@ import { isStorableText } from "../storable-text.ts"
 export const CONTRACT_TRANSFORMS: Record<string, (value: string) => string> = {
 	lowercase: (value) => value.toLowerCase(),
 	nfc: (value) => value.normalize("NFC"),
+	"strip-tab-newline": (value) => value.replace(/[\t\n\r]/g, ""),
 	trim: (value) => value.trim(),
 	uppercase: (value) => value.toUpperCase(),
 }
@@ -27,6 +28,7 @@ export const CONTRACT_KEYS: readonly string[] = [
 	"x-comb-rectangular",
 	"x-comb-text",
 	"x-comb-transform",
+	"x-comb-url",
 ]
 
 const utf8 = (value: string): number => new TextEncoder().encode(value).length
@@ -59,6 +61,11 @@ function takesText(schema: Schema, value: string): boolean {
 		if (transform === undefined) throw new Error(`the contract defines no transform ${name}`)
 		return transform(text)
 	}, value)
+	return (schema["x-comb-url"] === undefined || URL.canParse(rewritten)) && takesRewritten(schema, rewritten)
+}
+
+/** Whether a string, its transforms applied, keeps to the keys and bounds that bind the stored value */
+function takesRewritten(schema: Schema, rewritten: string): boolean {
 	const points = [...rewritten].length
 	if (schema["x-comb-text"] !== undefined && !isStorableText(rewritten)) return false
 	if (typeof schema["minLength"] === "number" && points < schema["minLength"]) return false

@@ -175,7 +175,7 @@ describe("generateFieldSchema: JSON", () => {
 			}),
 		).toBe('z.string().meta(_m.email).meta({"x-comb-maxLength":80})')
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
-			'z.string().trim().check(z.url()).min(9).regex(/^https:\\/\\//u, { message: "Must be an HTTPS URL" }).meta(_m.url).meta({"x-comb-transform":["trim"]})',
+			'z.string().trim().overwrite((value) => value.replace(/[\\t\\n\\r]/g, "")).check(z.url()).min(9).regex(/^https:\\/\\//u, { message: "Must be an HTTPS URL" }).meta(_m.url).meta({"x-comb-transform":["trim","strip-tab-newline"],"x-comb-url":"whatwg"})',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
 			'z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).meta({"x-comb-transform":["trim","lowercase"]}).optional()',

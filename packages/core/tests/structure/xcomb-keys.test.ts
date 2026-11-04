@@ -29,7 +29,7 @@ function definedKeys(): string[] {
 
 /** The transforms §2.1 defines, one sub-bullet each */
 const definedTransforms = (): string[] =>
-	[...FIELD_KEYS.matchAll(/^ {2}- `"(\w+)"`:/gm)].map(([, name]) => name as string)
+	[...FIELD_KEYS.matchAll(/^ {2}- `"([\w-]+)"`:/gm)].map(([, name]) => name as string)
 
 type Found = { keys: Set<string>; transforms: Set<string> }
 

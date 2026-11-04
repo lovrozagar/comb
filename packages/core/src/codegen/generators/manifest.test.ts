@@ -157,7 +157,7 @@ describe("entity manifest — a text column's kind and transforms", () => {
 			.map(({ name, textKind, transform }) => [name, textKind, transform])
 		expect(facts).toEqual([
 			["email", "email", ["trim", "lowercase"]],
-			["site", "url", ["trim"]],
+			["site", "url", ["trim", "strip-tab-newline"]],
 			["pic", "imageUri", []],
 			["pass", "password", []],
 			["who", "name", ["trim"]],

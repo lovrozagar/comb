@@ -117,7 +117,7 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
 ```
 
 - `x-comb-transform`: the rewrites a written text takes before any check, in the order applied;
-  an email's is `["trim", "lowercase"]`, a url's `["trim"]`, and `passwordText()`'s `["nfc"]`. A
+  an email's is `["trim", "lowercase"]`, a url's `["trim", "strip-tab-newline"]`, and `passwordText()`'s `["nfc"]`. A
   read publishes none. See §6.9 for
   what the published bounds then mean. Each value is one exact operation, which a reader in any
   language applies as written here, as its own `strip()` or `TrimSpace` differs:
@@ -129,6 +129,8 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
   - `"uppercase"`: ECMAScript's `String.prototype.toUpperCase`: the same, to upper case.
   - `"nfc"`: ECMAScript's `String.prototype.normalize("NFC")`: Unicode Normalization Form C, so a
     decomposed `e` and U+0301 become one `é`. It may shorten a value.
+  - `"strip-tab-newline"`: it removes every U+0009, U+000A and U+000D anywhere in the value, and no
+    other code point: the WHATWG URL parser's own first step, which a url's stored value keeps.
 
   Fixtures for a reader's tests, each `input` with one `transform` applied:
 
@@ -141,7 +143,9 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
   	{ "transform": "lowercase", "input": "\u03a3\u0391\u03a3", "expect": "\u03c3\u03b1\u03c2" },
   	{ "transform": "uppercase", "input": "stra\u00dfe", "expect": "STRASSE" },
   	{ "transform": "nfc", "input": "e\u0301", "expect": "\u00e9" },
-  	{ "transform": "nfc", "input": "\u212b", "expect": "\u00c5" }
+  	{ "transform": "nfc", "input": "\u212b", "expect": "\u00c5" },
+  	{ "transform": "strip-tab-newline", "input": "a\tb\nc\rd", "expect": "abcd" },
+  	{ "transform": "strip-tab-newline", "input": "a\u000bb\u0085c", "expect": "a\u000bb\u0085c" }
   ]
   ```
 
@@ -156,6 +160,9 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
 - `x-comb-cidr`: `true` on a Postgres cidr: the address, an IPv4 or IPv6 one with its prefix length
   or without (a host), has no bit set past that length: `10.0.0.0/8` is a network, `10.0.0.1/8` is
   not. `isCidr` from `@lovrozagar/comb` is the check.
+- `x-comb-url`: `"whatwg"` on a written url: the value, after its transforms, parses with the WHATWG URL
+  parser (`new URL(value)`, `URL.canParse(value)`), which the published pattern's `https://` prefix
+  alone does not state: `https://ex.co:99999`, `https://a b` and `https://:80` do not parse.
 - `x-comb-rectangular`: `true` on a multidimensional array: every sub-array of one level, across the
   whole level, has the same length, as Postgres stores an array: `[[1, 2], [3, 4]]` is one,
   `[[1, 2], [3]]` is not.

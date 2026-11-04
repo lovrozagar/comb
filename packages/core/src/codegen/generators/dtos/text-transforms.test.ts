@@ -11,6 +11,7 @@ import { generateFieldSchema } from "./field-schema.ts"
 
 const OPERATIONS: Record<string, (value: string) => string> = {
 	lowercase: (value) => value.toLowerCase(),
+	"strip-tab-newline": (value) => value.replace(/[\t\n\r]/g, ""),
 	trim: (value) => value.trim(),
 	uppercase: (value) => value.toUpperCase(),
 }
@@ -55,9 +56,10 @@ describe("a written text's published transforms and what it parses to", () => {
 		expect(schema.parse(input)).toBe(applied)
 	})
 
-	it("publishes a url's trim, which is comb's own, with its https rule beside it and no format (A2-8 of r22)", () => {
+	it("publishes a url's trim and tab and newline strip, comb's own, with its https rule beside it and no format (A2-8 of r22, A3-3 of r23)", () => {
 		const schema = written("{ url: true }")
-		expect(published(schema)).toEqual(["trim"])
+		expect(published(schema)).toEqual(["trim", "strip-tab-newline"])
+		expect(schema.safeParse("https://a\tb.io/x\ry").data).toBe("https://ab.io/xy")
 		expect(z.toJSONSchema(schema, { io: "input" })).toMatchObject({ pattern: "^https:\\/\\/" })
 		expect(z.toJSONSchema(schema, { io: "input" })).not.toHaveProperty("format")
 		expect(schema.safeParse("https://a.io/x\n").data).toBe("https://a.io/x")
@@ -66,7 +68,7 @@ describe("a written text's published transforms and what it parses to", () => {
 	})
 
 	it("publishes a declared trim on a url once", () => {
-		expect(published(written("{ trim: true, url: true }"))).toEqual(["trim"])
+		expect(published(written("{ trim: true, url: true }"))).toEqual(["trim", "strip-tab-newline"])
 	})
 
 	it("leaves a password as written", () => {

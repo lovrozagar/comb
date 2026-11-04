@@ -188,7 +188,7 @@ describe("where a field's x-comb-* keys sit", () => {
 		expect(facts(create.properties["title"])).toEqual(["x-comb-text", "x-comb-transform"])
 		expect(facts(create.properties["titled"])).toEqual(["x-comb-text", "x-comb-transform"])
 		expect(facts(create.properties["mail"])).toEqual(["x-comb-transform"])
-		expect(facts(create.properties["site"])).toEqual(["x-comb-text", "x-comb-transform"])
+		expect(facts(create.properties["site"])).toEqual(["x-comb-text", "x-comb-transform", "x-comb-url"])
 		expect(facts(create.properties["doc"])).toEqual(["x-comb-maxBytes", "x-comb-text"])
 		expect(facts(create.properties["raw"])).toEqual(["x-comb-text"])
 		expect(facts(create.properties["plain"])).toEqual(["x-comb-text"])

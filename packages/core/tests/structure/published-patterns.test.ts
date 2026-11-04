@@ -257,6 +257,7 @@ const POOL = [
 
 const TRANSFORMS: Record<string, (text: string) => string> = {
 	lowercase: (text) => text.toLowerCase(),
+	"strip-tab-newline": (text) => text.replace(/[\t\n\r]/g, ""),
 	trim: (text) => text.trim(),
 	uppercase: (text) => text.toUpperCase(),
 }
