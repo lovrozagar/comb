@@ -18,6 +18,16 @@ describe("a state column's create takes its initial alone (CD4; sibling: the upd
 		expect(build("read")).toBe('z.enum(["queued","done"]).meta({ examples: ["queued"] })')
 	})
 
+	/* AA11 of r22: the example a reader sees is the initial, not the enum's first value */
+	it("publishes the initial as the example on create, update and read when it is not the first value", () => {
+		const machine = '["done", "queued"], { initial: "queued", terminal: ["done"] }'
+		const field = parseField("status", `c.enum("status", ${machine}).notNull()`)
+		const build = (type: SchemaType) => generateFieldSchema(field, type, { imports: imports() })
+		expect(build("create")).toBe('z.literal("queued").meta({ examples: ["queued"] })')
+		expect(build("update")).toBe('z.enum(["done","queued"]).meta({ examples: ["queued"] }).optional()')
+		expect(build("read")).toBe('z.enum(["done","queued"]).meta({ examples: ["queued"] })')
+	})
+
 	it("keeps the enum on an array's element, which a machine of one value does not describe", () => {
 		const field = parseField("steps", `c.enum("steps", ${MACHINE}).array().notNull()`, { dialect: "postgres" })
 		const create = generateFieldSchema(field, "create", { dialect: "postgres", imports: imports() })
