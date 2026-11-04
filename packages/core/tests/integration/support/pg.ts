@@ -6,10 +6,11 @@
  * Every test gets its own sessions, and every table a test makes is TEMP, so tests never see
  * each other's tables and nothing outlives the session.
  */
-import { randomUUID } from "node:crypto"
 import pg from "pg"
 import postgres from "postgres"
-import { afterEach, beforeEach } from "vitest"
+import { afterEach, beforeEach, onTestFinished } from "vitest"
+import { getCurrentTest } from "vitest/suite"
+import { scratchName } from "./scratch-sweep.ts"
 
 export const PG_URL_VAR = "COMB_TEST_PG_URL"
 
@@ -54,23 +55,36 @@ export function usePg(): PgSessions {
 
 /**
  * A database made for `run` on the server and dropped after it, for tools such as Atlas that
- * need a whole clean database rather than TEMP tables. `run` gets its URL.
+ * need a whole clean database rather than TEMP tables. `run` gets its URL. Called in a test, the
+ * database is also dropped when the test ends, so one vitest timed out, whose `run` never settles,
+ * leaves none (plan 21 leaf 10.9); a database a killed run left is the global setup's sweep's
+ * (scratch-sweep.ts). The name carries the millisecond it was made, which the sweep reads.
  */
 export async function withScratchDb<T>(run: (url: string) => Promise<T> | T): Promise<T> {
 	const server = new URL(pgUrl() as string)
-	const name = `comb_scratch_${randomUUID().replaceAll("-", "")}`
+	const name = scratchName()
 	const admin = new pg.Client({ connectionString: server.href })
-	await admin.connect()
+	let made = false
+	let released: Promise<void> | undefined
+	/* once, whichever comes first: `run` settling, or the test ending */
+	const drop = async () => {
+		if (made) await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+	}
+	const release = () => (released ??= drop().finally(() => admin.end()))
+	if (getCurrentTest() !== undefined) onTestFinished(release)
 	try {
+		await admin.connect()
 		await admin.query(`CREATE DATABASE ${name}`)
-		const url = new URL(server.href)
-		url.pathname = `/${name}`
-		try {
-			return await run(url.href)
-		} finally {
-			await admin.query(`DROP DATABASE ${name} WITH (FORCE)`)
-		}
+		made = true
+	} catch (error) {
+		await release()
+		throw error
+	}
+	const url = new URL(server.href)
+	url.pathname = `/${name}`
+	try {
+		return await run(url.href)
 	} finally {
-		await admin.end()
+		await release()
 	}
 }

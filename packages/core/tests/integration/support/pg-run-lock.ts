@@ -15,10 +15,15 @@
  * global setup, before any of its tests, so a run waiting on it holds no stale-replay lock; and the
  * stale-replay locks a holding run's tests wait on are held by its own tests, since no other run's
  * Postgres suites are running.
+ *
+ * Once it holds the lock, the run sweeps the scratch databases a timed-out or killed run left
+ * (scratch-sweep.ts, plan 21 leaf 10.9): no other run's suites are running then, so none of theirs
+ * is in use.
  */
 import pg from "pg"
 import setupIntegration from "./global-setup.ts"
 import { pgUrl } from "./pg.ts"
+import { sweepScratchDbs } from "./scratch-sweep.ts"
 
 /** The lock's key pair: comb's test pair, apart from stale-replay.ts's ('comb test', 'a replay left') */
 export const RUN_KEY = "hashtext('comb test'), hashtext('a postgres run')"
@@ -28,7 +33,7 @@ type Held = { projects: number; session: Promise<pg.Client> }
 const HELD = Symbol.for("comb.test.pg-run-lock")
 const store = globalThis as typeof globalThis & { [HELD]?: Held }
 
-/** A session on `url` holding the lock, said once on stderr when another run holds it first */
+/** A session on `url` holding the lock, said once on stderr when another run holds it first, and the scratch swept */
 async function take(url: string): Promise<pg.Client> {
 	const session = new pg.Client({ connectionString: url, keepAlive: true })
 	await session.connect()
@@ -40,6 +45,7 @@ async function take(url: string): Promise<pg.Client> {
 		)
 		await session.query(`SELECT pg_advisory_lock(${RUN_KEY})`)
 	}
+	await sweepScratchDbs(session)
 	return session
 }
 
