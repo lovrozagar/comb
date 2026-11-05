@@ -135,7 +135,8 @@ describe("an index on a partitioned table on Postgres 17 (PA10; sibling: ON ONLY
 		})
 	}, 60_000)
 
-	it("warns of neither end of that route: ONLY ev builds nothing and locks no partition, and the attach blocks nothing", async () => {
+	it("warns of neither end of that route: ONLY ev builds nothing and locks no partition, and the attach scans nothing", async () => {
+		/* the attach holds the partition's index ACCESS EXCLUSIVE, which a query of ev_old opens, but builds nothing under it */
 		/* the partition's own concurrent build, and its instant USING INDEX, stand in HISTORY's place here */
 		const only = "ALTER TABLE ONLY ev ADD CONSTRAINT ev_pkey PRIMARY KEY (id, at);"
 		const partition = [
@@ -147,7 +148,7 @@ describe("an index on a partitioned table on Postgres 17 (PA10; sibling: ON ONLY
 		})
 		await withScratchDb(async (url) => {
 			expect(await both(url, "ALTER INDEX ev_pkey ATTACH PARTITION ev_old_k;\n", [only, ...partition])).toEqual({
-				held: {},
+				held: { ev_old: "reads and writes" },
 				warned: [],
 			})
 		})

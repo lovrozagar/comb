@@ -17,6 +17,7 @@ const HISTORY = [
 	"ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;",
 	"CREATE TABLE orders (id int, user_id int);",
 	"CREATE INDEX orders_user ON orders (user_id);",
+	"CREATE INDEX orders_expr ON orders ((id + 1));",
 	"CREATE VIEW v_users AS SELECT id, n FROM users;",
 	"CREATE VIEW v_both AS SELECT u.id FROM v_users u JOIN orders o ON o.user_id = u.id JOIN users x ON x.id = u.id;",
 	"CREATE MATERIALIZED VIEW mv AS SELECT id FROM users;",
@@ -26,6 +27,13 @@ const HISTORY = [
 	"CREATE TABLE ev_old PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');",
 	"CREATE TABLE ev_rest PARTITION OF ev DEFAULT;",
 	"CREATE TABLE ev_loose (id int, at date);",
+	"CREATE TABLE notes (id int, body text);",
+	"CREATE TABLE tags (id int, names int[]);",
+	"CREATE TABLE stamps (id serial, at pg_catalog.timestamptz);",
+	"CREATE SCHEMA s;",
+	"CREATE TABLE s.a (id int);",
+	"CREATE INDEX ev_i ON ONLY ev (id);",
+	"CREATE INDEX ev_old_i ON ev_old (id);",
 ].join("\n")
 
 const VALIDATE = "ALTER TABLE users VALIDATE CONSTRAINT pos;"
@@ -75,7 +83,7 @@ const HOLDS: Array<[string, string]> = [
 	],
 	/* a column rename through the descendants, a table's alone */
 	["ALTER TABLE ev RENAME COLUMN at TO day;", "ev, ev_old and ev_rest locked against reads and writes"],
-	["ALTER TABLE ev RENAME TO events;", "ev locked against reads and writes"],
+	["ALTER TABLE ev RENAME TO events;", "events locked against reads and writes"],
 	/* a domain's scans, and a CASCADE drop of a type, on each table with a column of it */
 	["ALTER DOMAIN posint ADD CONSTRAINT p CHECK (VALUE > 0);", "dm locked against writes"],
 	["ALTER DOMAIN posint VALIDATE CONSTRAINT p;", "dm locked against writes"],
@@ -86,9 +94,7 @@ const HOLDS: Array<[string, string]> = [
 	["CLUSTER orders USING orders_user;", "orders locked against reads and writes"],
 	["TRUNCATE ev;", "ev, ev_old and ev_rest locked against reads and writes"],
 	["CREATE RULE r AS ON INSERT TO orders DO INSTEAD NOTHING;", "orders locked against reads and writes"],
-	["REINDEX TABLE orders;", "orders locked against writes"],
 	["CREATE TRIGGER t2 AFTER UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION trg();", "orders locked against writes"],
-	["REINDEX INDEX orders_user;", "orders locked against writes"],
 	["DROP INDEX orders_user;", "orders locked against reads and writes"],
 	["DROP TRIGGER t ON orders;", "orders locked against reads and writes"],
 	["CREATE OR REPLACE VIEW v_users AS SELECT id, n FROM users;", "v_users locked against reads and writes"],
@@ -97,6 +103,23 @@ const HOLDS: Array<[string, string]> = [
 		"ALTER TABLE orders ADD COLUMN u int REFERENCES users (id);",
 		"orders locked against reads and writes, and users against writes",
 	],
+	/*
+	 * a REINDEX holds each index it rebuilds ACCESS EXCLUSIVE, a TOAST table's among them, which a
+	 * column not stored plain gives a table; a table with neither is held SHARE alone
+	 */
+	["REINDEX TABLE orders;", "orders locked against reads and writes"],
+	["REINDEX INDEX orders_user;", "orders locked against reads and writes"],
+	["REINDEX TABLE notes;", "notes locked against reads and writes"],
+	["REINDEX TABLE tags;", "tags locked against reads and writes"],
+	["REINDEX TABLE stamps;", "stamps locked against writes"],
+	["REINDEX TABLE ev_loose;", "ev_loose locked against writes"],
+	["REINDEX TABLE nowhere;", "nowhere locked against reads and writes"],
+	/* an index moved to another tablespace, and a relation to another schema */
+	["ALTER INDEX orders_user SET TABLESPACE pg_default;", "orders locked against reads and writes"],
+	["ALTER INDEX ev_i ATTACH PARTITION ev_old_i;", "ev_old locked against reads and writes"],
+	["ALTER TABLE orders SET SCHEMA s;", "s.orders locked against reads and writes"],
+	["ALTER VIEW v_users SET SCHEMA s;", "s.v_users locked against reads and writes"],
+	["ALTER MATERIALIZED VIEW mv SET SCHEMA s;", "s.mv locked against reads and writes"],
 	/* EXCLUSIVE, which readers pass */
 	["REFRESH MATERIALIZED VIEW CONCURRENTLY mv;", "mv locked against writes"],
 ]
@@ -113,7 +136,13 @@ const NOTHING: string[] = [
 	"REINDEX INDEX nowhere;",
 	"ALTER INDEX orders_user SET (fillfactor = 70);",
 	"ALTER INDEX orders_user RENAME TO orders_u;",
+	"ALTER INDEX orders_expr ALTER COLUMN 1 SET STATISTICS 100;",
+	"ALTER INDEX nowhere SET TABLESPACE pg_default;",
+	"ALTER INDEX ev_i ATTACH PARTITION nowhere;",
+	"ALTER FUNCTION trg() SET SCHEMA s;",
+	"ALTER TYPE posint SET SCHEMA s;",
 	"ALTER SEQUENCE IF EXISTS s RENAME TO s2;",
+	"ALTER SEQUENCE IF EXISTS s SET LOGGED;",
 	/* a temporary table, and a relation the file made, which no other session sees */
 	"CREATE TEMP TABLE tt (id int);\nALTER TABLE tt ADD COLUMN x int;",
 	"LOCK TABLE pg_temp.tt;",
@@ -148,9 +177,34 @@ describe("what a statement before a VALIDATE leaves held (0005)", () => {
 		)
 	})
 
-	it("holds a relation the history holds through its rename, and one renamed in a schema by its schema", () => {
+	it("holds a relation the history holds through its schema's rename, by its schema's new name", () => {
+		expect(holds("ALTER TABLE s.a ADD COLUMN x int;\nALTER SCHEMA s RENAME TO s3;")).toBe(
+			"s3.a locked against reads and writes",
+		)
+		expect(
+			holds("CREATE TRIGGER t9 AFTER UPDATE ON s.a FOR EACH ROW EXECUTE FUNCTION trg();\nALTER SCHEMA s RENAME TO s3;"),
+		).toBe("s3.a locked against writes")
+		expect(holds("CREATE TABLE s.t (id int);\nALTER SCHEMA s RENAME TO s3;\nALTER TABLE s3.t ADD COLUMN x int;")).toBe(
+			"",
+		)
+		expect(holds("ALTER TABLE orders ADD COLUMN x int;\nALTER SCHEMA s RENAME TO s3;")).toBe(
+			"orders locked against reads and writes",
+		)
+	})
+
+	it("holds a relation the history holds through its move to another schema, by its new name alone", () => {
+		expect(holds("ALTER TABLE orders SET SCHEMA s;\nALTER TABLE s.orders ADD COLUMN x int;")).toBe(
+			"s.orders locked against reads and writes",
+		)
+		expect(holds("CREATE TABLE t (id int);\nALTER TABLE t SET SCHEMA s;\nALTER TABLE s.t ADD COLUMN x int;")).toBe("")
+	})
+
+	it("holds a relation the history holds through its rename by its new name alone, and one renamed in a schema by its schema", () => {
 		expect(holds("ALTER TABLE orders RENAME TO o2;\nALTER TABLE o2 ADD COLUMN x int;")).toBe(
-			"o2 and orders locked against reads and writes",
+			"o2 locked against reads and writes",
+		)
+		expect(holds("ALTER TABLE s.a ADD COLUMN x int;\nALTER TABLE s.a RENAME TO c;")).toBe(
+			"s.c locked against reads and writes",
 		)
 		expect(holds("CREATE TABLE s.t (id int);\nALTER TABLE s.t RENAME TO t2;\nALTER TABLE s.t2 ADD COLUMN x int;")).toBe(
 			"",

@@ -83,7 +83,7 @@ const HOLDS: Array<[string, string]> = [
 	/* through a rename of the table, its column, its constraint, a column it references */
 	[
 		"ALTER TABLE users RENAME TO people;\nTRUNCATE people CASCADE;",
-		`ev, ev_mid, ev_old, items, ${LONG_TABLE}, orders, people, t2, users and ${WIDE_TABLE} locked against reads and writes`,
+		`ev, ev_mid, ev_old, items, ${LONG_TABLE}, orders, people, t2 and ${WIDE_TABLE} locked against reads and writes`,
 	],
 	[
 		"ALTER TABLE orders RENAME COLUMN user_id TO uid;\nALTER TABLE orders DROP COLUMN uid;",

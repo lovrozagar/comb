@@ -11,32 +11,60 @@ function blocking(modes: readonly string[]): string | undefined {
 	return modes.some((mode) => writes.includes(mode)) ? "writes" : undefined
 }
 
+/*
+ * Each table, view and materialized view of public by its oid, and each index and TOAST table of
+ * one, and each TOAST table's index, under the name of the relation it belongs to: a query of a
+ * table opens every index of it, so a lock on one blocks the table as much as a lock on the table
+ */
+const OWNED = `WITH owner AS (
+  SELECT oid, oid AS of FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p', 'v', 'm', 'f')
+), part AS (
+  SELECT oid, of FROM owner
+  UNION ALL SELECT c.reltoastrelid, o.of FROM owner o JOIN pg_class c ON c.oid = o.oid WHERE c.reltoastrelid <> 0
+)
+SELECT p.oid::int8::text AS oid, p.of::int8::text AS of, c.relname FROM part p JOIN pg_class c ON c.oid = p.of
+UNION ALL
+SELECT x.indexrelid::int8::text, p.of::int8::text, c.relname FROM part p JOIN pg_index x ON x.indrelid = p.oid JOIN pg_class c ON c.oid = p.of`
+
+/* each relation's name inside the transaction, its schema's in front outside public, by its oid */
+const NAMES = `SELECT oid::int8::text AS oid,
+  CASE WHEN relnamespace = 'public'::regnamespace THEN relname ELSE relnamespace::regnamespace::text || '.' || relname END AS name
+FROM pg_class WHERE oid = ANY($1::oid[])`
+
 /**
  * What the transaction of `file` holds blocked at its end, `setup` committed before it: each table,
- * view and materialized view of public there before the transaction, by the name it had then, so a
- * relation the file drops or renames is still read, and one it makes, which no other session sees, is not
+ * view and materialized view of public there before the transaction, by the name it has at the
+ * end, as the file names it after a rename or a move, or the name it had if the file drops it; one
+ * the file makes, which no other session sees, is not read; a lock on an index or TOAST table
+ * counts as one on the relation it belongs to
  */
 async function heldBy(url: string, setup: readonly string[], file: string): Promise<Record<string, string>> {
 	const client = new pg.Client({ connectionString: url })
 	await client.connect()
 	try {
 		for (const sql of setup) await client.query(sql)
-		const before = await client.query<{ oid: string; relname: string }>(
-			"SELECT oid::int8::text AS oid, relname FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p', 'v', 'm', 'f')",
-		)
-		const named = new Map(before.rows.map(({ oid, relname }) => [oid, relname]))
+		const before = await client.query<{ of: string; oid: string; relname: string }>(OWNED)
 		await client.query("BEGIN")
 		await client.query(file)
-		const { rows } = await client.query<{ modes: string[]; oid: string }>(
-			"SELECT relation::int8::text AS oid, array_agg(mode::text) AS modes FROM pg_locks WHERE pid = pg_backend_pid() AND relation IS NOT NULL GROUP BY 1",
+		const { rows } = await client.query<{ mode: string; oid: string }>(
+			"SELECT relation::int8::text AS oid, mode::text AS mode FROM pg_locks WHERE pid = pg_backend_pid() AND relation IS NOT NULL",
 		)
+		const now = await client.query<{ name: string; oid: string }>(NAMES, [
+			[...new Set(before.rows.map(({ of }) => of))],
+		])
 		await client.query("ROLLBACK")
+		const current = new Map(now.rows.map(({ name, oid }) => [oid, name]))
+		const named = new Map(before.rows.map(({ of, oid, relname }) => [oid, current.get(of) ?? relname]))
+		const modes = new Map<string, string[]>()
+		for (const { mode, oid } of rows) {
+			const name = named.get(oid)
+			if (name !== undefined) modes.set(name, [...(modes.get(name) ?? []), mode])
+		}
 		return Object.fromEntries(
-			rows
-				.flatMap(({ modes, oid }) => {
-					const name = named.get(oid)
-					const blocks = blocking(modes)
-					return name === undefined || blocks === undefined ? [] : [[name, blocks] as const]
+			[...modes]
+				.flatMap(([name, held]) => {
+					const blocks = blocking(held)
+					return blocks === undefined ? [] : [[name, blocks] as const]
 				})
 				.toSorted(([a], [b]) => a.localeCompare(b)),
 		)

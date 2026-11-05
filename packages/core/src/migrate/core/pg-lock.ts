@@ -2,9 +2,11 @@
  * How a Postgres statement locks a relation (0005 of r22b, pg-held.ts holds what a file holds): ACCESS
  * EXCLUSIVE, which blocks reads and writes, or SHARE and the like, which block writes, on the relation
  * alone or through its descendants too, and the locks a change reaches through the foreign keys of
- * its table (pg-foreign.ts), on tables the statement does not name.
+ * its table (pg-foreign.ts), on tables the statement does not name. A lock on an index, or on a
+ * TOAST table's, blocks its table as one on the table does: every query of a table opens its indexes.
  */
 import { type Change, keyReach, partitionReach, truncated } from "./pg-foreign.ts"
+import { indexesOn } from "./pg-index-facts.ts"
 import { type Facts, flag, type Node, tableOf } from "./pg-nodes.ts"
 
 /** A lock a statement takes: the relation's key, and whether reads wait too */
@@ -93,16 +95,105 @@ function truncateLocks(node: Node, facts: Facts): Lock[] {
 	return [...named, ...reached.map((key): Lock => [key, true])]
 }
 
+// lookup-table: Postgres 17's built-in types stored plain, which never take a TOAST table (typstorage 'p'), and the serials
+const PLAIN = /* @__PURE__ */ new Set([
+	"bigserial",
+	"bool",
+	"box",
+	"char",
+	"cid",
+	"circle",
+	"date",
+	"float4",
+	"float8",
+	"int2",
+	"int4",
+	"int8",
+	"interval",
+	"line",
+	"lseg",
+	"macaddr",
+	"macaddr8",
+	"money",
+	"name",
+	"oid",
+	"pg_lsn",
+	"point",
+	"regclass",
+	"regcollation",
+	"regconfig",
+	"regdictionary",
+	"regnamespace",
+	"regoper",
+	"regoperator",
+	"regproc",
+	"regprocedure",
+	"regrole",
+	"regtype",
+	"serial",
+	"smallserial",
+	"tid",
+	"time",
+	"timestamp",
+	"timestamptz",
+	"timetz",
+	"uuid",
+	"xid",
+	"xid8",
+])
+
+/**
+ * Whether the table keyed `key` has an index, or a TOAST table, which has one: a column not stored
+ * plain; a table the history does not hold may have either
+ */
+function indexed(key: string, facts: Facts): boolean {
+	const columns = facts.columnTypes.get(key)
+	if (columns === undefined || indexesOn(facts, key).length > 0) return true
+	return [...columns.values()].some(({ dims, type }) => dims > 0 || !PLAIN.has(type.replace(/^pg_catalog\./, "")))
+}
+
+/**
+ * The locks a REINDEX takes in a transaction: SHARE on its table, and ACCESS EXCLUSIVE on each index
+ * it rebuilds, its TOAST table's among them, which every query of the table opens
+ */
+function reindexLocks(node: Node, facts: Facts): Lock[] {
+	if (node["kind"] === "REINDEX_OBJECT_TABLE") {
+		const { key } = tableOf(node["relation"], facts.schema)
+		return [[key, indexed(key, facts)]]
+	}
+	if (node["kind"] !== "REINDEX_OBJECT_INDEX") return []
+	const table = facts.indexes.get(tableOf(node["relation"], facts.schema).key)?.table
+	return table === undefined ? [] : [[table, true]]
+}
+
+/**
+ * The locks an ALTER INDEX's command takes: a move to another tablespace rewrites the index, and an
+ * ATTACH PARTITION locks the partition's index it attaches, each ACCESS EXCLUSIVE, which every query
+ * of the index's table opens; the rest take SHARE UPDATE EXCLUSIVE
+ */
+function indexLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
+	const index =
+		cmd["subtype"] === "AT_SetTableSpace"
+			? node["relation"]
+			: cmd["subtype"] === "AT_AttachPartition"
+				? (cmd["def"] as { PartitionCmd: Node }).PartitionCmd["name"]
+				: undefined
+	const table = index === undefined ? undefined : facts.indexes.get(tableOf(index, facts.schema).key)?.table
+	return table === undefined ? [] : [[table, true]]
+}
+
 export {
 	changeLocks,
 	defaultOf,
 	EXCLUSIVE,
 	EXCLUSIVE_ALL,
+	indexLocks,
 	keyLocks,
 	type Lock,
 	on,
 	partitionLocks,
 	reachLocks,
+	reindexLocks,
 	SHARE,
 	SHARE_ALL,
 	truncateLocks,

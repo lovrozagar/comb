@@ -20,6 +20,7 @@ const HISTORY = [
 	"CREATE TABLE users (id int PRIMARY KEY, n int);",
 	"CREATE TABLE orders (id int, user_id int);",
 	"CREATE INDEX orders_user ON orders (user_id);",
+	"CREATE INDEX orders_expr ON orders ((id + 1));",
 	"CREATE VIEW v_users AS SELECT id, n FROM users;",
 	"CREATE MATERIALIZED VIEW mv AS SELECT id FROM users;",
 	"CREATE FUNCTION trg() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$;",
@@ -31,6 +32,11 @@ const HISTORY = [
 	"CREATE TABLE ev (id int NOT NULL, at date NOT NULL) PARTITION BY RANGE (at);",
 	"CREATE TABLE ev_old PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');",
 	"CREATE TABLE ev_loose (id int NOT NULL, at date NOT NULL);",
+	"CREATE SCHEMA s;",
+	"CREATE TABLE pt (id int) PARTITION BY LIST (id);",
+	"CREATE TABLE pt_1 PARTITION OF pt FOR VALUES IN (1);",
+	"CREATE INDEX pt_i ON ONLY pt (id);",
+	"CREATE INDEX pt_1_i ON pt_1 (id);",
 	"ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;",
 ].join("\n")
 
@@ -60,7 +66,7 @@ const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> 
 	["ALTER TABLE orders SET (fillfactor = 70), ALTER COLUMN id SET STATISTICS 100, CLUSTER ON orders_user;", {}],
 	["ALTER TABLE orders SET (user_catalog_table = true);", { orders: READS }],
 	["ALTER TABLE orders RENAME COLUMN id TO num;", { orders: READS }],
-	["ALTER TABLE orders RENAME TO orders2;", { orders: READS }],
+	["ALTER TABLE orders RENAME TO orders2;", { orders2: READS }],
 	["ALTER TABLE ev ADD COLUMN x int;", { ev: READS, ev_old: READS }],
 	["ALTER TABLE ev ATTACH PARTITION ev_loose FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');", { ev_loose: READS }],
 	["ALTER TABLE ev DETACH PARTITION ev_old;", { ev: READS, ev_old: READS }],
@@ -89,8 +95,19 @@ const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> 
 	["TRUNCATE orders;", { orders: READS }],
 	["REFRESH MATERIALIZED VIEW mv;", { mv: READS }],
 	["CLUSTER orders USING orders_user;", { orders: READS }],
-	["REINDEX TABLE orders;", { orders: WRITES }],
-	["REINDEX INDEX orders_user;", { orders: WRITES }],
+	/* a REINDEX holds each index it rebuilds ACCESS EXCLUSIVE, which every query of its table opens */
+	["REINDEX TABLE orders;", { orders: READS }],
+	["REINDEX INDEX orders_user;", { orders: READS }],
+	["REINDEX TABLE users;", { users: READS }],
+	/* an index's own ALTER: a move rewrites it under ACCESS EXCLUSIVE; its options take SHARE UPDATE EXCLUSIVE */
+	["ALTER INDEX orders_user SET TABLESPACE pg_default;", { orders: READS }],
+	["ALTER INDEX orders_user SET (fillfactor = 50);", {}],
+	["ALTER INDEX orders_expr ALTER COLUMN 1 SET STATISTICS 100;", {}],
+	/* an index attached to a partitioned table's, held ACCESS EXCLUSIVE, which every query of its partition opens */
+	["ALTER INDEX pt_i ATTACH PARTITION pt_1_i;", { pt_1: READS }],
+	/* a move to another schema, read by the name the table has after it */
+	["ALTER TABLE orders SET SCHEMA s;", { "s.orders": READS }],
+	["ALTER VIEW v_users SET SCHEMA s;", { "s.v_users": READS }],
 	/* drops */
 	["DROP INDEX orders_user;", { orders: READS }],
 	["DROP TABLE orders;", { orders: READS }],

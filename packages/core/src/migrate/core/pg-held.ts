@@ -11,16 +11,21 @@ import {
 	defaultOf,
 	EXCLUSIVE,
 	EXCLUSIVE_ALL,
+	indexLocks,
 	keyLocks,
 	type Lock,
 	on,
 	partitionLocks,
 	reachLocks,
+	reindexLocks,
 	SHARE,
 	SHARE_ALL,
 	truncateLocks,
 } from "./pg-lock.ts"
 import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
+
+/* the relations a move to another schema, and a rename, carry with them */
+const RELATIONS = /^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/
 
 /** The relations the open transaction holds locked, by key, each with whether reads wait too, and the relations it made */
 type Held = { locks: Map<string, boolean>; made: Set<string> }
@@ -82,9 +87,11 @@ function commandLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	]
 }
 
-/** The locks an ALTER TABLE, VIEW, MATERIALIZED VIEW or FOREIGN TABLE's command takes; none for any other ALTER */
-const alterLocks = (node: Node, cmd: Node, facts: Facts): Lock[] =>
-	/^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/.test(node["objtype"] as string) ? commandLocks(node, cmd, facts) : []
+/** The locks an ALTER TABLE, INDEX, VIEW, MATERIALIZED VIEW or FOREIGN TABLE's command takes; none for any other ALTER */
+function alterLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
+	if (node["objtype"] === "OBJECT_INDEX") return indexLocks(node, cmd, facts)
+	return RELATIONS.test(node["objtype"] as string) ? commandLocks(node, cmd, facts) : []
+}
 
 /** A DROP's objects, each a name's parts */
 const dropped = (node: Node): string[][] =>
@@ -103,7 +110,7 @@ function relationDrop(key: string, cascade: boolean, facts: Facts): Lock[] {
 /** The locks a DROP takes: a relation's, an index's table, a trigger's, policy's or rule's table, and a CASCADE type's tables */
 function dropLocks(node: Node, facts: Facts): Lock[] {
 	const type = node["removeType"] as string
-	if (/^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/.test(type))
+	if (RELATIONS.test(type))
 		return dropped(node).flatMap((parts) =>
 			relationDrop(keyOf(parts, facts.schema), node["behavior"] === "DROP_CASCADE", facts),
 		)
@@ -162,14 +169,6 @@ function createLocks(node: Node, facts: Facts): Lock[] {
 	]
 }
 
-/** The locks a REINDEX takes in a transaction: SHARE on its table */
-function reindexLocks(node: Node, facts: Facts): Lock[] {
-	if (node["kind"] === "REINDEX_OBJECT_TABLE") return on(node["relation"], facts, SHARE)
-	if (node["kind"] !== "REINDEX_OBJECT_INDEX") return []
-	const table = facts.indexes.get(tableOf(node["relation"], facts.schema).key)?.table
-	return table === undefined ? [] : [[table, false]]
-}
-
 /* the renames that take ACCESS EXCLUSIVE on their table; an index's takes SHARE UPDATE EXCLUSIVE */
 const EXCLUSIVE_RENAMES = /^OBJECT_(?:TABLE|COLUMN|TABCONSTRAINT|TRIGGER|MATVIEW|VIEW|FOREIGN_TABLE|POLICY|RULE)$/
 
@@ -194,6 +193,8 @@ function domainLocks(node: Node, facts: Facts): Lock[] {
 // lookup-table: each statement other than an ALTER TABLE that takes a lock blocking reads or writes, and the locks it takes
 const STATEMENTS: Readonly<Record<string, (node: Node, facts: Facts) => Lock[]>> = {
 	AlterDomainStmt: domainLocks,
+	AlterObjectSchemaStmt: (node, facts) =>
+		RELATIONS.test(node["objectType"] as string) ? on(node["relation"], facts, EXCLUSIVE) : [],
 	AlterPolicyStmt: (node, facts) => on(node["table"], facts, EXCLUSIVE),
 	ClusterStmt: (node, facts) => (node["relation"] === undefined ? [] : on(node["relation"], facts, EXCLUSIVE)),
 	CreatePolicyStmt: (node, facts) => on(node["table"], facts, EXCLUSIVE),
@@ -211,6 +212,18 @@ const STATEMENTS: Readonly<Record<string, (node: Node, facts: Facts) => Lock[]>>
 		facts.views.has(tableOf(node["view"], facts.schema).key) ? on(node["view"], facts, EXCLUSIVE) : [],
 }
 
+/** The key a rename or a move to another schema gives a relation, undefined for any other statement */
+function movedTo(type: string, node: Node, facts: Facts): string | undefined {
+	const kind = node[type === "RenameStmt" ? "renameType" : "objectType"] as string
+	if ((type !== "RenameStmt" && type !== "AlterObjectSchemaStmt") || !RELATIONS.test(kind)) return undefined
+	const relation = node["relation"] as { relname: string; schemaname?: string | undefined }
+	if (type === "AlterObjectSchemaStmt") return keyOf([String(node["newschema"]), relation.relname], facts.schema)
+	return keyOf(
+		[...(relation.schemaname === undefined ? [] : [relation.schemaname]), String(node["newname"])],
+		facts.schema,
+	)
+}
+
 /** The relation a statement makes that the history does not hold, undefined for any other statement */
 function madeBy(type: string, node: Node, facts: Facts): string | undefined {
 	const relation =
@@ -226,19 +239,37 @@ function madeBy(type: string, node: Node, facts: Facts): string | undefined {
 	return facts.tables.has(key) || facts.views.has(key) || facts.reads.has(key) ? undefined : key
 }
 
+/**
+ * `held`'s record of the relation `from`, its lock or that the file made it, carried to `to`: a
+ * relation is named by the one name it has where the file reads it, as the file names it next
+ */
+function carry(held: Held, from: string, to: string): void {
+	const reads = held.locks.get(from)
+	if (reads !== undefined) {
+		held.locks.delete(from)
+		held.locks.set(to, reads || held.locks.get(to) === true)
+	}
+	if (held.made.delete(from)) held.made.add(to)
+}
+
+/** Each key `held` records in the schema a RENAME of it names, carried to the schema's new name */
+function carrySchema(node: Node, { facts, held }: { facts: Facts; held: Held }): void {
+	for (const key of [...held.locks.keys(), ...held.made]) {
+		const parts = key.split(".")
+		if ((parts.length > 1 ? parts[0] : facts.schema) === node["subname"])
+			carry(held, key, keyOf([String(node["newname"]), parts.at(-1) as string], facts.schema))
+	}
+}
+
 /** `held` after a top-level statement other than an ALTER TABLE, read before `facts` follow it */
 function holdStatement(type: string, node: Node, { facts, held }: { facts: Facts; held: Held }): void {
 	const made = madeBy(type, node, facts)
 	if (made !== undefined) held.made.add(made)
 	hold(held, STATEMENTS[type]?.(node, facts) ?? [])
-	/* a relation the file made keeps no other session's view through its rename */
-	if (type !== "RenameStmt" || !/^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/.test(node["renameType"] as string))
-		return
-	const relation = node["relation"] as { schemaname?: string | undefined }
-	const from = tableOf(relation, facts.schema).key
-	if (!held.made.delete(from)) return
-	const parts = [...(relation.schemaname === undefined ? [] : [relation.schemaname]), String(node["newname"])]
-	held.made.add(keyOf(parts, facts.schema))
+	/* what the file holds, and what it made, which no other session sees, follow a rename or a move */
+	const to = movedTo(type, node, facts)
+	if (to !== undefined) carry(held, tableOf(node["relation"], facts.schema).key, to)
+	else if (type === "RenameStmt" && node["renameType"] === "OBJECT_SCHEMA") carrySchema(node, { facts, held })
 }
 
 export { alterLocks, clearHeld, type Held, heldStart, hold, holdStatement, type Lock }
