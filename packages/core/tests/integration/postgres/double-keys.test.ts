@@ -129,7 +129,8 @@ describe("a float key under extra_float_digits 0 is refused, never skipping rows
 			} finally {
 				await client.query("RESET extra_float_digits")
 			}
-			expect(await walked(client, path)).toEqual(["a", "b", "c", "d"])
+			/* at the default the key reads exact: the rows at 1 follow, their tie broken by id descending */
+			expect(await walked(client, path)).toEqual(["a", "d", "c", "b"])
 		},
 	)
 })
