@@ -52,3 +52,24 @@ describe("migrate apply on a bun:sqlite file another process holds the write loc
 		expect(history(made.db)).toEqual([["0001_t.sql"], ["0002_add.sql"]])
 	})
 })
+
+/* The holder under bun:sqlite, as tests/integration/libsql/busy.test.ts pins it under node:sqlite */
+describe("the lock holder", () => {
+	it("commits once a reader holding the shared lock at its COMMIT lets go", async () => {
+		const made = await applied()
+		const holder = await holdLock(made.db, APP_WRITE, 200)
+		const reader = new Database(made.db)
+		reader.exec("BEGIN")
+		reader.query("SELECT count(*) FROM t").get()
+		await new Promise((resolve) => setTimeout(resolve, 800))
+		reader.exec("COMMIT")
+		reader.close()
+		expect(await holder.done).toBe(0)
+		const read = new Database(made.db, { readonly: true })
+		try {
+			expect(read.query("SELECT v FROM t").values()).toEqual([[99]])
+		} finally {
+			read.close()
+		}
+	})
+})

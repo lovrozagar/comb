@@ -1,13 +1,16 @@
 /**
  * SL4 of r22: another process holding a local SQLite file's write lock, as the app that serves the
  * file or a second runner does. It runs on the runtime the test runs on, bun:sqlite under Bun and
- * node:sqlite under Node, so vitest and bun test spawn it alike.
+ * node:sqlite under Node, so vitest and bun test spawn it alike. It opens with a 5 s busy timeout, as an
+ * app writer should: comb's wait takes the file's shared lock between its retries, so the holder's COMMIT
+ * can meet that read and would fail at once with SQLITE_BUSY without one, as against any reader.
  */
 import { spawn } from "node:child_process"
 import { generateMigrationHash } from "../../src/migrate/core/parse.ts"
 
 const HOLDER = `const Database = typeof Bun === "undefined" ? require("node:sqlite").DatabaseSync : require("bun:sqlite").Database
 const db = new Database(process.argv.at(-4))
+db.exec("PRAGMA busy_timeout = 5000")
 db.exec(\`BEGIN \${process.argv.at(-3)}\`)
 db.exec(process.argv.at(-2))
 console.log("locked")

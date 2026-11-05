@@ -4,6 +4,7 @@
  * apply wait for it, as SQLite's busy timeout does, and a second run that applied the file meanwhile
  * makes this one skip it, never apply it twice nor fail on its record.
  */
+import { DatabaseSync } from "node:sqlite"
 import { afterEach, describe, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
 import { ADD, APP_WRITE, holdExclusive, holdLock, otherRun, TABLE } from "../../support/busy.ts"
@@ -44,6 +45,26 @@ describe("migrate apply on a libsql file another process holds the write lock of
 		expect(run.code, run.text).toBe(0)
 		expect(run.text).toContain("Skip (applied by another run): 0002_add.sql")
 		expect(await history(made.db)).toEqual([["0001_t.sql"], ["0002_add.sql"]])
+	})
+})
+
+/*
+ * The holder stands in for an app writer, which commits while comb's apply waits: SQLite's BEGIN IMMEDIATE
+ * takes the file's shared lock between its busy-handler sleeps, so the holder's COMMIT can meet a reader
+ * and must wait for it under a busy timeout, as an app writer should, where it would fail at once.
+ */
+describe("the lock holder", () => {
+	it("commits once a reader holding the shared lock at its COMMIT lets go", async () => {
+		const made = await applied()
+		const holder = await holdLock(made.db, APP_WRITE, 200)
+		const reader = new DatabaseSync(made.db)
+		reader.exec("BEGIN")
+		reader.prepare("SELECT count(*) FROM t").get()
+		await new Promise((resolve) => setTimeout(resolve, 800))
+		reader.exec("COMMIT")
+		reader.close()
+		expect(await holder.done).toBe(0)
+		expect(await sqliteRows(`file:${made.db}`, "SELECT v FROM t")).toEqual([[99]])
 	})
 })
 
