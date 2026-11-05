@@ -62,6 +62,25 @@ describe("the README on the role names a file's shared-catalog change is read by
 	})
 })
 
+describe("the README's Postgres lock warnings (AE2-12)", () => {
+	const warnings = sentence(
+		paragraph("`apply` works on a private copy of the migrations directory"),
+		"with lock warnings for statements that block a table",
+	)
+
+	it("says an ATTACH PARTITION whose bound the history proves scans only the default partition", () => {
+		expect(warnings).toContain("an `ATTACH PARTITION`, which scans the partition unless the history proves its bound")
+		expect(warnings).toContain("and the parent's default partition, when it has one, either way")
+	})
+
+	it("names the storage moves that rewrite, and none to where the history left the relation", () => {
+		expect(warnings).toContain(
+			"a `SET TABLESPACE`, `SET ACCESS METHOD`, `SET LOGGED` or `SET UNLOGGED`, which rewrites",
+		)
+		expect(warnings).toContain("none for a move to where the history left it")
+	})
+})
+
 describe("the README on Postgres's outside-transaction statements (PA14 of r22b)", () => {
 	const list = sentence(
 		paragraph("A statement Postgres runs only outside a transaction needs its own file"),
