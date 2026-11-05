@@ -10,6 +10,7 @@
  * became required is read from, which no hash names.
  */
 import { createHash } from "node:crypto"
+import { dirname, join, relative } from "node:path"
 import { ts } from "ts-morph"
 import {
 	checkerOf,
@@ -43,96 +44,64 @@ const textOf = (node: ts.Node): string =>
 
 type Optionality = Record<string, "optional" | "required">
 
-/** A member a consumer can read or pass: named, neither `#private` nor private, protected or static */
-function publicName(member: ts.ClassElement | ts.TypeElement): string | undefined {
-	const name = member.name
-	if (name === undefined || !(ts.isIdentifier(name) || ts.isStringLiteral(name))) return undefined
-	const hidden = [ts.SyntaxKind.PrivateKeyword, ts.SyntaxKind.ProtectedKeyword, ts.SyntaxKind.StaticKeyword]
-	const modifiers = ts.canHaveModifiers(member) ? (ts.getModifiers(member) ?? []) : []
-	return modifiers.some((modifier) => hidden.includes(modifier.kind)) ? undefined : name.text
-}
+/** The symbols whose declared type a consumer reads members of: an interface's, a class's instances', an alias's */
+const HAS_MEMBERS = ts.SymbolFlags.Interface | ts.SymbolFlags.Class | ts.SymbolFlags.TypeAlias
 
-/** A type element's or a class element's members, each optional or required; a constructor or an index signature names none */
-const ownMembers = (members: readonly (ts.ClassElement | ts.TypeElement)[]): Optionality =>
-	Object.fromEntries(
-		members.flatMap((member) => {
-			const name =
-				ts.isConstructorDeclaration(member) || ts.isIndexSignatureDeclaration(member) ? undefined : publicName(member)
-			const optional = "questionToken" in member && member.questionToken !== undefined
-			return name === undefined ? [] : [[name, optional ? "optional" : "required"] as const]
-		}),
+const HIDDEN = ts.ModifierFlags.Private | ts.ModifierFlags.Protected | ts.ModifierFlags.Static
+
+/** A member a consumer can read or pass: neither `#private` nor private, protected or static */
+const isPublic = (member: ts.Symbol): boolean =>
+	!(member.declarations ?? []).some(
+		(declaration) =>
+			ts.getCombinedModifierFlags(declaration as ts.Declaration) & HIDDEN ||
+			ts.getNameOfDeclaration(declaration as ts.Declaration)?.kind === ts.SyntaxKind.PrivateIdentifier,
 	)
-
-/** Every part's members together, or undefined when a part's are not known */
-const merged = (parts: Array<Optionality | undefined>): Optionality | undefined =>
-	parts.some((part) => part === undefined) ? undefined : Object.assign({}, ...parts)
-
-/** The members every arm holds, optional where any arm's is, or undefined when an arm's are not known */
-function commonToEvery(arms: Array<Optionality | undefined>): Optionality | undefined {
-	if (arms.some((arm) => arm === undefined)) return undefined
-	const [first, ...rest] = arms as Optionality[]
-	return Object.fromEntries(
-		Object.entries(first as Optionality)
-			.filter(([name]) => rest.every((arm) => arm[name] !== undefined))
-			.map(([name, was]) => [
-				name,
-				[was, ...rest.map((arm) => arm[name])].includes("optional") ? "optional" : "required",
-			]),
-	)
-}
-
-/** The types an interface or a class extends */
-const basesOf = (node: ts.ClassDeclaration | ts.InterfaceDeclaration): ts.ExpressionWithTypeArguments[] =>
-	(node.heritageClauses ?? [])
-		.filter((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)
-		.flatMap((clause) => clause.types)
 
 /**
- * Reads the members a declaration spells out, each optional or required, from its text as a consumer's
- * compiler reads it: a type literal's, an interface's or a class's own and those of the local types it
- * extends (a dependency's base, such as `Error`, adds none), an intersection's arms', the members every
- * arm of a union holds, and `Partial` or `Required` of one of those. Undefined for any other type, such
- * as a mapped type or one a dependency declares, whose members the text does not list.
+ * The members a consumer's compiler gives the type `symbol` declares, each optional or required: what
+ * an interface or a class holds with its local bases', what every arm of a union holds, and what an
+ * intersection, a mapped type, a computed key or a `z.infer` resolves to. A member a dependency
+ * declares, such as `Error`'s `message` or a `z.ZodObject`'s `parse`, is left out: it is the
+ * dependency's to change, and comb's declarations hash already moves when comb's own use of it does.
+ * Undefined for a type that is not an object, or a union with an arm that is not.
  */
-function memberReader(
+function membersOf(
 	checker: ts.TypeChecker,
-	local: (symbol: ts.Symbol) => boolean,
-): (declaration: ts.Node, symbol: ts.Symbol) => Optionality | undefined {
-	const target = (reference: ts.TypeReferenceNode | ts.ExpressionWithTypeArguments): ts.Symbol | undefined => {
-		const found = named(checker, reference)
-		const resolved = found === undefined ? undefined : real(checker, found)
-		return resolved !== undefined && local(resolved) ? resolved : undefined
-	}
-	const spelled = (node: ts.Node, seen: ReadonlySet<ts.Symbol>): Optionality | undefined => {
-		const each = (nodes: readonly ts.Node[]) => nodes.map((part) => spelled(part, seen))
-		if (ts.isTypeLiteralNode(node)) return ownMembers(node.members)
-		if (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) {
-			const bases = basesOf(node).map((base) => (target(base) === undefined ? {} : referenced(base, seen)))
-			return merged([...bases, ownMembers(node.members)])
+	symbol: ts.Symbol,
+	inPackage: (node: ts.Node) => boolean,
+): Optionality | undefined {
+	if (!(symbol.flags & HAS_MEMBERS)) return undefined
+	const type = checker.getDeclaredTypeOfSymbol(symbol)
+	const arms = type.isUnion() ? type.types : [type]
+	if (!arms.every((arm) => arm.flags & ts.TypeFlags.Object || arm.isIntersection())) return undefined
+	const declared = (member: ts.Symbol) =>
+		(member.declarations ?? []).length === 0 || (member.declarations ?? []).some(inPackage)
+	return Object.fromEntries(
+		checker
+			.getPropertiesOfType(type)
+			.filter((member) => isPublic(member) && declared(member))
+			.map((member) => [member.name, member.flags & ts.SymbolFlags.Optional ? "optional" : "required"] as const)
+			.sort(([a], [b]) => (a < b ? -1 : 1)),
+	)
+}
+
+/**
+ * Each type's key in `Members`: its name, which is what a consumer and an Upgrading section call it.
+ * When types of one name hold different members, the exported one keeps the name and every other is
+ * keyed `Name (file)`, its declaration file under the package's declarations without `.d.ts`.
+ */
+function keyed(found: Array<{ exported: boolean; file: string; members: Optionality; name: string }>): Members {
+	const members: Members = {}
+	const byName = Map.groupBy(found, (type) => type.name)
+	for (const [name, types] of byName) {
+		const distinct = new Set(types.map((type) => JSON.stringify(type.members)))
+		const exported = types.filter((type) => type.exported)
+		for (const type of types) {
+			const bare = distinct.size === 1 || (exported.length === 1 && type.exported)
+			members[bare ? name : `${name} (${type.file})`] = type.members
 		}
-		if (ts.isTypeAliasDeclaration(node) || ts.isParenthesizedTypeNode(node)) return spelled(node.type, seen)
-		if (ts.isIntersectionTypeNode(node)) return merged(each(node.types))
-		if (ts.isUnionTypeNode(node)) return commonToEvery(each(node.types))
-		if (ts.isTypeReferenceNode(node) || ts.isExpressionWithTypeArguments(node)) return referenced(node, seen)
-		return undefined
 	}
-	/** The members of the type a reference names: a local one's, or `Partial` or `Required` of what it wraps */
-	const referenced = (
-		reference: ts.TypeReferenceNode | ts.ExpressionWithTypeArguments,
-		seen: ReadonlySet<ts.Symbol>,
-	): Optionality | undefined => {
-		const name = ts.isTypeReferenceNode(reference) ? reference.typeName.getText() : reference.expression.getText()
-		const [argument] = reference.typeArguments ?? []
-		if ((name === "Partial" || name === "Required") && argument !== undefined) {
-			const inner = spelled(argument, seen)
-			const now = name === "Partial" ? "optional" : "required"
-			return inner === undefined ? undefined : Object.fromEntries(Object.keys(inner).map((member) => [member, now]))
-		}
-		const found = target(reference)
-		const declaration = found === undefined || seen.has(found) ? undefined : found.declarations?.[0]
-		return declaration === undefined ? undefined : spelled(declaration, new Set([...seen, found as ts.Symbol]))
-	}
-	return (declaration, symbol) => spelled(declaration, new Set([symbol]))
+	return Object.fromEntries(Object.entries(members).sort(([a], [b]) => (a < b ? -1 : 1)))
 }
 
 /** The hashes of what `declarations` exports, by subpath and name, and the members of each type they reach */
@@ -141,7 +110,6 @@ function apiIn({ dir, entries }: Declarations): Api {
 	const bySubpath = exportsBySubpath(checker, program, entries)
 	const local = (symbol: ts.Symbol) => symbol.declarations?.[0]?.getSourceFile().fileName.startsWith(dir) === true
 	const reachedTypes = new Set<ts.Symbol>()
-	const readMembers = memberReader(checker, local)
 	/** The texts of `symbol`'s declarations, then those of each local type they reach, sorted */
 	const closure = (symbol: ts.Symbol): string[] => {
 		reachedTypes.add(symbol)
@@ -175,18 +143,16 @@ function apiIn({ dir, entries }: Declarations): Api {
 			return [subpath, Object.fromEntries(hashes.sort(([a], [b]) => (a < b ? -1 : 1)))]
 		}),
 	)
-	const members: Members = {}
-	for (const symbol of [...reachedTypes].sort((a, b) => (a.name < b.name ? -1 : 1))) {
-		const declaration = symbol.declarations?.[0]
-		const own = declaration === undefined ? undefined : readMembers(declaration, symbol)
-		if (own === undefined) continue
-		const sorted = Object.fromEntries(Object.entries(own).sort(([a], [b]) => (a < b ? -1 : 1)))
-		const prior = members[symbol.name]
-		if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(sorted)) {
-			throw new Error(`two types an export reaches are named ${symbol.name}, with different members`)
-		}
-		members[symbol.name] = sorted
-	}
+	const exported = new Set(bySubpath.flatMap(([, symbols]) => symbols.map((symbol) => real(checker, symbol))))
+	const base = dirname(entries["."] ?? join(dir, "index.d.ts"))
+	const inPackage = (node: ts.Node) => node.getSourceFile().fileName.startsWith(dir)
+	const members = keyed(
+		[...reachedTypes].flatMap((symbol) => {
+			const own = membersOf(checker, symbol, inPackage)
+			const file = relative(base, symbol.declarations?.[0]?.getSourceFile().fileName ?? base).replace(/\.d\.ts$/, "")
+			return own === undefined ? [] : [{ exported: exported.has(symbol), file, members: own, name: symbol.name }]
+		}),
+	)
 	return { exports, members }
 }
 

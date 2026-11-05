@@ -491,6 +491,18 @@
 			"uniqueIndexes": "required",
 			"v": "required"
 		},
+		"CombEntityMetaInput": {
+			"generated": "required",
+			"identity": "required",
+			"immutable": "required",
+			"kind": "required",
+			"name": "required",
+			"partialUniqueIndexes": "optional",
+			"softDelete": "required",
+			"states": "required",
+			"tenantColumn": "required",
+			"uniqueIndexes": "required"
+		},
 		"CombError": {
 			"column": "optional",
 			"errorKey": "required",
@@ -508,7 +520,12 @@
 			"kind": "required",
 			"v": "required"
 		},
-		"CombMetaStamp": {},
+		"CombMetaInput": {
+			"kind": "required"
+		},
+		"CombMetaStamp": {
+			"x-comb": "required"
+		},
 		"CombMigrateConfig": {
 			"databases": "required"
 		},
@@ -537,12 +554,39 @@
 			"stableTiebreak": "required",
 			"v": "required"
 		},
+		"CombQueryMetaInput": {
+			"defaultOrder": "required",
+			"filterFields": "optional",
+			"filterable": "required",
+			"grammar": "required",
+			"kind": "required",
+			"maxFilterBytes": "optional",
+			"maxFilterConditions": "optional",
+			"maxFilterDepth": "optional",
+			"maxFilterValues": "optional",
+			"maxInValues": "optional",
+			"maxLimit": "required",
+			"maxPage": "optional",
+			"maxPatternBytes": "optional",
+			"maxQueryBytes": "optional",
+			"maxSearchBytes": "optional",
+			"maxSearchTerms": "optional",
+			"maxSortKeys": "optional",
+			"nulls": "optional",
+			"searchable": "required",
+			"selectable": "required",
+			"sortable": "required",
+			"stableTiebreak": "required"
+		},
 		"CombStatesMeta": {
 			"column": "required",
 			"initial": "required",
 			"terminal": "required",
 			"values": "required"
 		},
+		"ComputedFilterResolver": {},
+		"ComputedSortResolver": {},
+		"Connect": {},
 		"Connection": {
 			"batch": "required",
 			"close": "required",
@@ -622,6 +666,7 @@
 			"name": "optional",
 			"provider": "optional"
 		},
+		"DatabaseErrorHandler": {},
 		"DatabaseMissing": {},
 		"DatabaseShared": {
 			"codegen": "optional",
@@ -665,6 +710,14 @@
 		},
 		"EnumChecksConfig": {
 			"output": "required"
+		},
+		"EnumOptions": {
+			"initial": "optional",
+			"nomutate": "optional",
+			"private": "optional",
+			"tenant": "optional",
+			"terminal": "optional",
+			"transitions": "optional"
 		},
 		"EnumStates": {
 			"initial": "optional",
@@ -850,6 +903,7 @@
 			"ftsTable": "required",
 			"table": "required"
 		},
+		"FtsState": {},
 		"FtsTableConfig": {
 			"columns": "required",
 			"tokenizer": "optional"
@@ -916,6 +970,7 @@
 			"type": "required",
 			"url": "required"
 		},
+		"LikeSearchResolver": {},
 		"ListExtras": {
 			"_combAnchorGone": "optional",
 			"_combId": "optional",
@@ -937,6 +992,13 @@
 			"parsedSort": "required",
 			"read": "required",
 			"window": "required"
+		},
+		"ListQuery": {
+			"extras": "required",
+			"limit": "required",
+			"offset": "required",
+			"orderBy": "required",
+			"where": "required"
 		},
 		"ListQueryAppliable": {
 			"limit": "required",
@@ -975,6 +1037,7 @@
 			"q": "optional",
 			"validated": "optional"
 		},
+		"ListQueryInput (query/list-schema)": {},
 		"ListQueryLimits": {
 			"maxConditions": "required",
 			"maxDepth": "required",
@@ -1009,6 +1072,17 @@
 			"search": "required",
 			"where": "required"
 		},
+		"ListQuerySchema": {},
+		"ListQueryShape": {
+			"cursor": "required",
+			"filter": "optional",
+			"lang": "optional",
+			"limit": "required",
+			"order": "required",
+			"page": "required",
+			"q": "optional",
+			"select": "optional"
+		},
 		"LiveObjects": {
 			"extensions": "required",
 			"kinds": "required",
@@ -1023,6 +1097,7 @@
 			"triggers": "required",
 			"user": "required"
 		},
+		"LiveRead": {},
 		"LiveTarget": {
 			"schema": "required",
 			"url": "required"
@@ -1031,6 +1106,7 @@
 			"config": "required",
 			"configDir": "required"
 		},
+		"LogFn": {},
 		"LruCache": {
 			"clear": "required",
 			"delete": "required",
@@ -1096,6 +1172,16 @@
 			"column": "required",
 			"kind": "required"
 		},
+		"MergedListQueryResult": {
+			"extras": "required",
+			"limit": "required",
+			"meta": "required",
+			"offset": "required",
+			"orderBy": "required",
+			"pagination": "required",
+			"search": "required",
+			"where": "required"
+		},
 		"MetaCarrier": {
 			"meta": "required"
 		},
@@ -1133,6 +1219,7 @@
 			"output": "required",
 			"relationsOutput": "optional"
 		},
+		"OutputStableShape": {},
 		"PaginationConfig": {
 			"defaultLimit": "optional",
 			"maxLimit": "optional",
@@ -1145,6 +1232,7 @@
 			"nextCursor": "required",
 			"page": "required"
 		},
+		"PaginationResponseSchema": {},
 		"ParamMeta": {
 			"description": "required",
 			"examples": "required"
@@ -1257,6 +1345,7 @@
 			"type": "required",
 			"url": "required"
 		},
+		"RetrieveInput": {},
 		"RetrieveQueryConfig": {
 			"extend": "optional",
 			"fields": "required",
@@ -1266,6 +1355,7 @@
 			"lang": "required",
 			"parsedFields": "required"
 		},
+		"RetrieveQuerySchema": {},
 		"RetrieveShape": {
 			"lang": "optional",
 			"select": "required"
@@ -1279,6 +1369,7 @@
 		"RowsConfig": {
 			"output": "required"
 		},
+		"Run": {},
 		"RunOptions": {
 			"cwd": "optional",
 			"env": "optional",
@@ -1331,6 +1422,15 @@
 			"target": "required",
 			"updated_at": "required"
 		},
+		"ShardMapTable": {
+			"created_at": "required",
+			"deleted_at": "required",
+			"driver": "required",
+			"org_id": "required",
+			"shard_id": "required",
+			"target": "required",
+			"updated_at": "required"
+		},
 		"ShardMapping": {
 			"createdAt": "required",
 			"deletedAt": "required",
@@ -1345,6 +1445,7 @@
 			"shardId": "required",
 			"with": "optional"
 		},
+		"ShardPick": {},
 		"ShardPickInput": {
 			"counts": "required",
 			"orgId": "required",
@@ -1494,6 +1595,7 @@
 			"input": "required",
 			"output": "required"
 		},
+		"Text": {},
 		"TextConstraints": {
 			"autogenerate": "optional",
 			"email": "optional",

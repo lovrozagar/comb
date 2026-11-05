@@ -101,20 +101,59 @@ interface Narrow { name: string }
 export type Mixed = Narrow & Partial<{ later: number }> & { required: Hidden }
 export type Either = { kind: "a"; a?: string; both: number } | { kind: "b"; both?: number }
 export type Mapped = { [K in "x"]: string }
+const KEY = "x-key"
+export type Keyed = { [KEY]: number; plain?: string }
 `
 
 describe("the members of each type an export reaches, as a consumer's compiler reads them", () => {
-	it("lists each public member optional or required, through bases, intersections, unions and Partial", () => {
+	it("lists each public member optional or required, through bases, intersections, unions, mapped types and computed keys", () => {
 		const root = fixture(BASE)
 		writeFileSync(join(root, "src/index.ts"), MEMBERS)
 		const { members } = apiOf(root)
 		expect(members).toEqual({
 			Either: { both: "optional", kind: "required" },
 			Hidden: { inner: "required" },
+			/* a dependency's base adds none: Error's members are its own to change, and its release notes' to name */
 			Kept: { column: "optional", toJSON: "required" },
+			Keyed: { plain: "optional", "x-key": "required" },
+			Mapped: { x: "required" },
 			Mixed: { later: "optional", name: "required", required: "required" },
 			Narrow: { name: "required" },
 			Wide: { extra: "optional", name: "required" },
+		})
+	})
+})
+
+describe("two types an export reaches under one name", () => {
+	/* 0.20.1 reached the exported ListQueryInput of query/types.ts and a z.ZodObject of that name in query/list-schema.ts */
+	it("keep the bare name for the exported one, and key the other by its file", () => {
+		const root = fixture(BASE)
+		writeFileSync(join(root, "src/a.ts"), "export type Shared = { a: string }\n")
+		writeFileSync(join(root, "src/b.ts"), "type Shared = { b?: number }\nexport type UsesB = { shared: Shared }\n")
+		writeFileSync(
+			join(root, "src/index.ts"),
+			'export type { Shared } from "./a.ts"\nexport type { UsesB } from "./b.ts"\n',
+		)
+		expect(apiOf(root).members).toEqual({
+			Shared: { a: "required" },
+			"Shared (b)": { b: "optional" },
+			UsesB: { shared: "required" },
+		})
+	})
+
+	it("key each by its file when none is exported, or more than one is", () => {
+		const root = fixture(BASE)
+		writeFileSync(join(root, "src/a.ts"), "type Shared = { a: string }\nexport type UsesA = { shared: Shared }\n")
+		writeFileSync(join(root, "src/b.ts"), "type Shared = { b?: number }\nexport type UsesB = { shared: Shared }\n")
+		writeFileSync(
+			join(root, "src/index.ts"),
+			'export type { UsesA } from "./a.ts"\nexport type { UsesB } from "./b.ts"\n',
+		)
+		expect(apiOf(root).members).toEqual({
+			"Shared (a)": { a: "required" },
+			"Shared (b)": { b: "optional" },
+			UsesA: { shared: "required" },
+			UsesB: { shared: "required" },
 		})
 	})
 })
