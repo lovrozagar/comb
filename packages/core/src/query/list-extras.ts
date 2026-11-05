@@ -125,6 +125,8 @@ function malformed(row: object, sort: readonly SortField[]): string | undefined 
 const TEXT_MARK = "!"
 /* what a SQLite boolean key holding a value but 0 or 1 carries there (AB3-2 of area B) */
 const BOOLEAN_MARK = "!b"
+/* what a Postgres float key carries there under extra_float_digits 0 or below (AB4-4 of area B) */
+const FLOAT_MARK = "!f"
 
 /** A key's stored value `_combTextKeys` carries: a timestamp's TEXT, or a boolean's storage class and text */
 type HeldKey = string | readonly [StoredClass, string] | null
@@ -188,6 +190,14 @@ const storesText = (field: string): CombError =>
 		status: "internal_server_error",
 	})
 
+/** The 500 for a Postgres float key read under extra_float_digits 0 or below: its read is rounded */
+const printsRounded = (field: string): CombError =>
+	new CombError({
+		cause: `${field} is a float Postgres prints rounded under extra_float_digits 0 or below, which no cursor resumes from: leave extra_float_digits at its default of 1, or sort by another column`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+
 /**
  * A time key's value as the row stores it, where the builder carried it (QL2 of r22b): the Date the
  * driver read keeps milliseconds, where Postgres keeps microseconds and SQLite's seconds any fraction.
@@ -204,7 +214,8 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
 
 /**
  * A 500 naming the first of `sort`'s keys whose stored value the row's `_combKeyTexts` marks as none
- * a list binding it as read places: a SQLite timestamp's TEXT, or a boolean's value but 0 or 1.
+ * a list binding it as read places: a SQLite timestamp's TEXT, or a boolean's value but 0 or 1; and
+ * a Postgres float the session's extra_float_digits prints rounded on any list (AB4-4 of area B).
  * paginate asks it of every row it serves, so the refusal never hangs on which row ends a page
  */
 function refuseUnheld(row: Record<string, unknown>, sort: readonly SortField[]): void {
@@ -215,6 +226,8 @@ function refuseUnheld(row: Record<string, unknown>, sort: readonly SortField[]):
 	if (text !== undefined) throw storesText(text.field)
 	const other = sort.find((_, i) => carried[i] === BOOLEAN_MARK)
 	if (other !== undefined) throw storesOther(other.field)
+	const float = sort.find((_, i) => carried[i] === FLOAT_MARK)
+	if (float !== undefined) throw printsRounded(float.field)
 }
 
 /**

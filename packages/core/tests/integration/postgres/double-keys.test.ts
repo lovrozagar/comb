@@ -89,3 +89,47 @@ describe("the cursor binds by the list's dialect (QL4; sibling: r21 Q1)", () => 
 		},
 	)
 })
+
+/** Every id `path` serves by `n` descending, one a page, by cursor, at most six pages */
+async function walked(client: pg.Client, path: Path): Promise<string[]> {
+	const ids: string[] = []
+	let cursor: string | undefined
+	for (let n = 1; n <= 6; n++) {
+		const query = { ...schema.parse({ order: "n.desc" }), cursor }
+		const [rows, built] = await pageOf(client, path, query)
+		const [items, meta] = queryHelpers.paginate(rows, built)
+		ids.push(...items.map((row) => row["id"] as string))
+		if (meta.nextCursor === null) break
+		cursor = meta.nextCursor
+	}
+	return ids
+}
+
+/*
+ * AB4-4 of area B: under extra_float_digits 0 or below Postgres prints a double rounded to 15
+ * significant digits, so 1.0000000000000002 reads as 1, and its cursor skipped the rows that hold 1.
+ * No text Postgres prints holds the double then, so the page that reads such a key is a 500 naming the
+ * setting instead of a silent skip
+ */
+describe("a float key under extra_float_digits 0 is refused, never skipping rows (AB4-4 of area B; sibling: AB3-4)", () => {
+	const sessions = usePg()
+
+	it.each(["anchorless", "anchored", "table", "relational"] as const)(
+		"answers a 500 naming extra_float_digits on the %s path's page that reads 1.0000000000000002",
+		async (path) => {
+			const client = sessions.pg()
+			await client.query(`CREATE TEMP TABLE IF NOT EXISTS dbl_item (id text PRIMARY KEY, n double precision);
+			DELETE FROM dbl_item;
+			INSERT INTO dbl_item VALUES ('a', 1.0000000000000002), ('b', 1), ('c', 1), ('d', 1)`)
+			await client.query("SET extra_float_digits = 0")
+			try {
+				await expect(walked(client, path)).rejects.toThrow(
+					expect.objectContaining({ cause: expect.stringContaining("extra_float_digits"), errorKey: "sort_not_wired" }),
+				)
+			} finally {
+				await client.query("RESET extra_float_digits")
+			}
+			expect(await walked(client, path)).toEqual(["a", "b", "c", "d"])
+		},
+	)
+})

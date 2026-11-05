@@ -65,11 +65,30 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 			: null
 	}
 	if (column instanceof DateKey) return null
-	if (is(column, Column) && !carriesOpaque(column))
+	if (is(column, Column) && !carriesOpaque(column)) {
+		if (FLOATS.has(column.dataType)) return sql`case when ${unprinted(column)} then '!f' else '' end`
 		return DATESTYLED.has(column.dataType) ? sql`coalesce(${isoText(column)}, '')` : null
+	}
 	const time = carriesOpaque(column) ? sql`` : sql` when ${isTime(column)} then ${isoText(column)}`
-	return sql`coalesce(case when ${roundsOnRead(column)} then (${column})::text${time} end, '')`
+	const float = sql` when ${isFloat(column)} and ${unprinted(column)} then '!f'`
+	return sql`coalesce(case when ${roundsOnRead(column)} then (${column})::text${float}${time} end, '')`
 }
+
+// lookup-table: drizzle's Postgres float columns, which a driver reads from the text extra_float_digits prints (AB4-4 of area B)
+const FLOATS = /* @__PURE__ */ new Set(["number double", "number float"])
+
+/* whether a Postgres expression's type is a double precision or real, or a domain over one */
+const isFloat = (column: SQLWrapper): SQL =>
+	sql`(pg_typeof(${column}) in (${floatTypes()}) or ${isDomainOver(column, floatTypes())})`
+
+/**
+ * Whether a Postgres float key's value reaches the driver rounded: every text Postgres prints a float
+ * in follows extra_float_digits, which at 0 or below keeps 15 significant digits (6 for a real), so
+ * 1.0000000000000002 reads as 1 and its cursor skips the rows that hold 1 (AB4-4 of area B). The row
+ * carries `!f`, which paginate refuses on the page that serves it, as it does a SQLite TEXT's `!`
+ */
+const unprinted = (column: SQLWrapper): SQL =>
+	sql`(${column} is not null and current_setting('extra_float_digits')::int <= 0)`
 
 /* whether a SQLite boolean's row holds what drizzle's read of it binds back: NULL, or a number that is 0 or 1 */
 const readAsStored = (column: SQLWrapper): SQL =>

@@ -21,6 +21,16 @@ import { keyTextsSQL, textKeysSQL } from "./key-texts.ts"
 const render = (column: Parameters<typeof keyTextsSQL>[0][number]["column"]) =>
 	new SQLiteDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "sqlite", () => true)).sql
 
+/** The types a Postgres key's guard may name: numeric and the times it carries the text of, and a float it marks where the session prints it rounded (AB4-4 of area B) */
+const TYPES_ALLOWED = [
+	"numeric",
+	"timestamp without time zone",
+	"timestamp with time zone",
+	"date",
+	"double precision",
+	"real",
+]
+
 /*
  * AB1 of area B: keyTextsSQL joins the carried texts on a comma, so a carried text must never hold
  * one. Only a numeric's text (digits, a sign, a point, NaN, Infinity), a time's (ISO under every
@@ -47,20 +57,21 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 		["an expression", sql`${kinds.label}`, true],
 		["a customType column", kinds.amount, true],
 	]
-	const TYPES_ALLOWED = ["numeric", "timestamp without time zone", "timestamp with time zone", "date"]
-
-	it.each([false, true])("names no type but a numeric or a time in a Postgres key's guard (as read: %s)", (asRead) => {
-		const rendered = new PgDialect().sqlToQuery(
-			keyTextsSQL(
-				pgKeys.map(([, column]) => ({ column, direction: "asc" as const })),
-				"postgres",
-				() => asRead,
-			),
-		).sql
-		const named = [...rendered.matchAll(/'([^']+)'::regtype/g)].map((match) => match[1])
-		expect(named.length).toBeGreaterThan(0)
-		expect(named.filter((type) => !TYPES_ALLOWED.includes(type as string))).toEqual([])
-	})
+	it.each([false, true])(
+		"names no type but a numeric, a time or a float in a Postgres key's guard (as read: %s)",
+		(asRead) => {
+			const rendered = new PgDialect().sqlToQuery(
+				keyTextsSQL(
+					pgKeys.map(([, column]) => ({ column, direction: "asc" as const })),
+					"postgres",
+					() => asRead,
+				),
+			).sql
+			const named = [...rendered.matchAll(/'([^']+)'::regtype/g)].map((match) => match[1])
+			expect(named.length).toBeGreaterThan(0)
+			expect(named.filter((type) => !TYPES_ALLOWED.includes(type as string))).toEqual([])
+		},
+	)
 
 	it.each(pgKeys)("carries %s's text or nothing, by its type", (_, column, carries) => {
 		const rendered = new PgDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "postgres", () => true)).sql
