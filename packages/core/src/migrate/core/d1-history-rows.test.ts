@@ -17,12 +17,13 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 const binding = { binding: "CORE", database_id: "00000000-0000-0000-0000-000000000000" }
 const read: ReadConfig = () => ({ d1_databases: [binding] })
 
-async function target(): Promise<D1Target & { db: ReturnType<typeof fakeD1>["db"] }> {
+async function target(): Promise<D1Target & Pick<ReturnType<typeof fakeD1>, "calls" | "db">> {
 	const run = fakeD1({ dir })
 	const config = { databaseName: "core", local: true, type: "d1" as const }
 	const conn = await createD1Provider(config, run).connect({ migrationsDir: dir, name: "core", provider: config })
 	localD1(dir, binding)
 	return {
+		calls: run.calls,
 		conn,
 		db: run.db,
 		exec: run,
@@ -74,6 +75,16 @@ describe("readHistory", () => {
 		const history = await readHistory(read, d1, "d1_migrations")
 		expect(history.marks).toBe(false)
 		expect(history.recorded).toEqual(new Map([["1.sql", { hash: "h1", marked: false }]]))
+	})
+
+	/* D1 documents the PRAGMA statement it allows, not a pragma's table-valued function, on a remote database too */
+	it("asks for comb's hash table's columns with PRAGMA table_info", async () => {
+		const d1 = await target()
+		d1.db.exec("CREATE TABLE _comb_migration_hashes (name TEXT PRIMARY KEY, hash TEXT NOT NULL, hash_v INTEGER)")
+		expect((await readHistory(read, d1, "d1_migrations")).marks).toBe(true)
+		const sent = d1.calls.flatMap((call) => call.filter((arg) => arg.startsWith("--command=")))
+		expect(sent.join("\n")).not.toMatch(/pragma_\w+\(/i)
+		expect(sent.join("\n")).toContain("PRAGMA table_info('_comb_migration_hashes')")
 	})
 })
 

@@ -61,11 +61,12 @@ async function readHistory(read: ReadConfig, target: D1Target, table: string): P
 	if (localMissing(read, target)) return noHistory()
 	const tables = [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE, DRIZZLE_HISTORY_TABLE]
 	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${tables.map(literal).join(", ")})`
-	const versioned = `SELECT name FROM pragma_table_info(${literal(D1_HASH_TABLE)}) WHERE name = 'hash_v'`
+	/* the PRAGMA statement D1 documents as allowed; it answers no row for a table that does not exist */
+	const versioned = `PRAGMA table_info(${literal(D1_HASH_TABLE)})`
 	/* executeAll answers one result per statement, or throws */
 	const [listed, columns] = await executeAll(target.exec, target, [listing, versioned])
 	const present = new Set((listed as Rows).map((row) => String(row["name"])))
-	const marks = !present.has(D1_HASH_TABLE) || (columns as Rows).length > 0
+	const marks = !present.has(D1_HASH_TABLE) || (columns as Rows).some((row) => row["name"] === "hash_v")
 	const [names, hashes, intents, drizzle] = [
 		namesOf(table),
 		`SELECT name, hash, ${marks ? "hash_v" : "NULL AS hash_v"} FROM ${D1_HASH_TABLE}`,
