@@ -3,9 +3,9 @@
  * global setup at argv's `setup` once for each of `projects`, as vitest runs it for each project
  * that names it, waits `settle` ms (a run slow to get going), appends `start <name>` to `log`,
  * waits for `peer`'s start for up to `hold` ms (or for good, with `hold` 0, until a test kills it),
- * appends `end <name>`, tears the setup down, and appends `exit <name>` once the peer started or
- * 10 s passed. The log's order is the windows': a peer that starts between a start and its end ran
- * beside it.
+ * appends `end <name>`, tears the setup down, and appends `exit <name>` once the peer started,
+ * however long it takes. The log's order is the windows': a peer that starts between a start and
+ * its end ran beside it.
  */
 import { appendFileSync, readFileSync } from "node:fs"
 
@@ -38,6 +38,6 @@ appendFileSync(log, `start ${name}\n`)
 await awaitPeer(hold)
 appendFileSync(log, `end ${name}\n`)
 for (const teardown of teardowns.toReversed()) if (typeof teardown === "function") await teardown()
-await awaitPeer(10_000)
+await awaitPeer(0)
 appendFileSync(log, `exit ${name}\n`)
 process.exit(0)

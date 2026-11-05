@@ -100,7 +100,9 @@ describe("two runs of the Postgres suites on one server", () => {
 			await until(() => lines().includes("start a"))
 			const second = window(url, { hold: 3000, name: "b", peer: "a", projects: 1, settle: 10_500 })
 			expect(await Promise.all([first.ended, second.ended])).toEqual([0, 0])
-			expect(lines()).toEqual(["start a", "end a", "start b", "exit a", "end b", "exit b"])
+			const order = lines()
+			expect(order.filter((line) => !line.startsWith("exit "))).toEqual(["start a", "end a", "start b", "end b"])
+			expect(order.indexOf("start b")).toBeLessThan(order.indexOf("exit a"))
 		})
 	}, 60_000)
 
