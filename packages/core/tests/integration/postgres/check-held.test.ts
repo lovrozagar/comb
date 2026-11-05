@@ -92,6 +92,11 @@ async function unreplayed(one: string, two: string): Promise<string[]> {
 	return out
 }
 
+/* a history leaving t's CHECK c to validate, and the pending file's VALIDATE of it */
+const NOT_VALID = `${T}ALTER TABLE t ADD CONSTRAINT c CHECK (w > 0) NOT VALID;\n`
+const VALIDATE_T = "ALTER TABLE t VALIDATE CONSTRAINT c;"
+const AT_T = { table: "t", validate: VALIDATE_T }
+
 describe("check's held warnings, measured on devUrl", () => {
 	it.each(CASES)(
 		"after %s, warns of what Postgres holds at the VALIDATE",
@@ -104,10 +109,6 @@ describe("check's held warnings, measured on devUrl", () => {
 		},
 		60_000,
 	)
-
-	const NOT_VALID = `${T}ALTER TABLE t ADD CONSTRAINT c CHECK (w > 0) NOT VALID;\n`
-	const VALIDATE_T = "ALTER TABLE t VALIDATE CONSTRAINT c;"
-	const AT_T = { table: "t", validate: VALIDATE_T }
 
 	it("names what a DO block locks, which only the replay sees", async () => {
 		const two = `${ALLOW}DO $$BEGIN EXECUTE 'ALTER TABLE u ADD COLUMN x int'; END$$;\n${VALIDATE_T}\n`
@@ -137,5 +138,32 @@ describe("check's held warnings, measured on devUrl", () => {
 		expect(heldOf(out, VALIDATE_T)).toEqual([])
 		/* the map names z, which Postgres does not: more than the replay measures, never less */
 		mapHolds({ one: NOT_VALID, out, two }, AT_T)
+	})
+})
+
+describe("check's held warnings of a lock no CASE takes, measured on devUrl (Area E round 2)", () => {
+	it("holds a table a LOCK IN EXCLUSIVE MODE took against writes", async () => {
+		const one = `${NOT_VALID}CREATE TABLE ex (id int);\n`
+		const two = `${ALLOW}LOCK ex IN EXCLUSIVE MODE;\n${VALIDATE_T}\n`
+		const { out, refused } = await checked(one, two)
+		expect(refused).toBeUndefined()
+		expect(heldOf(out, VALIDATE_T)).toEqual(warningOf(AT_T, { ex: "writes" }))
+		mapHolds({ one, out, two }, AT_T)
+	})
+
+	it("holds a table a REINDEX locked through its TOAST table alone against reads and writes", async () => {
+		const one = `${NOT_VALID}CREATE TABLE tx (v text);\n`
+		const two = `${ALLOW}REINDEX TABLE tx;\n${VALIDATE_T}\n`
+		const { out, refused } = await checked(one, two)
+		expect(refused).toBeUndefined()
+		expect(heldOf(out, VALIDATE_T)).toEqual(warningOf(AT_T, { tx: "reads and writes" }))
+		mapHolds({ one, out, two }, AT_T)
+	})
+
+	it("leaves out a temp table the file made in an earlier transaction, which no other session sees", async () => {
+		const two = `-- atlas:txmode none\n\n${ALLOW}CREATE TEMP TABLE tt (id int);\nBEGIN;\nLOCK tt IN ACCESS EXCLUSIVE MODE;\n${VALIDATE_T}\nCOMMIT;\n`
+		const { out, refused } = await checked(NOT_VALID, two)
+		expect(refused).toBeUndefined()
+		expect(heldOf(out, VALIDATE_T)).toEqual([])
 	})
 })
