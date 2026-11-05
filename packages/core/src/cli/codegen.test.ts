@@ -105,7 +105,7 @@ describe("comb codegen: config mode generator selection", () => {
 		writeTables(dir)
 		config(dir, { generators: ["rows", "manifest", "orm", "fts"], output: { rows: "./out/rows.gen.ts" } })
 		expect(await runCliWithFakes(["codegen", "core"], makeIo(dir))).toBe(0)
-		/* orm without a dialect and driver, and fts without a config, write nothing */
+		/* orm without a driver, and fts without a config, write nothing */
 		expect(readdirSync(dir).sort()).toEqual([
 			".comb.codegen.gen.json",
 			"comb.config.ts",
@@ -124,6 +124,14 @@ describe("comb codegen: config mode generator selection", () => {
 			"db.core.manifest.gen.json",
 			"db.core.tables.ts",
 		])
+	})
+
+	it("writes the orm client with a driver and the dialect the tables declare", async () => {
+		const dir = project()
+		writeTables(dir)
+		config(dir, { driver: "d1", generators: ["orm"] })
+		expect(await runCliWithFakes(["codegen"], makeIo(dir))).toBe(0)
+		expect(readFileSync(join(dir, "db.core.orm.gen.ts"), "utf8")).toContain("drizzle-orm/d1")
 	})
 })
 

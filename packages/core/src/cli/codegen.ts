@@ -99,8 +99,9 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 		generateManifest(plan.ctx, { output: out(plan, "manifest", beside(plan, "manifest.gen.json")) })
 	},
 	orm: async (plan) => {
-		const { dialect, driver, filePrefix } = plan.db
-		if (!dialect || !driver) return
+		const { dialect } = plan.ctx
+		const { driver, filePrefix } = plan.db
+		if (!driver) return
 		const { generateOrm } = await import("../codegen/generators/orm.ts")
 		const relationsOutput = path.resolve(plan.ctx.cwd, out(plan, "relations", beside(plan, "relations.gen.ts")))
 		generateOrm(plan.ctx, {
