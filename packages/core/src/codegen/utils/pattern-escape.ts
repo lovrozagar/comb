@@ -34,7 +34,7 @@ const SAME_ESCAPES = "^$\\.*+?()[]{}|/tnrfv"
 
 /* the General_Category values Go's RE2 names, which Rust's regex reads alike: Cs, a surrogate, Rust refuses (A3-2 of r23) */
 // lookup-table: a \p{…} every engine compiles
-const CATEGORIES: ReadonlySet<string> = /* @__PURE__ */ new Set([
+export const CATEGORIES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"C",
 	"Cc",
 	"Cf",

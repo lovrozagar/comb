@@ -4,6 +4,7 @@ import type { FieldMeta } from "../../analyzer-types.ts"
 import { type Base, type Build, plain } from "./build-types.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import { isMutative } from "./schema-type.ts"
+import { patternLiteral } from "../../utils/pattern.ts"
 
 /* the text guard every written text takes: comb's own isStorableText, which the shared file imports (G1), as a
    refine sits in the structural core F59 shares there */
@@ -30,7 +31,8 @@ const ID_PATTERN = `/${ID_SOURCE}/u`
 const ID_CHECK = `.regex(new RegExp("${ID_SOURCE}", "u")).meta({ pattern: "${ID_SOURCE}" })${TEXT_GUARD}`
 /* the regexes a kind holds a written text to, as the chain writes each: under u, as JSON Schema reads them (CS1 of r22b) */
 const HTTPS = "/^https:\\/\\//u"
-const NAME = "/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u"
+/* a name's rule, its categories written as the ranges comb publishes (AA4-2 of r24) */
+const nameRule = (): string => patternLiteral("/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u", "a name")
 const IMAGE = "/^(?:https:\\/\\/|data:image\\/)/u"
 
 /* the length comb's ids keep to, which a read states: an imported or older id may not (F65) */
@@ -161,7 +163,7 @@ function textKeys(build: Build): Record<string, unknown> {
 /** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
 function kindChecks(annotations: FieldConstraints): string {
 	const name = annotations.name
-		? `.regex(${NAME}, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })`
+		? `.regex(${nameRule()}, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })`
 		: ""
 	/* a regex, not a refine: JSON Schema publishes it as the pattern, so a client sees the rule */
 	const image = annotations.imageUri ? `.regex(${IMAGE}, { message: "Must be an HTTPS URL or a data:image/ URI" })` : ""
@@ -228,6 +230,10 @@ export function textRules(annotations: FieldConstraints, field: FieldMeta): Text
 	const range = textRange(annotations, field)
 	const declared = annotations.pattern === null ? [] : [annotations.pattern]
 	if (isIdText(annotations, field)) return { ...range, patterns: [ID_PATTERN] }
-	const kind = [annotations.url ? HTTPS : null, annotations.name ? NAME : null, annotations.imageUri ? IMAGE : null]
+	const kind = [
+		annotations.url ? HTTPS : null,
+		annotations.name ? nameRule() : null,
+		annotations.imageUri ? IMAGE : null,
+	]
 	return { ...range, patterns: [...declared, ...kind.filter((each) => each !== null)] }
 }
