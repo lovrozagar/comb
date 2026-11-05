@@ -6,8 +6,8 @@
  * them passed whatever it asked.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
-import { ts } from "ts-morph"
+import { join, relative } from "node:path"
+import { Project, ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import { checkerOf, diagnosticsIn, exportsBySubpath, MEMBER, named, real, withEmitted } from "./support/declarations.ts"
 
@@ -59,6 +59,62 @@ describe("the checker over comb's emitted declarations", () => {
 		expect(diagnostics).toEqual([])
 	})
 })
+
+/**
+ * The projects a consumer without Node's types runs, a Workers one and a browser bundle: comb lists
+ * @types/node only as a dev dependency, so a declaration naming `NodeJS` fails such a project with
+ * TS2503, or under skipLibCheck reads as `any` and accepts anything
+ */
+const WITHOUT_NODE = {
+	browser: { lib: ["lib.es2023.d.ts", "lib.dom.d.ts"], types: [] },
+	workers: { lib: ["lib.es2023.d.ts"], types: ["@cloudflare/workers-types"] },
+} satisfies Record<string, { lib: string[]; types: string[] }>
+
+/** Each error a project without Node's types reports on `files` under `dir` */
+function withoutNode(
+	project: keyof typeof WITHOUT_NODE,
+	{ dir, files, skipLibCheck }: { dir: string; files: readonly string[]; skipLibCheck: boolean },
+) {
+	const checked = new Project({
+		compilerOptions: {
+			...WITHOUT_NODE[project],
+			module: ts.ModuleKind.ESNext,
+			moduleResolution: ts.ModuleResolutionKind.Bundler,
+			noEmit: true,
+			skipLibCheck,
+			strict: true,
+			target: ts.ScriptTarget.ES2023,
+		},
+		skipAddingFilesFromTsConfig: true,
+	})
+	checked.addSourceFilesAtPaths([...files])
+	return diagnosticsIn(checked.getProgram().compilerObject, dir)
+}
+
+describe.each(Object.keys(WITHOUT_NODE) as Array<keyof typeof WITHOUT_NODE>)(
+	"comb's emitted declarations in a %s project, without Node's types",
+	(project) => {
+		const { decay, diagnostics } = withEmitted(ROOT, ({ dir, entries }) => {
+			const cli = entries["./cli"]
+			if (cli === undefined) throw new Error("no ./cli entry")
+			const probe = join(dir, "probe.ts")
+			const from = `./${relative(dir, cli).replace(/\.d\.ts$/, ".js")}`
+			writeFileSync(probe, `import type { Terminal } from "${from}"\nexport const bad: Terminal["output"] = 42\n`)
+			return {
+				decay: withoutNode(project, { dir, files: [probe], skipLibCheck: true }),
+				diagnostics: withoutNode(project, { dir, files: Object.values(entries), skipLibCheck: false }),
+			}
+		})
+
+		it("reports nothing on any entry's declarations", () => {
+			expect(diagnostics).toEqual([])
+		})
+
+		it("keeps Terminal typed under skipLibCheck, so a number is no output stream", () => {
+			expect(decay).toEqual([expect.stringMatching(/^probe\.ts: Type 'number' is not assignable to type /)])
+		})
+	},
+)
 
 describe("a checker over declarations that do not check", () => {
 	it("throws, naming each error, rather than read what it cannot resolve as `any`", () => {

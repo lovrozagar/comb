@@ -2,7 +2,6 @@
  * Where the CLI meets the process: the IO it writes and asks through, and the error it reports
  * as a message and an exit code. The only CLI module that touches the console.
  */
-import { createInterface } from "node:readline/promises"
 import type { Run, RunResult } from "../migrate/core/process.ts"
 import type { LiveRead } from "../migrate/core/pg-live-types.ts"
 import type { replayCatalog } from "../migrate/core/pg-replay.ts"
@@ -80,26 +79,69 @@ export class ShowHelp extends Error {
 	}
 }
 
-/** The streams `processIo` asks its yes/no questions on */
+/**
+ * The streams `processIo` asks its yes/no questions on, typed as the calls comb makes on them, so a
+ * consumer without Node's types reads them too: process.stdin and process.stderr, or any stream like them
+ */
 export type Terminal = {
-	/** Where the answer is read */
-	input: NodeJS.ReadableStream & {
+	/** Where the answer is read, one line in cooked mode, as a terminal sends it */
+	input: {
 		/** True when `input` is a terminal; any other value leaves `CliIo.confirm` absent, so nothing is asked */
 		isTTY?: boolean | undefined
+		/** Takes each chunk of the answer, bytes or, once an encoding is set, a string */
+		on(event: "data", listener: (chunk: string | Uint8Array) => void): unknown
+		/** Called when the input ends; what it sent before is the answer */
+		on(event: "end", listener: () => void): unknown
+		/** Called when reading fails; the question rejects with `error` */
+		on(event: "error", listener: (error: Error) => void): unknown
+		/** Removes a data listener `on` added, once the question is answered, ended or failed */
+		off(event: "data", listener: (chunk: string | Uint8Array) => void): unknown
+		/** Removes an end listener `on` added, once the question is answered, ended or failed */
+		off(event: "end", listener: () => void): unknown
+		/** Removes an error listener `on` added, once the question is answered, ended or failed */
+		off(event: "error", listener: (error: Error) => void): unknown
+		/** Starts the chunks flowing, as a question is asked */
+		resume(): unknown
+		/** Stops them once the question is answered, so the input holds the process open no longer */
+		pause(): unknown
 	}
 	/** Where the question is written; stderr by default, so a command's stdout stays its output */
-	output: NodeJS.WritableStream
+	output: {
+		/** Writes the question, `(y/N) ` after it, with no newline */
+		write(chunk: string): unknown
+	}
 }
 
-/** A yes/no question on the terminal; anything but y or yes is no */
-async function ask(terminal: Terminal, question: string): Promise<boolean> {
-	const prompt = createInterface({ input: terminal.input, output: terminal.output })
-	try {
-		const answer = await prompt.question(`${question} (y/N) `)
-		return /^y(?:es)?$/i.test(answer.trim())
-	} finally {
-		prompt.close()
-	}
+/** The first line `input` sends, or what it sent before it ended; it is paused and its listeners gone after */
+function readLine(input: Terminal["input"]): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const decoder = new TextDecoder()
+		let text = ""
+		const settle = (then: () => void): void => {
+			input.off("data", data)
+			input.off("end", end)
+			input.off("error", error)
+			input.pause()
+			then()
+		}
+		const data = (chunk: string | Uint8Array): void => {
+			text += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
+			const newline = text.indexOf("\n")
+			if (newline !== -1) settle(() => resolve(text.slice(0, newline)))
+		}
+		const end = (): void => settle(() => resolve(text + decoder.decode()))
+		const error = (cause: Error): void => settle(() => reject(cause))
+		input.on("data", data)
+		input.on("end", end)
+		input.on("error", error)
+		input.resume()
+	})
+}
+
+/** A yes/no question on the terminal; anything but y or yes is no, and so is an input that ends unanswered */
+async function ask({ input, output }: Terminal, question: string): Promise<boolean> {
+	output.write(`${question} (y/N) `)
+	return /^y(?:es)?$/i.test((await readLine(input)).trim())
 }
 
 /**

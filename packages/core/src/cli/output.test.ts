@@ -70,6 +70,60 @@ describe("processIo", () => {
 	})
 })
 
+/** A terminal whose input sends `chunks`, then ends, or fails with `error` */
+async function answering(
+	chunks: readonly (string | Uint8Array)[],
+	after: "end" | Error | "open" = "open",
+	encoding?: BufferEncoding,
+) {
+	const input = Object.assign(new PassThrough(), { isTTY: true })
+	if (encoding !== undefined) input.setEncoding(encoding)
+	const written: string[] = []
+	const output = { write: (chunk: string) => written.push(chunk) }
+	const confirm = processIo({ input, output }).confirm as (question: string) => Promise<boolean>
+	const answer = confirm("Drop it?")
+	for (const chunk of chunks) {
+		input.write(chunk)
+		await new Promise((resolve) => setImmediate(resolve))
+	}
+	if (after === "end") input.end()
+	else if (after instanceof Error) input.destroy(after)
+	return { answer, input, written }
+}
+
+/* comb-5d's node-types finding: Terminal named NodeJS, which a consumer without @types/node reads as `any` */
+describe("a question on a terminal typed by what comb calls", () => {
+	it("reads an answer split across chunks, as bytes or as strings", async () => {
+		const bytes = new TextEncoder().encode("Yes\n")
+		expect(await (await answering([bytes.slice(0, 2), bytes.slice(2)])).answer).toBe(true)
+		expect(await (await answering(["Y", "e", "s\n"])).answer).toBe(true)
+		expect(await (await answering(["Y", "e", "s\n"], "open", "utf8")).answer).toBe(true)
+	})
+
+	it("writes the question to output alone", async () => {
+		const { answer, written } = await answering(["yes\n"])
+		expect(await answer).toBe(true)
+		expect(written).toEqual(["Drop it? (y/N) "])
+	})
+
+	it("answers no when the input ends unanswered, and what it sent when it ends mid-line", async () => {
+		expect(await (await answering([], "end")).answer).toBe(false)
+		expect(await (await answering(["y"], "end")).answer).toBe(true)
+	})
+
+	it("rejects with the input's error", async () => {
+		const broke = new Error("input broke")
+		await expect((await answering([], broke)).answer).rejects.toBe(broke)
+	})
+
+	it("leaves the input paused, with none of its listeners", async () => {
+		const { answer, input } = await answering(["n\nleft"])
+		expect(await answer).toBe(false)
+		expect(input.isPaused()).toBe(true)
+		expect(["data", "end", "error"].map((event) => input.listenerCount(event))).toEqual([0, 0, 0])
+	})
+})
+
 /* K10 of r18: a failure a command already reported keeps its message and its exit code */
 describe("Reported", () => {
 	it("keeps what failed: a CliError's exit code, any other's 1, and a thrown non-error as text", () => {
