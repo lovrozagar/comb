@@ -10,7 +10,14 @@ import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts"
 export type TableMap = NonNullable<ConstraintMap[string]>
 
 /** The generic error for a kind of violation, used when no map entry matches. */
-export type Fallback = { cause: string; errorKey: string; status: StatusKey }
+export type Fallback = {
+	/** the message safe to show the client, which the CombError carries as its `cause` */
+	cause: string
+	/** the key a client branches on, one of `combErrorKeys` */
+	errorKey: string
+	/** the HTTP status the error answers with, by key: `conflict` is 409, `service_unavailable` 503 */
+	status: StatusKey
+}
 
 /** What a handler found: the map entry, if any, the generic error otherwise, and where. */
 export type Found = {

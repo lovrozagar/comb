@@ -274,9 +274,10 @@ function handleConstraintViolation(error: unknown, maps: readonly ConstraintMap[
 
 /**
  * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation, a resource error,
- * or a lost connection, as on D1 and Postgres (Q11 of r18); undefined for any other. It throws
- * nothing, so a caller can ask what an error is.
+ * or a lost connection, as on D1 and Postgres; undefined for any other. It throws nothing, so a
+ * caller can ask what an error is.
  */
+// classifies as D1 and Postgres do (Q11 of r18)
 function classifySqliteError(error: unknown, maps: readonly ConstraintMap[]): CombError | undefined {
 	const constraint = constraintError(error, maps)
 	if (constraint !== null) return constraint

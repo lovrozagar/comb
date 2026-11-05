@@ -14,8 +14,8 @@ declare function constraintError(error: unknown, given: readonly ConstraintMap[]
 declare function handleConstraintViolation(error: unknown, maps: readonly ConstraintMap[]): void;
 /**
  * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation, a resource error,
- * or a lost connection, as on D1 and Postgres (Q11 of r18); undefined for any other. It throws
- * nothing, so a caller can ask what an error is.
+ * or a lost connection, as on D1 and Postgres; undefined for any other. It throws nothing, so a
+ * caller can ask what an error is.
  */
 declare function classifySqliteError(error: unknown, maps: readonly ConstraintMap[]): CombError | undefined;
 /** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
@@ -154,8 +154,11 @@ import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts";
 export type TableMap = NonNullable<ConstraintMap[string]>;
 /** The generic error for a kind of violation, used when no map entry matches. */
 export type Fallback = {
+    /** the message safe to show the client, which the CombError carries as its `cause` */
     cause: string;
+    /** the key a client branches on, one of `combErrorKeys` */
     errorKey: string;
+    /** the HTTP status the error answers with, by key: `conflict` is 409, `service_unavailable` 503 */
     status: StatusKey;
 };
 /** What a handler found: the map entry, if any, the generic error otherwise, and where. */
