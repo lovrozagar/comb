@@ -9,6 +9,7 @@ import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import {
 	FRACTION_SEED,
 	FRACTION_SERVED,
+	firstCursor,
 	firstPage,
 	startsOrder,
 	TEXT_RELATIONS,
@@ -92,4 +93,27 @@ describe("a SQLite timestamp holding a fraction of its unit pages exactly on eve
 			}
 		},
 	)
+})
+
+/*
+ * B2-6 of area B: a list that binds a SQLite timestamp key as read carries the epoch number it stores,
+ * which readCursor returns as a number, unflagged, as no text was carried; a list that reads the key back
+ * from its row carries the Date
+ */
+describe("readCursor returns a SQLite timestamp key as its list carried it (B2-6 of area B; sibling: AB3's seconds)", () => {
+	it.each([
+		["anchorless", -1.5],
+		["anchored joined", -1.5],
+		["merged", -1.5],
+		["table", new Date(-1)],
+		["anchored own", new Date(-1)],
+		["listOptions", new Date(-1)],
+	] as Array<[TextShape, Date | number]>)("returns the %s list's key as %o", async (shape, value) => {
+		for (const key of ["m", "s"] as const) {
+			const cursor = await firstCursor(await dbsFor(shape, FRACTION_SEED), { direction: "asc", key, shape })
+			const expected = value instanceof Date && key === "s" ? new Date(-1500) : value
+			expect(cursor.values, key).toEqual([expected])
+			expect(cursor.carried, key).toEqual([false])
+		}
+	})
 })

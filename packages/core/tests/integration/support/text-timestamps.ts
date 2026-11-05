@@ -14,6 +14,7 @@
  */
 import { defineRelations, eq } from "drizzle-orm"
 import { integer, type SQLiteAsyncDatabase, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { type DecodedCursor, readCursor } from "../../../src/query/cursor.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { paginateMerged } from "../../../src/query/merged.ts"
@@ -144,6 +145,16 @@ export async function firstPage(
 ): Promise<Record<string, unknown>[]> {
 	const [items] = await pageOf(dbs, { key, shape }, schema.parse({ order: `${key}.${direction}` }))
 	return items
+}
+
+/** The first page's next cursor of the list `shape` by `key`, `direction`, as readCursor opens it */
+export async function firstCursor(
+	dbs: readonly Db[],
+	{ direction, key, shape }: { direction: "asc" | "desc"; key: TextKey; shape: TextShape },
+): Promise<DecodedCursor> {
+	const parsed = schema.parse({ order: `${key}.${direction}` })
+	const [, next] = await pageOf(dbs, { key, shape }, parsed)
+	return readCursor(next as string, parsed.parsedSort, SEALED)
 }
 
 /** `ids`' rows deleted on every shard, from both tables */
