@@ -13,7 +13,7 @@ describe("claim", () => {
 			const admin = fake((query) =>
 				query.startsWith("SELECT pid") ? [{ pid: 41, start: "1793680844883080", version }] : [],
 			)
-			expect(await claim(admin.sql)).toEqual({ owner: "41_1793680844883080", settings })
+			expect(await claim(admin.sql)).toEqual({ owner: "41_1793680844883080", settings, version })
 			expect(admin.sent[0]).toMatch(
 				/current_setting\('server_version_num'\)::int AS version FROM pg_stat_activity WHERE pid = pg_backend_pid\(\)$/,
 			)
@@ -27,18 +27,27 @@ describe("claim", () => {
 })
 
 describe("makeDatabase", () => {
-	it("makes a database named for the backend that owns it, from template0", async () => {
+	const LOCALE = "ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' LOCALE_PROVIDER libc"
+	const refusals = {
+		denied: () => new Error("no CREATEDB"),
+		locale: LOCALE,
+		unmade: (error: unknown) => new Error(`unmade: ${String(error)}`),
+	}
+
+	it("makes a database named for the backend that owns it, from template0 at the locale given", async () => {
 		const admin = fake()
-		const name = await makeDatabase(admin.sql, "41_1234", () => new Error("refused"))
+		const name = await makeDatabase(admin.sql, "41_1234", refusals)
 		expect(name).toMatch(/^comb_replay_41_1234_[0-9a-f]{8}$/)
-		expect(admin.sent).toEqual([`CREATE DATABASE ${name} TEMPLATE template0`])
+		expect(admin.sent).toEqual([`CREATE DATABASE ${name} TEMPLATE template0 ${LOCALE}`])
 	})
 
-	it("refuses a role without CREATEDB, and throws any other failure", async () => {
+	it("refuses a role without CREATEDB as denied, and any other refusal, a locale the server lacks among them, as unmade", async () => {
 		const denied = fake(() => coded("42501"))
-		await expect(makeDatabase(denied.sql, "1_1", () => new Error("no CREATEDB"))).rejects.toThrow("no CREATEDB")
-		const full = fake(() => coded("53100", "disk full"))
-		await expect(makeDatabase(full.sql, "1_1", () => new Error("no CREATEDB"))).rejects.toThrow("disk full")
+		await expect(makeDatabase(denied.sql, "1_1", refusals)).rejects.toThrow("no CREATEDB")
+		const lacking = fake(() => coded("42809", 'invalid LC_COLLATE locale name: "xx_YY.utf8"'))
+		await expect(makeDatabase(lacking.sql, "1_1", refusals)).rejects.toThrow(
+			'unmade: Error: invalid LC_COLLATE locale name: "xx_YY.utf8"',
+		)
 	})
 })
 

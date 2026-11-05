@@ -55,24 +55,25 @@ const CHECKS_CLIENT = 140_000
  * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
  * which the sweep finds a killed replay's backends, and on Postgres 14 and later a check every
  * second that its client is there, by which Postgres ends their statement itself; `admin` takes them
- * too
+ * too. Its server's version comes with them
  */
-async function claim(admin: Sql): Promise<{ owner: string; settings: Record<string, string> }> {
+async function claim(admin: Sql): Promise<{ owner: string; settings: Record<string, string>; version: number }> {
 	const [self] = await admin.unsafe(
 		`${SESSIONS.replace(" FROM pg_stat_activity", ", current_setting('server_version_num')::int AS version FROM pg_stat_activity")} WHERE pid = pg_backend_pid()`,
 		[],
 	)
 	const owner = `${(self as Session)["pid"]}_${(self as Session)["start"]}`
+	const version = Number((self as Session)["version"])
 	const settings: Record<string, string> = {
 		application_name: `${TAG} ${owner}`,
-		...(Number((self as Session)["version"]) >= CHECKS_CLIENT ? { client_connection_check_interval: "1s" } : {}),
+		...(version >= CHECKS_CLIENT ? { client_connection_check_interval: "1s" } : {}),
 	}
 	const names = Object.keys(settings)
 	await admin.unsafe(
 		`SELECT ${names.map((_, i) => `set_config($${2 * i + 1}, $${2 * i + 2}, false)`).join(", ")}`,
 		names.flatMap((name) => [name, settings[name] as string]),
 	)
-	return { owner, settings }
+	return { owner, settings, version }
 }
 
 /**
@@ -135,14 +136,21 @@ function replayOptions(
 	return { ...options, connection, database: at.database }
 }
 
-/** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
-async function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string> {
+/**
+ * A new replay database on `admin`'s server, named for its `owner`, made from template0 at the
+ * target's `locale` (CREATE DATABASE's options for it); a role without CREATEDB is `denied`, and any
+ * other refusal, a locale the server lacks among them, `unmade`
+ */
+async function makeDatabase(
+	admin: Sql,
+	owner: string,
+	{ denied, locale, unmade }: { denied: () => Error; locale: string; unmade: (error: unknown) => Error },
+): Promise<string> {
 	const name = `${PREFIX}${owner}_${randomUUID().replaceAll("-", "").slice(0, 8)}`
 	try {
-		await admin.unsafe(`CREATE DATABASE ${name} TEMPLATE template0`, [])
+		await admin.unsafe(`CREATE DATABASE ${name} TEMPLATE template0 ${locale}`, [])
 	} catch (error) {
-		if (codeOf(error) === "42501") throw refused()
-		throw error
+		throw codeOf(error) === "42501" ? denied() : unmade(error)
 	}
 	return name
 }

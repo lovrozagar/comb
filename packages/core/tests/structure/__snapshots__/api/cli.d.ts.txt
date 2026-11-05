@@ -396,11 +396,12 @@ declare const literal: (text: string) => string;
  * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
  * which the sweep finds a killed replay's backends, and on Postgres 14 and later a check every
  * second that its client is there, by which Postgres ends their statement itself; `admin` takes them
- * too
+ * too. Its server's version comes with them
  */
 declare function claim(admin: Sql): Promise<{
     owner: string;
     settings: Record<string, string>;
+    version: number;
 }>;
 /**
  * What a replay whose run is over left: its databases, each with the backends it left in it and
@@ -425,8 +426,16 @@ declare function replayOptions(devUrl: string, at?: {
     database: string;
     settings: Record<string, string>;
 }): Record<string, unknown>;
-/** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
-declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
+/**
+ * A new replay database on `admin`'s server, named for its `owner`, made from template0 at the
+ * target's `locale` (CREATE DATABASE's options for it); a role without CREATEDB is `denied`, and any
+ * other refusal, a locale the server lacks among them, `unmade`
+ */
+declare function makeDatabase(admin: Sql, owner: string, { denied, locale, unmade }: {
+    denied: () => Error;
+    locale: string;
+    unmade: (error: unknown) => Error;
+}): Promise<string>;
 /**
  * The extensions the history `texts` create with a plain CREATE EXTENSION, the one statement that
  * needs its extension absent, which the replay leaves them to make (P5 of r21); one a file creates IF

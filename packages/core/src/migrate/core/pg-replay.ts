@@ -54,6 +54,7 @@ import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-transaction.ts"
 import { claim, copyExtensions, extensionsOf, makeDatabase, replayOptions, type Sql } from "./pg-replay-database.ts"
 import { cleanUp, leaving, sweep } from "./pg-replay-drops.ts"
+import { localeClause, targetLocale } from "./pg-replay-locale.ts"
 import { devRoleOf, grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
@@ -186,17 +187,26 @@ const ATLAS_SESSION = { DateStyle: "ISO, MDY" } as const
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
 /**
- * The replay's database made on `admin`'s server, and its run on it: a connection there searching
- * `target`'s schema, and how each later session opens
+ * The replay's database made on `admin`'s server at `target`'s database's locale, and its run on it:
+ * a connection there searching `target`'s schema, and how each later session opens
  */
 async function opening(
 	admin: Sql,
 	target: PgTarget,
-	{ connect, stops }: { connect: Connect; stops: string },
+	{ connect, refused, stops }: { connect: Connect; refused: Refuse; stops: string },
 ): Promise<{ open: () => Sql; run: Run }> {
-	const { owner, settings } = await claim(admin)
+	const { owner, settings, version } = await claim(admin)
 	const search = { ...settings, ...ATLAS_SESSION, search_path: target.schema }
-	const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${stops}`))
+	const locale = localeClause(await targetLocale(connect, target, stops), version)
+	const database = await makeDatabase(admin, owner, {
+		denied: () => new ReplayFailed(`${NO_CREATEDB}; ${stops}`),
+		locale,
+		unmade: (error) =>
+			refused(
+				`devUrl's server could not make the replay's database at the target database's locale (${locale}), and a verdict under another is not the target's; point devUrl at a server that has it`,
+				error,
+			),
+	})
 	const open = () => connect(replayOptions(target.devUrl, { database, settings: search }))
 	const run: Run = {
 		admin,
@@ -244,7 +254,7 @@ async function onDev<T>(
 		return await onSignals(cleanup.run, async () => {
 			admin = connect(replayOptions(target.devUrl))
 			await sweep(admin, Date.now(), leave)
-			const { open, run } = await opening(admin, target, { connect, stops: replay.stops })
+			const { open, run } = await opening(admin, target, { connect, refused, stops: replay.stops })
 			cleanup.set(() => cleanUp(run, leave))
 			try {
 				const waits = await prepare(run, target.schema, { files, refused, stops: replay.stops })

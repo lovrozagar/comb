@@ -14,6 +14,16 @@ const file = (sql: string) => ({ files: [{ name: "1_a.sql", sql }], pending: ["1
 /* the replay's database, named for the backend that made it and a random suffix */
 const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 
+/* the target database's, ICU's */
+const LOCALE = {
+	collate: "en_US.UTF-8",
+	ctype: "en_US.UTF-8",
+	encoding: "UTF8",
+	locale: "en-US",
+	provider: "i",
+	rules: null,
+}
+
 /* the backend a replay runs on, which names its database and tags its roles */
 const OWNER = [{ pid: 7, start: "9", version: 170000 }]
 
@@ -40,7 +50,9 @@ const AROUND = {
 		expect.stringMatching(/^SELECT r\.rolname/),
 		expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
 		"SELECT set_config($1, $2, false), set_config($3, $4, false)",
-		"CREATE DATABASE <db> TEMPLATE template0",
+		/* the target database's locale, which the replay's database is made at */
+		expect.stringMatching(/^SELECT pg_encoding_to_char\(d\.encoding\) AS encoding, /),
+		"CREATE DATABASE <db> TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8' LOCALE_PROVIDER icu ICU_LOCALE 'en-US'",
 		"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
 		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
@@ -69,6 +81,7 @@ function fake(fail?: (query: string) => Error | undefined, roles: readonly strin
 			if (ROLES.test(query))
 				return roles.filter((role) => (params[0] as string[]).includes(role)).map((rolname) => ({ rolname }))
 			if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
+			if (query.endsWith("WHERE d.datname = current_database()")) return [LOCALE]
 			return query.startsWith(COUNTS) ? [{ on: "on", writes: {} }] : []
 		},
 	})

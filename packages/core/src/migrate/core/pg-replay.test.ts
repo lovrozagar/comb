@@ -15,6 +15,9 @@ const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "publi
 /* the replay's database, named for the backend that made it and a random suffix */
 const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 
+/* the target database's locale, which the replay's database is made at */
+const LIBC = { collate: "C", ctype: "C", encoding: "UTF8", locale: null, provider: "c", rules: null }
+
 /* the backend a replay runs on, which names its database and tags its roles */
 const OWNER = [{ pid: 7, start: "9", version: 170000 }]
 
@@ -43,6 +46,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				if (error !== undefined) throw error
 				if (query.startsWith(COUNTS)) return [{ on: "on", writes: {} }]
 				if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
+				if (query.endsWith("WHERE d.datname = current_database()")) return [LIBC]
 				return query === CATALOG ? rows : []
 			},
 		}
@@ -60,7 +64,10 @@ const SWEEP = [
 	"SELECT set_config($1, $2, false), set_config($3, $4, false)",
 ]
 const MADE = [
-	"CREATE DATABASE <db> TEMPLATE template0",
+	expect.stringMatching(
+		/^SELECT pg_encoding_to_char\(d\.encoding\) AS encoding, .* WHERE d\.datname = current_database\(\)$/,
+	),
+	"CREATE DATABASE <db> TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' LOCALE_PROVIDER libc",
 	"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
 	COUNTED,
 	expect.stringMatching(/^SELECT e\.extname/),
@@ -115,12 +122,14 @@ describe("replayCatalog", () => {
 			DROPPED,
 		])
 		expect(dev.sent.find(([query]) => query === CATALOG)).toEqual(target.sent[0])
-		/* one connection each, to devUrl's database and then to the replay's, dev's notices kept off the terminal */
-		const [admin, replay] = dev.given as [
+		/* one connection each, to devUrl's database, to url's for its locale and then to the replay's, notices kept off the terminal */
+		const [admin, url, replay] = dev.given as [
+			{ database: string; max: number; onnotice: () => unknown },
 			{ database: string; max: number; onnotice: () => unknown },
 			{ connection: Record<string, string>; database: string },
 		]
 		expect([admin.max, admin.onnotice(), admin.database]).toEqual([1, undefined, "dev"])
+		expect([url.max, url.onnotice(), url.database]).toEqual([1, undefined, "app"])
 		expect(replay.database).toMatch(/^comb_replay_7_9_[0-9a-f]{8}$/)
 		/* the replay's connection names its owner, by which a sweep finds the statement a killed run left (P4 of r22) */
 		expect(replay.connection).toMatchObject({
@@ -128,7 +137,7 @@ describe("replayCatalog", () => {
 			client_connection_check_interval: "1s",
 		})
 		/* the prepare's session, then one for each file, as apply gives each an Atlas call (PA1 of r22b), each searching the schema and reading dates month first from its start, as Atlas's session does (PR3 of r22b) */
-		const sessions = dev.given.slice(1) as Array<{ connection: Record<string, string>; database: string }>
+		const sessions = dev.given.slice(2) as Array<{ connection: Record<string, string>; database: string }>
 		expect(
 			sessions.map((each) => [each.database, each.connection["search_path"], each.connection["DateStyle"]]),
 		).toEqual(Array.from({ length: 3 }, () => [replay.database, "app", "ISO, MDY"]))
@@ -283,15 +292,17 @@ describe("replayCatalog's database", () => {
 			/^devUrl's role cannot create a database \(CREATEDB\).*; baseline compares nothing$/,
 		)
 		await expect(replay).rejects.toBeInstanceOf(ReplayFailed)
-		expect(dev.queries().at(-1)).toBe("CREATE DATABASE <db> TEMPLATE template0")
+		expect(dev.queries().at(-1)).toMatch(/^CREATE DATABASE <db> TEMPLATE template0 /)
 	})
 
-	it("says comb could not replay when making the database fails for another reason", async () => {
-		const full = Object.assign(new Error("could not write to file"), { code: "53100" })
-		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? full : undefined))
-		await expect(
-			replayCatalog(TARGET, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load),
-		).rejects.toThrow("comb could not replay the history on devUrl: could not write to file")
+	it("refuses a locale devUrl's server cannot make, naming it and the server's error (PR4 of r22b)", async () => {
+		const lacking = Object.assign(new Error('invalid LC_COLLATE locale name: "C"'), { code: "42809" })
+		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? lacking : undefined))
+		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load)
+		await expect(replay).rejects.toThrow(
+			`devUrl's server could not make the replay's database at the target database's locale (ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' LOCALE_PROVIDER libc), and a verdict under another is not the target's; point devUrl at a server that has it: invalid LC_COLLATE locale name: "C"; baseline compares nothing`,
+		)
+		await expect(replay).rejects.toBeInstanceOf(ReplayFailed)
 	})
 })
 
