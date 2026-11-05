@@ -16,20 +16,35 @@ function rated(sql: string) {
 
 describe("ddlFindings: an ALTER DOMAIN, as its column twin (P16)", () => {
 	it("rates ALTER DOMAIN's DROP DEFAULT and DROP CONSTRAINT cautious, SET NOT NULL unsafe, and a validated check a scan", () => {
-		const scan = { level: "lock", note: "scans every column of domain d, locking each table that holds one" }
+		const scan = {
+			level: "lock",
+			note: "scans every column of domain d, and blocks writes to each table that holds one while it scans",
+		}
 		expect(rated("ALTER DOMAIN d DROP DEFAULT")).toEqual([{ level: "cautious" }])
 		expect(rated("ALTER DOMAIN d DROP CONSTRAINT c")).toEqual([{ level: "cautious" }])
 		expect(rated("ALTER DOMAIN public.d SET NOT NULL")).toEqual([
 			{ level: "unsafe" },
-			{ ...scan, note: "scans every column of domain public.d, locking each table that holds one" },
+			{
+				...scan,
+				note: "scans every column of domain public.d, and blocks writes to each table that holds one while it scans",
+			},
 		])
 		expect(rated("ALTER DOMAIN d ADD CONSTRAINT c CHECK (VALUE > 0)")).toEqual([scan])
 		for (const sql of [
 			"ALTER DOMAIN d SET DEFAULT 1",
 			"ALTER DOMAIN d DROP NOT NULL",
 			"ALTER DOMAIN d ADD CONSTRAINT c CHECK (VALUE > 0) NOT VALID",
-			"ALTER DOMAIN d VALIDATE CONSTRAINT c",
 		])
 			expect(rated(sql), sql).toEqual([])
+	})
+
+	/* PA9 of r22b: Postgres validates a domain's constraint under SHARE on each table with a column of it, in any file */
+	it("rates a VALIDATE CONSTRAINT the scan, which no NOT VALID form avoids", () => {
+		expect(rated("ALTER DOMAIN d VALIDATE CONSTRAINT c")).toEqual([
+			{
+				level: "lock",
+				note: "scans every column of domain d, and blocks writes to each table that holds one while it scans",
+			},
+		])
 	})
 })
