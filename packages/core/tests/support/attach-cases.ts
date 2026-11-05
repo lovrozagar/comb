@@ -364,3 +364,41 @@ export const SCANNED: readonly AttachCase[] = [
 		"ALTER TABLE l ATTACH PARTITION o FOR VALUES FROM ('a') TO ('m');",
 	],
 ]
+
+/**
+ * A case whose files each run in a session of their own, as comb's apply runs them (AE2-5 of r22):
+ * what it is, the history's files, the pending file that ends in an ATTACH, and whether Postgres
+ * scans the partition. A temp relation dies with its file's session, and within its file an
+ * unqualified name resolves to it first, as pg_temp leads the search path.
+ */
+export type TempCase = readonly [what: string, files: readonly string[], pending: string, scans: boolean]
+
+const ATTACH_PUBLIC = ATTACH.replace("PARTITION o", "PARTITION public.o")
+const TEMP = "CREATE TEMP TABLE o (id int, at date NOT NULL"
+
+export const TEMPS: readonly TempCase[] = [
+	[
+		"a temp table of the partition's name, bounded, in its history file",
+		[`${plain}${TEMP}, ${BOUND});\n`],
+		ATTACH,
+		true,
+	],
+	[
+		"a drop in the file after a temp table's, which reaches the partition",
+		[`${PARENT}${PARTITION}`, `${TEMP});\n`, "ALTER TABLE o DROP CONSTRAINT o_b;\n"],
+		ATTACH,
+		true,
+	],
+	[
+		"a bound the pending file adds to a temp table",
+		[plain],
+		`${TEMP});\nALTER TABLE o ADD ${BOUND};\n${ATTACH_PUBLIC}`,
+		true,
+	],
+	[
+		"a drop the pending file makes of a temp table's bound",
+		[`${PARENT}${PARTITION}`],
+		`${TEMP}, CONSTRAINT o_b ${BOUND});\nALTER TABLE o DROP CONSTRAINT o_b;\n${ATTACH_PUBLIC}`,
+		false,
+	],
+]

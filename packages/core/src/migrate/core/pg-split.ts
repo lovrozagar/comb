@@ -119,11 +119,24 @@ type Trees = Array<RawStmt[] | undefined>
 // extractSchema and hands back as `before`, so its trees cannot travel on it
 const TREES = /* @__PURE__ */ new WeakMap<object, Trees | undefined>()
 
-/** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */
+// lru-cache: where each Postgres schema's history files end, each the count of statements up to its end, released with the schema
+const ENDS = /* @__PURE__ */ new WeakMap<object, readonly number[] | undefined>()
+
+/** Record the trees of `read`, the file that took `from` to `schema`, and where it ends, beside `schema` */
 function recordRead(schema: object, from: { statements: readonly string[] }, read: PgRead): void {
-	const before = from.statements.length === 0 ? [] : TREES.get(from)
+	const empty = from.statements.length === 0
+	const before = empty ? [] : TREES.get(from)
 	TREES.set(schema, before === undefined ? undefined : [...before, ...read.statements.map(({ tree }) => tree)])
+	const ends = empty ? [] : ENDS.get(from)
+	ENDS.set(schema, ends === undefined ? undefined : [...ends, from.statements.length + read.statements.length])
 }
+
+/**
+ * Where `schema`'s history files end, each the count of its statements up to the end, the last
+ * always its whole history; without a record, after each statement, as no file is known to hold two
+ */
+const fileEnds = (schema: { statements: readonly string[] }): readonly number[] =>
+	ENDS.get(schema) ?? schema.statements.map((_, i) => i + 1)
 
 /** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
 const historyTrees = (schema: object): ReadonlyArray<RawStmt[] | undefined> | undefined => TREES.get(schema)
@@ -175,6 +188,7 @@ function atlasFile(statements: readonly string[], head = ""): string {
 
 export {
 	atlasFile,
+	fileEnds,
 	type FileRead,
 	fileRead,
 	historyTrees,

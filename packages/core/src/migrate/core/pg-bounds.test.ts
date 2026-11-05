@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
-import { ATTACH, IMPLIED, PARENT, PARTITION, SCANNED, SCANS } from "../../../tests/support/attach-cases.ts"
+import { ATTACH, IMPLIED, PARENT, PARTITION, SCANNED, SCANS, TEMPS } from "../../../tests/support/attach-cases.ts"
 
 /** `attach`'s lock warnings after `history`, read as Postgres */
 const warned = (history: string, attach = ATTACH): string[] =>
@@ -41,4 +41,19 @@ describe("an ATTACH whose bound comb cannot prove keeps the scan's warning (sibl
 		])
 		expect(SCANS).toContain("check its bound")
 	})
+})
+
+/* AE2-5 of r22: each file runs in a session of its own, where its temp relations die */
+describe("an ATTACH after a temp table of the partition's name (AE2-5 of r22)", () => {
+	it.each(TEMPS.map(([what, files, pending, scans]) => ({ files, pending, scans, what })))(
+		"warns of the scan for $what only when Postgres scans",
+		({ files, pending, scans }) => {
+			const before = files.reduce(
+				(schema, file) => extractSchema(file, schema, "postgres"),
+				extractSchema("", undefined, "postgres"),
+			)
+			const warnings = classifyMigration(pending, { before, dialect: "postgres" }).lockWarnings
+			expect(warnings.some((warning) => warning.includes("under an exclusive lock to check its bound"))).toBe(scans)
+		},
+	)
 })

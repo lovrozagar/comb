@@ -23,6 +23,7 @@ import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, tableOf } from "./pg-history.ts"
+import { resolveTemps, type Temps } from "./pg-temps.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
@@ -58,6 +59,8 @@ type TreeContext = {
 	preparing: Map<string, Node>
 	/** the file's first statement so far that may PREPARE as it runs, named (pg-execute.ts) */
 	dynamic?: string | undefined
+	/** the temp relations the file made so far, which its later unqualified names resolve to (pg-temps.ts) */
+	temps: Temps
 }
 
 // lookup-table: the settings whose change decides what a later statement runs, and why
@@ -248,7 +251,7 @@ function pgTreeFindings(
 	postgresParser()
 	let tree: { stmts?: unknown }
 	try {
-		tree = kept === undefined ? parsePostgres(stmt) : { stmts: kept }
+		tree = { stmts: resolveTemps(kept === undefined ? parsePostgres(stmt).stmts : kept, ctx.temps) }
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		const note = `comb could not parse this as Postgres 17: ${(error as Error).message}`

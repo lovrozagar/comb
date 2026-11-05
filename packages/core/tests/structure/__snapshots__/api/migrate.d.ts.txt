@@ -1082,10 +1082,17 @@ declare function pgRead(sql: string): PgRead;
 declare const fileRead: (sql: string, dialect: Dialect) => FileRead;
 /** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
 declare const pgStatements: (sql: string) => string[];
-/** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */
+/** Record the trees of `read`, the file that took `from` to `schema`, and where it ends, beside `schema` */
 declare function recordRead(schema: object, from: {
     statements: readonly string[];
 }, read: PgRead): void;
+/**
+ * Where `schema`'s history files end, each the count of its statements up to the end, the last
+ * always its whole history; without a record, after each statement, as no file is known to hold two
+ */
+declare const fileEnds: (schema: {
+    statements: readonly string[];
+}) => readonly number[];
 /** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
 declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefined> | undefined;
 /**
@@ -1095,7 +1102,7 @@ declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefi
  * the file's own, which its first line sets
  */
 declare function atlasFile(statements: readonly string[], head?: string): string;
-export { atlasFile, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
+export { atlasFile, fileEnds, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
 
 // migrate/core/schema.d.ts
 import { type FileRead } from "./pg-split.ts";

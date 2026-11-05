@@ -30,6 +30,7 @@ import type { Node } from "./pg-nodes.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { partitionedRecipe } from "./pg-partitioned.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
+import type { Temps } from "./pg-temps.ts"
 import { type Held, heldStart, measured } from "./pg-held.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
@@ -68,6 +69,8 @@ type FileContext = RebuildContext & {
 	reindexed: Set<string>
 	/** on Postgres, the query each PREPARE so far holds, by the name Postgres keys it under (pg-tree.ts) */
 	preparing: Map<string, Node>
+	/** on Postgres, the temp relations the file made so far (pg-temps.ts) */
+	temps: Temps
 }
 
 const UNSAFE_DROP =
@@ -221,6 +224,7 @@ function readFile(
 		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
 		held: heldStart(),
 		preparing: new Map(),
+		temps: new Map(),
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),

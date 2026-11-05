@@ -11,7 +11,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { IMPLIED, SCANNED } from "../../support/attach-cases.ts"
+import { IMPLIED, SCANNED, TEMPS } from "../../support/attach-cases.ts"
 import { withScratchDb } from "../support/pg.ts"
 
 beforeAll(loadPostgresParser)
@@ -93,6 +93,47 @@ describe("an ATTACH comb warns of, on Postgres 17 (siblings of PA16 of r22b)", (
 			const verdict = await postgres(history, attach)
 			expect(warned(history, attach)).not.toEqual([])
 			expect({ what, skips: verdict === "skips" }).toEqual({ what, skips: PROVEN_BEYOND_COMB.has(what) })
+		},
+		60_000,
+	)
+})
+
+/**
+ * Whether Postgres scans the partition for the ATTACH that ends `pending`, after `files`, each file on
+ * a session of its own, as comb's apply runs it (AE2-5 of r22)
+ */
+const scansPerFile = (files: readonly string[], pending: string): Promise<boolean> =>
+	withScratchDb(async (url) => {
+		const notices: string[] = []
+		for (const [i, file] of [...files, pending].entries()) {
+			const client = new pg.Client({ connectionString: url })
+			client.on("notice", (notice) => notices.push(notice.message ?? ""))
+			await client.connect()
+			try {
+				if (i === files.length) await client.query("SET client_min_messages = debug1")
+				await client.query(file)
+			} finally {
+				await client.end()
+			}
+		}
+		return !notices.some((notice) => notice.endsWith("is implied by existing constraints"))
+	})
+
+describe("an ATTACH after a temp table of the partition's name, as comb applies it on Postgres 17 (AE2-5 of r22)", () => {
+	it.each(TEMPS.map(([what, files, pending, scans]) => ({ files, pending, scans, what })))(
+		"warns of the scan for $what only when Postgres scans",
+		async ({ files, pending, scans }) => {
+			const before = files.reduce(
+				(schema, file) => extractSchema(file, schema, "postgres"),
+				extractSchema("", undefined, "postgres"),
+			)
+			const scanWarned = classifyMigration(pending, { before, dialect: "postgres" }).lockWarnings.some((warning) =>
+				warning.includes("under an exclusive lock to check its bound"),
+			)
+			expect({ postgres: await scansPerFile(files, pending), warned: scanWarned }).toEqual({
+				postgres: scans,
+				warned: scans,
+			})
 		},
 		60_000,
 	)

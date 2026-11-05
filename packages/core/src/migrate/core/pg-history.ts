@@ -35,7 +35,8 @@ import {
 	typeOf,
 } from "./pg-nodes.ts"
 import { parsePostgres } from "./pg-parser.ts"
-import { historyTrees } from "./pg-split.ts"
+import { fileEnds, historyTrees } from "./pg-split.ts"
+import { forgetTemps, resolveTemps, type Temps } from "./pg-temps.ts"
 
 /** What a value of `type` runs on its way into a column: its domain's CHECK, or an implicit or assignment cast */
 const typeCode = (type: string, facts: Facts): string | undefined =>
@@ -265,7 +266,8 @@ const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Map<string, Facts>>()
 
 /**
  * What `before`'s history attached to its tables, its names keyed under `schema`: a copy the file's
- * own statements then follow
+ * own statements then follow. Each history file's temp relations are keyed apart, and forgotten at
+ * its end (pg-temps.ts)
  */
 function historyFacts(before: ExtractedSchema | undefined, schema: string): Facts {
 	const empty = emptyFacts(schema)
@@ -277,7 +279,15 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 		facts = empty
 		/* the trees extractSchema kept; a statement without one is parsed here, which fails for one the parser cannot read */
 		const trees = historyTrees(before)
-		for (const [i, statement] of before.statements.entries()) followTree(trees?.[i] ?? historyTree(statement), facts)
+		/* each file runs in a session of its own, whose temp relations die with it */
+		const ends = new Set(fileEnds(before))
+		let temps: Temps = new Map()
+		for (const [i, statement] of before.statements.entries()) {
+			followTree(resolveTemps(trees?.[i] ?? historyTree(statement), temps), facts)
+			if (!ends.has(i + 1)) continue
+			forgetTemps(facts)
+			temps = new Map()
+		}
 		read.set(schema, facts)
 	}
 	return structuredClone(facts)
