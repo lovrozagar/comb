@@ -3,7 +3,7 @@ import { verdictOf } from "../__fixtures__/copy-verdict.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
-import { copyScript, creatable, liveObjects } from "./proof-copy.ts"
+import { copyScript, creatable, jsonColumns, liveObjects, scriptOf } from "./proof-copy.ts"
 
 /** The live schema of `conn`, as the proof reads it */
 const schemaOf = async (conn: Connection) => creatable(await liveObjects(conn, notEngineTables(conn)))
@@ -91,6 +91,9 @@ describe("copyScript (SD1 of r22): the proof's copy as statements another engine
 	})
 })
 
+/** The INSERTs of `script` into table far */
+const intoFar = (script: string[]) => script.filter((sql) => sql.startsWith('INSERT INTO "far"'))
+
 /** The tables copyScript seeds over a live database `schema` made, for pending `files` */
 async function seededBy(schema: string, files: string[]): Promise<string[]> {
 	const live = libsqlConnection()
@@ -135,6 +138,24 @@ describe("copyScript seeds what the pending files reach (8.5)", () => {
 	it("seeds each ancestor whose keys a reached table's rows take, but not an ancestor's other children", async () => {
 		const schema = `${UNRELATED}CREATE TABLE org (id INTEGER PRIMARY KEY);\nCREATE TABLE team (id INTEGER PRIMARY KEY, org INTEGER NOT NULL REFERENCES org (id));\nCREATE TABLE member (id INTEGER PRIMARY KEY, team INTEGER NOT NULL REFERENCES team (id));\nCREATE TABLE invoice (id INTEGER PRIMARY KEY, org INTEGER NOT NULL REFERENCES org (id));`
 		expect(await seededBy(schema, ["UPDATE member SET team = team;"])).toEqual(["member", "org", "team"])
+	})
+
+	/* AC2-7 of area C round 2: an ALTER makes the copy create a table a view names, which no write reaches */
+	it("inserts no row into a table it creates but does not seed, where the whole copy does", async () => {
+		const live = libsqlConnection()
+		try {
+			await live.client.executeMultiple(
+				"CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);\nCREATE TABLE far (id INTEGER PRIMARY KEY, v TEXT);\nCREATE VIEW far_v AS SELECT v FROM far;",
+			)
+			const objects = await schemaOf(live)
+			const files = [{ sql: "ALTER TABLE t ADD COLUMN b TEXT;" }]
+			const scoped = await copyScript(objects, files, "d1_migrations")
+			expect(scoped).toContain("CREATE TABLE far (id INTEGER PRIMARY KEY, v TEXT)")
+			expect(intoFar(scoped)).toEqual([])
+			expect(intoFar(await scriptOf(objects, { json: jsonColumns(files), variant: 0 })).length).toBeGreaterThan(0)
+		} finally {
+			await live.close()
+		}
 	})
 
 	it("seeds no table a pending file does not reach", async () => {
