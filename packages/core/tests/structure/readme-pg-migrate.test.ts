@@ -53,6 +53,15 @@ describe("the 0.21 upgrade notes on Postgres check's ratings and refusals (AE2-7
 	})
 })
 
+describe("the README on the role names a file's shared-catalog change is read by (AE2-11)", () => {
+	it("says CURRENT_USER and its kin name devUrl's role, and ALTER ROLE ALL every role", () => {
+		const guard = paragraph("a change there is the file's only when the role, database or other object")
+		expect(sentence(guard, "name devUrl's role")).toContain(
+			"`CURRENT_USER`, `CURRENT_ROLE`, `SESSION_USER` and `USER` name devUrl's role, and `ALL` in `ALTER ROLE ALL` names every role",
+		)
+	})
+})
+
 describe("the README on Postgres's outside-transaction statements (PA14 of r22b)", () => {
 	const list = sentence(
 		paragraph("A statement Postgres runs only outside a transaction needs its own file"),
