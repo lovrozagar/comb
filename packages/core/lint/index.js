@@ -5,6 +5,7 @@ import { rule as noLocaleCompare } from "./no-locale-compare.js"
 import { rule as noModuleSideEffects } from "./no-module-side-effects.js"
 import { rule as noModuleState } from "./no-module-state.js"
 import { rule as noSilentCatch } from "./no-silent-catch.js"
+import { rule as noSpawnedKill } from "./no-spawned-kill.js"
 import { rule as noV8Ignore } from "./no-v8-ignore.js"
 import { rule as optionalUndefined } from "./optional-undefined.js"
 import { rule as publicJsdoc } from "./public-jsdoc.js"
@@ -19,6 +20,7 @@ export default {
 		"no-module-side-effects": noModuleSideEffects,
 		"no-module-state": noModuleState,
 		"no-silent-catch": noSilentCatch,
+		"no-spawned-kill": noSpawnedKill,
 		"no-v8-ignore": noV8Ignore,
 		"optional-undefined": optionalUndefined,
 		"public-jsdoc": publicJsdoc,

@@ -28,6 +28,7 @@ type Visitors = Record<string, ((node: never) => void) | undefined>
 type Rule = { create(context: Context): Visitors }
 
 const PLUGIN = join(import.meta.dirname, "index.js")
+const REPO_CONFIG = join(import.meta.dirname, "../../../.oxlintrc.json")
 const OXLINT = join(dirname(createRequire(import.meta.url).resolve("oxlint/package.json")), "bin", "oxlint")
 
 /* the comments that touch `node` with only whitespace between, as ESLint's SourceCode reports them */
@@ -133,18 +134,17 @@ export function oxlintJson(
 	}
 }
 
-/** Runs the real oxlint binary with the comb plugin and only `comb/<name>` on, with `options`, over the fixture. */
-export function oxlintReports(name: string, fixture: Fixture, options: unknown[] = []): Report[] {
+/** One finding of a run under the repo's config: the fixture path, its line, and the message with the help a rule's config gives it. */
+export type LineReport = { file: string; line: number; message: string }
+
+type Diagnostic = { filename: string; help?: string; labels: Array<{ span: { line: number } }>; message: string }
+
+/* the fixture written to a temp folder outside any checkout, oxlint run there under `config` over every file of it */
+function lintInTemp(fixture: Fixture, config: object): { diagnostics: Diagnostic[]; dir: string } {
 	const dir = mkdtempSync(join(tmpdir(), "comb-lint-"))
 	try {
 		/* oxlint applies a checkout's .gitignore even with --no-ignore, so a fixture inside one lints nothing */
 		if (insideGitCheckout(dir)) throw new Error(`TMPDIR ${tmpdir()} is inside a git checkout; set it outside one`)
-		const config = {
-			categories: { correctness: "off", suspicious: "off" },
-			jsPlugins: [{ name: "comb", specifier: PLUGIN }],
-			plugins: [],
-			rules: { [`comb/${name}`]: ["error", ...options] },
-		}
 		writeFileSync(join(dir, ".oxlintrc.json"), JSON.stringify(config))
 		for (const [file, code] of Object.entries(fixture)) {
 			mkdirSync(dirname(join(dir, file)), { recursive: true })
@@ -152,11 +152,35 @@ export function oxlintReports(name: string, fixture: Fixture, options: unknown[]
 		}
 		const files = Object.keys(fixture).map((file) => join(dir, file))
 		const args = ["--config", join(dir, ".oxlintrc.json"), "--format", "json", "--no-ignore", ...files]
-		const proc = spawnSync(OXLINT, args, { encoding: "utf8" })
-		return oxlintJson(proc)
-			.diagnostics.map((d) => ({ file: d.filename.slice(dir.length + 1), message: d.message }))
-			.sort((a, b) => a.file.localeCompare(b.file))
+		const { diagnostics } = oxlintJson(spawnSync(OXLINT, args, { encoding: "utf8" })) as { diagnostics: Diagnostic[] }
+		return { diagnostics, dir }
 	} finally {
 		rmSync(dir, { force: true, recursive: true })
 	}
+}
+
+/** Runs the real oxlint binary with the comb plugin and only `comb/<name>` on, with `options`, over the fixture. */
+export function oxlintReports(name: string, fixture: Fixture, options: unknown[] = []): Report[] {
+	const config = {
+		categories: { correctness: "off", suspicious: "off" },
+		jsPlugins: [{ name: "comb", specifier: PLUGIN }],
+		plugins: [],
+		rules: { [`comb/${name}`]: ["error", ...options] },
+	}
+	const { diagnostics, dir } = lintInTemp(fixture, config)
+	return diagnostics
+		.map((d) => ({ file: d.filename.slice(dir.length + 1), message: d.message }))
+		.sort((a, b) => a.file.localeCompare(b.file))
+}
+
+/** Runs the real oxlint binary under the repo's own .oxlintrc.json over the fixture, laid out as the repo is, sorted by file and line. */
+export function repoReports(fixture: Fixture): LineReport[] {
+	const { diagnostics, dir } = lintInTemp(fixture, { extends: [REPO_CONFIG] })
+	return diagnostics
+		.map((d) => ({
+			file: d.filename.slice(dir.length + 1),
+			line: Math.min(...d.labels.map((label) => label.span.line)),
+			message: d.help === undefined ? d.message : `${d.message} ${d.help}`,
+		}))
+		.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.message.localeCompare(b.message))
 }

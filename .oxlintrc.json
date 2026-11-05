@@ -85,6 +85,44 @@
 			"rules": {
 				"max-lines": ["error", 500]
 			}
+		},
+		{
+			"files": ["packages/core/src/**/*.test.ts", "packages/core/lint/**/*.test.ts", "packages/core/tests/**"],
+			"rules": {
+				"no-restricted-properties": [
+					"error",
+					{
+						"object": "process",
+						"property": "kill",
+						"message": "A test signals a pid it recorded through tests/support/pid.ts, which knows the process by its start time; vi.spyOn(process, \"kill\") stubs it"
+					}
+				],
+				"no-restricted-imports": [
+					"error",
+					{
+						"patterns": [
+							{
+								"group": ["**/migrate/core/cleanup*", "./cleanup*"],
+								"importNames": ["isAlive"],
+								"message": "A test probes a pid it recorded through tests/support/pid.ts, which knows the process by its start time"
+							}
+						]
+					}
+				],
+				"comb/no-spawned-kill": "error"
+			}
+		},
+		{
+			"files": ["packages/core/tests/support/pid.ts"],
+			"rules": {
+				"no-restricted-properties": "off"
+			}
+		},
+		{
+			"files": ["packages/core/src/migrate/core/cleanup.test.ts"],
+			"rules": {
+				"no-restricted-imports": "off"
+			}
 		}
 	]
 }
