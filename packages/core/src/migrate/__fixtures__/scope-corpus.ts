@@ -185,6 +185,8 @@ function brokenElsewhereCases(): ScopeCase[] {
 		["a broken view, RENAME TO", STALE_VIEW, "ALTER TABLE t RENAME TO t2;"],
 		["a broken view, ADD COLUMN", STALE_VIEW, "ALTER TABLE t ADD COLUMN c TEXT;"],
 		["a broken trigger, RENAME COLUMN", STALE_TRIGGER, "ALTER TABLE t RENAME COLUMN a TO a_2;"],
+		/* drizzle and Atlas write a comment before a statement, which the ALTER is still read past */
+		["a broken view, an ALTER after a comment", STALE_VIEW, "-- rename a\nALTER TABLE t RENAME COLUMN a TO a_2;"],
 	].map(([label, schema, file]) => ({
 		file: file as string,
 		label: `broken elsewhere: ${label as string}`,
