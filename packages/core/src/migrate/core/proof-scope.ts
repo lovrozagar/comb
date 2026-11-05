@@ -10,12 +10,13 @@
  * - A file that reads a catalog (sqlite_master, sqlite_schema, their temp forms, pragma_table_list or PRAGMA
  *   table_list) observes every object, so the copy creates them all, seeding only the tables above.
  * - Otherwise the copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
- *   them on DROP COLUMN and RENAME COLUMN). When a pending file holds an ALTER TABLE, it creates every view and
- *   trigger instead: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere fails
- *   the file, and the copy carries them all rather than a list of which ALTER forms check. Then to a fixpoint each
- *   index and trigger on a created table or view (a view's INSTEAD OF triggers carry out a write through it), each
- *   table and view a created trigger or view names, and each created table's FK ancestors, which a write to it
- *   compiles checks against. Only the seeded tables get rows.
+ *   them on DROP COLUMN and RENAME COLUMN, and a rename rewrites them). Then to a fixpoint each index and trigger on a
+ *   created table or view (a view's INSTEAD OF triggers carry out a write through it), each table and view a created
+ *   trigger or view names, and each created table's FK ancestors, which a write to it compiles checks against.
+ * - When a pending file holds an ALTER TABLE, it creates every other view and trigger too, with each table and view
+ *   they name through views: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere
+ *   fails the file, and the copy carries them all rather than a list of which ALTER forms check. The check resolves
+ *   names and nothing writes them, so their tables' indexes and FK ancestors stay out. Only the seeded tables get rows.
  */
 import type { LiveObject } from "./proof-copy.ts"
 import { codeOf } from "../../sql-lexer.ts"
@@ -105,20 +106,6 @@ function graphOf(objects: readonly LiveObject[]) {
 
 type Graph = ReturnType<typeof graphOf>
 
-/** `start` and, to a fixpoint, each index and trigger on a table or view in it, and each table and view a trigger or view in it names */
-function forward(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
-	const out = new Set(start)
-	for (const object of out) {
-		/* a view's INSTEAD OF triggers carry out every write through it */
-		if (object.type === "table" || object.type === "view")
-			for (const each of graph.on.get(asciiFold(object.name)) ?? []) out.add(each)
-		if (object.type !== "trigger" && object.type !== "view") continue
-		for (const name of graph.names.get(object) as Set<string>)
-			for (const each of graph.named.get(name) ?? []) if (each.type === "table" || each.type === "view") out.add(each)
-	}
-	return out
-}
-
 /** The tables of `objects`, folded */
 const tablesIn = (objects: Iterable<LiveObject>): Set<string> =>
 	new Set([...objects].filter((object) => object.type === "table").map((object) => asciiFold(object.name)))
@@ -126,6 +113,33 @@ const tablesIn = (objects: Iterable<LiveObject>): Set<string> =>
 /** The live objects of `names`, folded */
 const objectsOf = (graph: Graph, names: Iterable<string>): LiveObject[] =>
 	[...names].flatMap((name) => graph.named.get(name) ?? [])
+
+/** The tables and views trigger or view `object` names, none for another object */
+function namedBy(graph: Graph, object: LiveObject): LiveObject[] {
+	if (object.type !== "trigger" && object.type !== "view") return []
+	return objectsOf(graph, graph.names.get(object) as Set<string>).filter(
+		(each) => each.type === "table" || each.type === "view",
+	)
+}
+
+/** `start` and, to a fixpoint, each table and view a trigger or view in it names */
+function resolved(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
+	const out = new Set(start)
+	for (const object of out) for (const each of namedBy(graph, object)) out.add(each)
+	return out
+}
+
+/** `start` and, to a fixpoint, each index and trigger on a table or view in it, and each table and view a trigger or view in it names */
+function forward(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
+	const out = new Set(start)
+	for (const object of out) {
+		/* a view's INSTEAD OF triggers carry out every write through it */
+		if (object.type === "table" || object.type === "view")
+			for (const each of graph.on.get(asciiFold(object.name)) ?? []) out.add(each)
+		for (const each of namedBy(graph, object)) out.add(each)
+	}
+	return out
+}
 
 /**
  * The scope of the copy pending `files` run on over the live schema `objects`, with the binding's history table
@@ -157,20 +171,19 @@ function observable(
 	const statements = files.flatMap(({ sql }) => splitSqlStatements(sql))
 	/* a catalog lists every object, so a file that reads one observes them all, though no more rows */
 	if (statements.some(readsCatalog)) return { objects: [...objects], seeded }
-	const altered = statements.some(isAlterTable)
-	const checked = objects.filter(
-		(object) =>
-			(object.type === "view" || object.type === "trigger") &&
-			(altered || [...(graph.names.get(object) as Set<string>)].some((name) => s.has(name))),
-	)
+	const checks = objects.filter((object) => object.type === "view" || object.type === "trigger")
+	/* a rename rewrites the text of each naming an S table, and D1 then compiles the writes to its table */
+	const rewritten = checks.filter((object) => [...(graph.names.get(object) as Set<string>)].some((name) => s.has(name)))
 	/* a write to a created table compiles its keys' checks, which need each parent table */
-	let made = forward(graph, [...n, ...objectsOf(graph, seeded), ...checked])
+	let made = forward(graph, [...n, ...objectsOf(graph, seeded), ...rewritten])
 	for (;;) {
 		const parents = objectsOf(graph, reach(tablesIn(made), graph.parentsOf)).filter((object) => !made.has(object))
 		if (parents.length === 0) break
 		made = forward(graph, [...made, ...parents])
 	}
-	return { objects: objects.filter((object) => made.has(object)), seeded }
+	/* the others an ALTER checks resolve against what they name, which no statement writes */
+	const read = statements.some(isAlterTable) ? resolved(graph, checks) : new Set<LiveObject>()
+	return { objects: objects.filter((object) => made.has(object) || read.has(object)), seeded }
 }
 
 export { isVirtual, observable, type Scope, SHADOWS, shadowsOf }

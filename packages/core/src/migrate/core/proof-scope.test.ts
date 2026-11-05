@@ -32,6 +32,9 @@ async function verdicts(schema: string, file: string): Promise<{ scoped: string;
 /** A live table */
 const table = (name: string, sql: string): LiveObject => ({ name, sql, table: name, type: "table" })
 
+/** A live view */
+const view = (name: string, sql: string): LiveObject => ({ name, sql, table: name, type: "view" })
+
 /* 8.5 of plan 21, ruled 23:35Z: "the closure is enough" is a test, not an argument */
 describe("the D1 proof's scoped copy answers every corpus file as the whole schema's copy does (8.5)", () => {
 	const corpus = scopeCorpus()
@@ -114,6 +117,34 @@ describe("observable: what the scoped copy creates and seeds", () => {
 			table("other", "CREATE TABLE other (x)"),
 		]
 		expect([...observable(objects, [{ sql: "SELECT 1;" }], "D1_Migrations").seeded]).toEqual(["d1_migrations"])
+	})
+})
+
+/* AC2-4 of area C round 2: SQLite's ALTER check resolves each view and trigger against what it names, and needs no
+   key ancestor or index of a table only those name */
+describe("observable: with an ALTER TABLE pending", () => {
+	const objects = [
+		table("t", "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT)"),
+		table("p0", "CREATE TABLE p0 (id INTEGER PRIMARY KEY)"),
+		table("p1", "CREATE TABLE p1 (id INTEGER PRIMARY KEY, up INTEGER REFERENCES p0 (id))"),
+		table("p2", "CREATE TABLE p2 (id INTEGER PRIMARY KEY, up INTEGER REFERENCES p1 (id))"),
+		{ name: "p2_up", sql: "CREATE INDEX p2_up ON p2 (up)", table: "p2", type: "index" },
+		view("v1", "CREATE VIEW v1 AS SELECT id FROM p2"),
+		view("v2", "CREATE VIEW v2 AS SELECT id FROM v1"),
+		table("q", "CREATE TABLE q (id INTEGER PRIMARY KEY, up INTEGER REFERENCES p0 (id))"),
+		table("r", "CREATE TABLE r (id INTEGER PRIMARY KEY)"),
+		{
+			name: "q_in",
+			sql: "CREATE TRIGGER q_in AFTER INSERT ON q BEGIN INSERT INTO r DEFAULT VALUES; END",
+			table: "q",
+			type: "trigger",
+		},
+	]
+
+	it("creates every view and trigger and what each names, through views, and no ancestor or index only they reach", () => {
+		const scope = observable(objects, [{ sql: "ALTER TABLE t RENAME COLUMN a TO b;" }])
+		expect(scope.objects.map(({ name }) => name)).toEqual(["t", "p2", "v1", "v2", "q", "r", "q_in"])
+		expect([...scope.seeded]).toEqual(["t"])
 	})
 })
 
