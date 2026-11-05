@@ -3,7 +3,16 @@
  * text a read would round, and _combTextKeys, the TEXT a SQLite timestamp key holds.
  */
 import { sql } from "drizzle-orm"
-import { customType, numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
+import {
+	customType,
+	date,
+	numeric as pgNumeric,
+	PgDialect,
+	pgTable,
+	text as pgText,
+	time,
+	timestamp,
+} from "drizzle-orm/pg-core"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { keyTextsSQL, textKeysSQL } from "./key-texts.ts"
@@ -33,7 +42,7 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 	const pgKeys: Array<[string, Parameters<typeof keyTextsSQL>[0][number]["column"], boolean]> = [
 		["a numeric in number mode", kinds.n, true],
 		["a date-mode timestamp", kinds.when, true],
-		["a string-mode timestamp", kinds.at, false],
+		["a string-mode timestamp", kinds.at, true],
 		["a text column", kinds.label, false],
 		["an expression", sql`${kinds.label}`, true],
 		["a customType column", kinds.amount, true],
@@ -73,6 +82,35 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 		expect(render(sqliteKinds.at)).toContain("printf('%!.17g', ")
 		expect(render(sqliteKinds.label)).toBe("''")
 		expect(render(sql`${sqliteKinds.label}`)).toBe("''")
+	})
+})
+
+/** keyTextsSQL of `column` alone on Postgres, bound as read or not, rendered */
+const carried = (column: Parameters<typeof keyTextsSQL>[0][number]["column"], asRead: boolean) =>
+	new PgDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "postgres", () => asRead)).sql
+
+/*
+ * AB3-4 of area B: a Postgres time key's read follows DateStyle, a string-mode one's text included
+ * (`01/01/2024 05:30:00 IST`, whose zone reads back as another), so every list carries to_json's text,
+ * one that reads the key back from its anchor row too: with the row gone, the cursor binds it
+ */
+describe("keyTextsSQL carries a Postgres time key's to_json text on every list (AB3-4 of area B; sibling: B2-7)", () => {
+	const times = pgTable("times", {
+		at: timestamp("at", { mode: "string", precision: 6, withTimezone: true }),
+		clock: time("clock"),
+		day: date("day"),
+		label: pgText("label"),
+		when: timestamp("when", { precision: 6 }),
+	})
+
+	it.each([false, true])("carries a timestamp, a date and a time expression in either mode (as read: %s)", (asRead) => {
+		for (const column of [times.at, times.day, times.when, sql`${times.at}`])
+			expect(carried(column, asRead)).toContain("to_json(")
+	})
+
+	it("carries no text for a key DateStyle does not write: a time of day or a text", () => {
+		expect(carried(times.clock, false)).toBe("''")
+		expect(carried(times.label, false)).toBe("''")
 	})
 })
 

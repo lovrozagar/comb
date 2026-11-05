@@ -45,8 +45,9 @@ const familyOf = (column: SQLWrapper): SQL =>
 /**
  * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
  * time: a Postgres timestamp, timestamptz or date as to_json writes it, ISO 8601 with a numeric offset
- * in every DateStyle, which it reads back as that type in any session (a column in string mode reads
- * as its text already); a SQLite timestamp's stored seconds or
+ * in every DateStyle, which it reads back as that type in any session, on every list: a cursor binds it
+ * once the row a list reads the key back from is gone, and a read in string mode follows DateStyle,
+ * whose zone abbreviation reads back as another zone (AB3-4 of area B); a SQLite timestamp's stored seconds or
  * milliseconds at 17 significant digits, which a double reads back exactly, where a Date keeps whole
  * milliseconds, and none for ±Infinity, whose `Inf` no cursor reads back and whose type the row
  * carries already (AB3-1 of area B); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
@@ -65,8 +66,8 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	}
 	if (column instanceof DateKey) return null
 	if (is(column, Column) && !carriesOpaque(column))
-		return asRead && column.dataType === "object date" ? sql`coalesce(${isoText(column)}, '')` : null
-	const time = asRead && !carriesOpaque(column) ? sql` when ${isTime(column)} then ${isoText(column)}` : sql``
+		return DATESTYLED.has(column.dataType) ? sql`coalesce(${isoText(column)}, '')` : null
+	const time = carriesOpaque(column) ? sql`` : sql` when ${isTime(column)} then ${isoText(column)}`
 	return sql`coalesce(case when ${roundsOnRead(column)} then (${column})::text${time} end, '')`
 }
 
@@ -83,6 +84,9 @@ const readAsStored = (column: SQLWrapper): SQL =>
 const booleanStored = (column: SQLWrapper): SQL =>
 	sql`case when ${readAsStored(column)} then null when typeof(${column}) = 'integer' then json_array('integer', cast(${column} as text)) when typeof(${column}) = 'real' then json_array('real', case when abs(${column}) < 9e999 then printf('%!.17g', ${column}) when ${column} > 0 then '9e999' else '-9e999' end) when typeof(${column}) = 'text' then json_array('text', ${column}) else json_array('blob', hex(${column})) end`
 
+// lookup-table: the Postgres columns whose read follows DateStyle, or keeps milliseconds of a time's microseconds (AB3-4 of area B)
+const DATESTYLED = /* @__PURE__ */ new Set(["object date", "string date", "string timestamp"])
+
 /* B2-7 of area B: a time's ::text follows DateStyle, whose zone abbreviation (IST, PST) reads back as another zone */
 const isoText = (column: SQLWrapper): SQL => sql`(to_json(${column}) #>> '{}')`
 
@@ -94,7 +98,7 @@ const isoText = (column: SQLWrapper): SQL => sql`(to_json(${column}) #>> '{}')`
 const roundsOnRead = (column: SQLWrapper): SQL =>
 	sql`(pg_typeof(${column}) = 'numeric'::regtype or ${isDomainOver(column, sql`'numeric'::regtype`)})`
 
-/** Each of `keys`' stored text, comma-joined, empty for one no list carries; asRead keys carry their time too */
+/** Each of `keys`' stored text, comma-joined, empty for one no list carries; asRead SQLite keys carry their time too */
 function keyTextsSQL(
 	keys: readonly SortKey[],
 	dialect: ListDialect,

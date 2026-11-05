@@ -3,7 +3,8 @@
  * query-helpers with drizzle's relational query API.
  */
 import type { Column, SQL, SQLWrapper } from "drizzle-orm"
-import { sql } from "drizzle-orm"
+import { is, sql } from "drizzle-orm"
+import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
@@ -116,13 +117,18 @@ function tiebreakOf(table: RelationalTable): SQL {
 const countOver = (): SQL<number> => sql<number>`cast(count(*) over() as integer)`
 
 /**
- * The extras that carry a key's text where its read rounds it, and a SQLite timestamp's TEXT, which
- * the next cursor binds (QL3 of r22b, B2-3 of area B); none on a list with no sort
+ * The extras that carry a key's text where its read rounds it or loses its time, and a SQLite
+ * timestamp's TEXT, which the next cursor binds (QL3 of r22b, B2-3 and AB3-4 of area B), in the
+ * dialect the table's columns are of; none on a list with no sort
  */
 function textsOf(sort: readonly SortField[]) {
 	if (sort.length === 0) return {}
+	const keyTexts = (table: RelationalTable) => {
+		const { keys, tiebreak } = keysOn(table, sort)
+		return keyTextsSQL(keys, is(tiebreak.column, SQLiteColumn) ? "sqlite" : "postgres")
+	}
 	return {
-		_combKeyTexts: (table: RelationalTable) => keyTextsSQL(keysOn(table, sort).keys, "postgres"),
+		_combKeyTexts: keyTexts,
 		_combTextKeys: (table: RelationalTable) => textKeysSQL(keysOn(table, sort).keys),
 	}
 }

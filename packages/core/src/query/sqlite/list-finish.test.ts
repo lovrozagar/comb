@@ -172,8 +172,10 @@ describe("finish's key families and stored times on Postgres (QL1, QL2 of r22b; 
 			`coalesce((to_json("pg_ev"."at") #>> '{}'), '') || ',' || coalesce(case when (pg_typeof("pg_ev"."at") = 'numeric'::regtype or ${OVER_NUMERIC}) then ("pg_ev"."at")::text when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) then (to_json("pg_ev"."at") #>> '{}') end, '') || ',' || '' || ',' || ''`,
 		)
 		expect(extrasOf("postgres", [{ column: pgEv.label, direction: "asc" }])).not.toHaveProperty("_combKeyTexts")
+		/* AB3-4 of area B: a list that reads the key back carries it too, for a cursor whose row is gone */
 		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv as never })).toEqual({
 			_combId: expect.any(String),
+			_combKeyTexts: `coalesce((to_json("pg_ev"."at") #>> '{}'), '')`,
 			_total: expect.any(String),
 		})
 	})
@@ -183,7 +185,7 @@ describe("finish's key families and stored times on Postgres (QL1, QL2 of r22b; 
 describe("finish's carried numeric texts (QL3 of r22b; sibling: the stored times)", () => {
 	const amount = pgTable("amount", { id: pgText("id").primaryKey(), n: pgNumeric("n", { mode: "number" }) })
 
-	it("carries a numeric in number mode on an anchored list, a table list and the relational one, and nothing else there", () => {
+	it("carries a numeric in number mode on an anchored list, a table list and the relational one, beside a time", () => {
 		const anchored = extrasOf("postgres", [{ column: amount.n, direction: "asc" }], { table: amount as never })
 		expect(anchored).not.toHaveProperty("_combKeyTypes")
 		expect(anchored["_combKeyTexts"]).toBe(`coalesce(("amount"."n")::text, '')`)
@@ -196,11 +198,14 @@ describe("finish's carried numeric texts (QL3 of r22b; sibling: the stored times
 			],
 			"postgres",
 		)
-		expect(new PgDialect().sqlToQuery(relational).sql).toBe(`coalesce(("amount"."n")::text, '') || ',' || ''`)
+		expect(new PgDialect().sqlToQuery(relational).sql).toBe(
+			`coalesce(("amount"."n")::text, '') || ',' || coalesce((to_json("pg_ev"."at") #>> '{}'), '')`,
+		)
 	})
 
-	it("carries an anchored Postgres expression's text only where its type may read rounded, not as a time", () => {
+	it("carries an anchored Postgres expression's text where its type may read rounded or is a time (AB3-4 of area B)", () => {
 		const own = extrasOf("postgres", [{ column: sql`${pgEv.at}`, direction: "asc" }], { table: pgEv as never })
 		expect(own["_combKeyTexts"]).toMatch(/^coalesce\(case when \(pg_typeof\("pg_ev"\."at"\) = 'numeric'::regtype or /)
+		expect(own["_combKeyTexts"]).toContain(`then (to_json("pg_ev"."at") #>> '{}') end`)
 	})
 })

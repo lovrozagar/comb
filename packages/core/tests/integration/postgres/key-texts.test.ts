@@ -1,8 +1,8 @@
 /**
  * B2-8 of area B: AB1's invariant, checked on the server. A list carries a key's text only where the
- * driver's read rounds it, a numeric or a domain over one, and, on a list that binds the key as read,
- * a timestamp, timestamptz or date; every other type carries nothing, so no text holding a comma is
- * comma-joined. The unit test in list-finish.test.ts pins the type names the guard spells; this one
+ * driver's read rounds it, a numeric or a domain over one, or may follow the session's DateStyle, a
+ * timestamp, timestamptz or date (AB3-4); every other type carries nothing, so no text holding a
+ * comma is comma-joined. The unit test in list-finish.test.ts pins the type names the guard spells; this one
  * evaluates the guard for one value of each type a user can create and of every built-in category,
  * so an arm naming no type (`pg_typeof(k)::oid >= 16384`, AB1's original bug) fails here.
  */
@@ -23,7 +23,7 @@ const MADE = [
 	"CREATE DOMAIN pg_temp.b8_amount AS numeric",
 ]
 
-/* a value of each type, by what a list carries for it: always, only as read, or never */
+/* a value of each type, by what a list carries for it: its rounded text, its time text, or nothing */
 const ROUNDED = ["1.5::numeric", "1.5::pg_temp.b8_amount"]
 const TIMES = [
 	"'2024-01-01'::date",
@@ -67,7 +67,7 @@ async function carried(client: pg.Client, value: string, asRead: boolean): Promi
 	return rows[0]?.t
 }
 
-describe("keyTextsSQL carries a key's text on the server only for a numeric and, as read, a time (B2-8 of area B; sibling: AB1's unit pin)", () => {
+describe("keyTextsSQL carries a key's text on the server only for a numeric and a time (B2-8 of area B; sibling: AB1's unit pin, AB3-4)", () => {
 	const sessions = usePg()
 
 	/** The built-in numeric category's base types, each by a value its input reads */
@@ -85,7 +85,7 @@ describe("keyTextsSQL carries a key's text on the server only for a numeric and,
 		const numbers = (await numericCategory()).filter((value) => value !== "'1'::numeric")
 		expect(numbers).toEqual(expect.arrayContaining(["'1'::integer", "'1'::bigint", "'1'::money", "'1'::oid"]))
 		for (const value of ROUNDED) expect(await carried(sessions.pg(), value, asRead), value).toBe("1.5")
-		for (const value of TIMES) expect((await carried(sessions.pg(), value, asRead)) !== "", value).toBe(asRead)
+		for (const value of TIMES) expect((await carried(sessions.pg(), value, asRead)) !== "", value).toBe(true)
 		for (const value of [...NEVER, ...numbers]) expect(await carried(sessions.pg(), value, asRead), value).toBe("")
 	})
 })

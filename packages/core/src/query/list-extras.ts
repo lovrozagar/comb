@@ -14,6 +14,8 @@ const COMB_ID = "_combId" as const
 const DECIMAL: RegExp = /^(?:0|[1-9]\d*)$/
 /* an integer as a SQLite driver writes it in a string: canonical, signed */
 const INTEGER_TEXT: RegExp = /^-?(?:0|[1-9]\d*)$/
+/* the start of a Postgres time's to_json text in any DateStyle: a year of four digits or more and its dash, or ±infinity; no numeric's text, which a custom column carries, starts so */
+const TIME_TEXT: RegExp = /^(?:-?infinity$|\d{4,}-)/
 // lookup-table: the storage classes SQLite's typeof() answers with, a REAL ±Infinity as its own (Q3 of r20), and Postgres's families (Q2 of r21)
 const KEY_CLASSES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"+inf",
@@ -195,6 +197,8 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
 	if (carried === undefined || carried === "") return value
 	/* B2-7 of area B: node-postgres reads a time no DateStyle but ISO writes as null, which its stored text replaces */
 	if (stored === "time" || typeof value === "number") return carried
+	/* AB3-4 of area B: with no classes, a Postgres time's text stands in for any read of it, a string mode's included */
+	if (TIME_TEXT.test(carried)) return carried
 	return value instanceof Date ? Number(carried) : value
 }
 

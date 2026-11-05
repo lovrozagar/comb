@@ -203,6 +203,23 @@ describe("a time key's stored value on a key bound as read (QL2 of r22b; sibling
 	})
 })
 
+/* AB3-4 of area B: a list that reads a Postgres time key back carries its to_json text for the row gone */
+describe("a Postgres time key's carried text on a list that reads it back (AB3-4 of area B; sibling: QL2)", () => {
+	const pgEvent = pgTable("ev", { at: timestamp("at", { precision: 6 }) })
+	const iso = "2024-01-01T00:00:00.1231+00:00"
+
+	it("fits the text the cursor flags as carried on a date-mode key, and no unflagged one", () => {
+		expect(() => assertCursorFits([pgEvent.at], [iso], { carried: () => true, table: pgEvent })).not.toThrow()
+		expect(() => assertCursorFits([pgEvent.at], [iso], { table: pgEvent })).toThrow(
+			expect.objectContaining({ errorKey: "invalid_cursor" }),
+		)
+	})
+
+	it("binds a carried text as itself, past the column's Date mapper", () => {
+		expect(new PgDialect().sqlToQuery(boundCarried(pgEvent.at, iso, true) as SQL)).toEqual({ params: [iso], sql: "$1" })
+	})
+})
+
 /* Q2 of r19: libsql's intMode "string" reads an INTEGER as its canonical decimal string */
 describe("assertCursorFits on what libsql's intMode string reads", () => {
 	it("takes a canonical integer string on a number column, and binds it as that integer, exact", () => {

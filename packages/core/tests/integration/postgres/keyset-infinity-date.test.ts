@@ -2,7 +2,9 @@
  * U17 of the 0.12 round: a date-mode Postgres time column holding ±infinity. drizzle reads a
  * `timestamp` 'infinity' and '-infinity' both as 2000-01-01 local time, a valid Date the keyset
  * would page by, so the cursor's bound is read from its row. A `timestamptz` or `date` reads them as
- * an Invalid Date, which a cursor carries as itself, its bound read from the row too (3.24).
+ * an Invalid Date, which a cursor carries as itself, its bound read from the row too (3.24). A list
+ * carries the key's to_json text beside it, 'infinity' or '-infinity', and binds that (AB3-4), so a
+ * deleted infinite anchor resumes exactly where it stood.
  */
 import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
@@ -88,20 +90,15 @@ describe("keyset pagination on a date-mode timestamp holding ±infinity (U17)", 
 		expect(await pageAll(sessions, order, { at })).toEqual(all)
 	})
 
-	/* resumed from the direction's own end, as the row may have held either infinity */
+	/* the carried text keeps the infinity's sign, which the Date read as 2000-01-01 lost (AB3-4) */
 	it.each([
 		["ts.asc", 1],
 		["ts.desc.nullslast", 2],
-	] as const)(
-		"repeats rows and skips none on %s once its infinite cursor row %s, at the far end, is deleted",
-		async (order, at) => {
-			const inOrder = await seeded(sessions)
-			const all = await inOrder(order)
-			const seen = await pageAll(sessions, order, { at })
-			expect(all.filter((id) => !seen.includes(id))).toEqual([])
-			expect(seen.length).toBeGreaterThan(all.length)
-		},
-	)
+	] as const)("pages %s on exactly once its infinite cursor row %s, at the far end, is deleted", async (order, at) => {
+		const inOrder = await seeded(sessions)
+		const all = await inOrder(order)
+		expect(await pageAll(sessions, order, { at })).toEqual(all)
+	})
 
 	it.each([
 		["ts.asc", 2],
@@ -130,17 +127,16 @@ describe("keyset pagination on a date-mode timestamptz or date holding ±infinit
 		expect(await pageAll(sessions, order as string, { limit: limit as number })).toEqual(await inOrder(order as string))
 	})
 
-	/* its sign unknown once the row is gone, the list resumes from the direction's own end */
+	/* the carried text keeps the infinity's sign once the row is gone (AB3-4) */
 	it.each([
 		["tz.asc", 1],
 		["tz.desc", 2],
 		["d.asc", 7],
 		["d.desc", 8],
-	] as const)("repeats rows and skips none on %s once its infinite cursor row %s is deleted", async (order, at) => {
+	] as const)("pages %s on exactly once its infinite cursor row %s is deleted", async (order, at) => {
 		const inOrder = await seeded(sessions, INFINITE(order.split(".")[0] as string))
 		const all = await inOrder(order)
-		const seen = await pageAll(sessions, order, { at })
-		expect(all.filter((id) => !seen.includes(id))).toEqual([])
+		expect(await pageAll(sessions, order, { at })).toEqual(all)
 	})
 
 	it("refuses a derived list's cursor at an infinite row, which no row can bound, with sort_not_wired", async () => {

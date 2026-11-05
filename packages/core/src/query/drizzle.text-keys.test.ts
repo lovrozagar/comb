@@ -46,6 +46,16 @@ describe("queryHelpers.listOptions' _combTextKeys (B2-3 of area B; sibling: _com
 		expect(rendered).not.toContain("json_array")
 	})
 
+	/* AB3-4 of area B: a Postgres time key carries its to_json text on the relational list too; SQLite has no to_json */
+	it("carries a Postgres timestamp key's to_json text, and nothing for a SQLite one", () => {
+		const options = queryHelpers.listOptions(byAt, SEALED)
+		const db = pgDrizzle.mock({ relations: defineRelations({ pgStamped }) })
+		expect(db.query.pgStamped.findMany(options as never).toSQL().sql).toContain(
+			`(coalesce((to_json("d0"."at") #>> '{}'), '')) as "_combKeyTexts"`,
+		)
+		expect(dialect.sqlToQuery(options.extras["_combKeyTexts"]!(getTableColumns(stamped))).sql).toBe("''")
+	})
+
 	it("is stripped from the served rows, and a page whose rows lack it is a 500 page_not_wired naming it", () => {
 		const options = queryHelpers.listOptions(byAt, SEALED)
 		const row = { _combId: 1, _combKeyTexts: "", _combTextKeys: '["now"]', _total: 1, at: new Date(Number.NaN), id: 1 }

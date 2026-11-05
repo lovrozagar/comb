@@ -147,6 +147,24 @@ describe("typedKeys with a carried text (QL3 of r22b; sibling: a time key's stor
 	})
 })
 
+/* AB3-4 of area B: a table list carries a Postgres time key's to_json text with no _combKeyTypes */
+describe("typedKeys and carriedTexts: a Postgres time key's text on a list with no classes (AB3-4 of area B; sibling: QL2)", () => {
+	const iso = "2024-01-01T00:00:00+00:00"
+
+	it("takes the carried text for a string-mode time's DateStyle text and for a Date, and flags it", () => {
+		const text = { _combId: 1, _combKeyTexts: `${iso},`, k: "01/01/2024 05:30:00 IST", name: "a" }
+		expect(typedKeys(text, SORT)).toEqual({ ...text, k: iso })
+		expect(carriedTexts(text, SORT)).toEqual(new Set(["k"]))
+		const date = { _combId: 1, _combKeyTexts: `${iso},`, k: new Date(0), name: "a" }
+		expect(typedKeys(date, SORT)["k"]).toBe(iso)
+	})
+
+	it("keeps a custom column's mapped text where the carried one is a numeric's (AB2)", () => {
+		const row = { _combId: 1, _combKeyTexts: "12.50,", k: "12.5", name: "a" }
+		expect(typedKeys(row, SORT)).toBe(row)
+	})
+})
+
 /* comb-9d's AB2 ruling: the cursor flags each key whose value is a carried text, which binds as itself */
 describe("carriedTexts (comb-9d's AB2 ruling; sibling: typedKeys' carried text)", () => {
 	it("names a key whose value typedKeys took from the carried text, and no key read as its text already", () => {
