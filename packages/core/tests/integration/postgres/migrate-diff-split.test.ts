@@ -78,7 +78,7 @@ describe("migrate diff on Postgres: a history Atlas splits as it runs it", () =>
 			} finally {
 				await withScratchDb((url) => query(url, `DROP ROLE IF EXISTS "${role}"`))
 			}
-		}, 120_000)
+		})
 
 		it("replays a BEGIN ATOMIC function and a rule's action list, each one statement, and finds it synced", async () => {
 			await withScratchDb(async (devUrl) => {

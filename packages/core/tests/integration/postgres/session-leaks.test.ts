@@ -210,14 +210,10 @@ async function checked({ files }: Case): Promise<string> {
 }
 
 describe("one apply, or one check, of every file ends as applying them one at a time does (PA1 reversed; AE1 to AE5, AE10 to AE13)", () => {
-	it.each(Object.keys(CASES))(
-		"%s",
-		async (name) => {
-			const shape = CASES[name] as Case
-			const alone = await applied(shape, true)
-			const together = [await applied(shape, false), shape.hand === undefined ? await checked(shape) : alone]
-			expect(together).toEqual([alone, alone])
-		},
-		180_000,
-	)
+	it.each(Object.keys(CASES))("%s", async (name) => {
+		const shape = CASES[name] as Case
+		const alone = await applied(shape, true)
+		const together = [await applied(shape, false), shape.hand === undefined ? await checked(shape) : alone]
+		expect(together).toEqual([alone, alone])
+	})
 })

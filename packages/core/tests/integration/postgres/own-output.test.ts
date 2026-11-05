@@ -66,7 +66,7 @@ describe("comb's own diff output on Postgres", () => {
 			} finally {
 				rmSync(dir, { force: true, recursive: true })
 			}
-		}, 180_000)
+		})
 	})
 })
 

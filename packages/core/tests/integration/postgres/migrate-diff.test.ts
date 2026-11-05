@@ -170,7 +170,7 @@ describe("migrate diff on Postgres: row level security", () => {
 				expect(await rlsOf(url)).toEqual([{ enabled: false, forced: false, table: "post" }])
 				expect((await diff(dev, POST, "plain")).synced).toBe(true)
 			})
-		}, 90_000)
+		})
 
 		it("drops a table with row level security, then creates it again with its policy", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -190,7 +190,7 @@ describe("migrate diff on Postgres: row level security", () => {
 				])
 				expect(await query(url, "SELECT polname FROM pg_policy")).toEqual([{ polname: "own" }])
 			})
-		}, 90_000)
+		})
 	})
 })
 
@@ -210,7 +210,7 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 					{ polname: "own", rel: "article" },
 				])
 			})
-		}, 90_000)
+		})
 
 		it("follows a hand-written rename of a secured table in the history", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -225,7 +225,7 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "article" }])
 			})
-		}, 90_000)
+		})
 
 		it("creates a policy again after a hand-written drop of its table", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -239,7 +239,7 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "post" }])
 				expect(await query(url, "SELECT polname FROM pg_policy")).toEqual([{ polname: "own" }])
 			})
-		}, 90_000)
+		})
 	})
 })
 
@@ -340,6 +340,7 @@ describe("migrate diff on Postgres: the default dev database", () => {
 			async () => {
 				expect((await diff(target("docker://postgres/17/dev"), POST)).files).toHaveLength(1)
 			},
+			// CI only: Atlas starts its own postgres:17 container, pulling the image on a fresh runner
 			180_000,
 		)
 	})
@@ -384,7 +385,7 @@ describe("migrate diff on Postgres: sequences a default uses", () => {
 					await query(url, dropRole(role))
 				}
 			})
-		}, 90_000)
+		})
 
 		it("diffs a hand-written sequence default and a column added beside it", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -396,7 +397,7 @@ describe("migrate diff on Postgres: sequences a default uses", () => {
 				await applyAll(url)
 				expect((await diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "again")).synced).toBe(true)
 			})
-		}, 90_000)
+		})
 	})
 })
 
@@ -417,7 +418,7 @@ describe("migrate diff on Postgres: a policy over another table, and a role anot
 				await applyAll(url)
 				expect((await diff(dev, teamPolicy("bigint"), "again")).synced).toBe(true)
 			})
-		}, 90_000)
+		})
 
 		it("creates a role only where it is missing, as roles are the cluster's, and reads that statement back", async () => {
 			const role = roleName()
@@ -433,7 +434,7 @@ describe("migrate diff on Postgres: a policy over another table, and a role anot
 					await query(url, `DROP ROLE IF EXISTS "${role}"`)
 				}
 			})
-		}, 90_000)
+		})
 	})
 })
 
@@ -471,21 +472,17 @@ describe("migrate diff on Postgres: hand-written statements about comb's objects
 				object: MATVIEW,
 				statement: 'CREATE INDEX "mv_id" ON "mv" ("id");\n',
 			},
-		])(
-			"keeps $name through a later diff that recreates its object",
-			async ({ check, expected, object, statement }) => {
-				await withDevAndTarget(async (devUrl, url) => {
-					const dev = target(devUrl)
-					await diff(dev, POST + object)
-					handWritten("20990101000000_extra.sql", statement)
-					const widened = POST.replace("NOT NULL)", 'NOT NULL, "body" text)') + object
-					await diff(dev, widened, "widen")
-					await applyAll(url)
-					expect(await query(url, check)).toEqual(expected)
-					expect((await diff(dev, widened, "again")).synced).toBe(true)
-				})
-			},
-			90_000,
-		)
+		])("keeps $name through a later diff that recreates its object", async ({ check, expected, object, statement }) => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				await diff(dev, POST + object)
+				handWritten("20990101000000_extra.sql", statement)
+				const widened = POST.replace("NOT NULL)", 'NOT NULL, "body" text)') + object
+				await diff(dev, widened, "widen")
+				await applyAll(url)
+				expect(await query(url, check)).toEqual(expected)
+				expect((await diff(dev, widened, "again")).synced).toBe(true)
+			})
+		})
 	})
 })

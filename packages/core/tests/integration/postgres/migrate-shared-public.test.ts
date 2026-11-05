@@ -139,7 +139,7 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 				expect(await query(url, "SELECT to_regclass('public.c') IS NOT NULL AS made")).toEqual([{ made: true }])
 				expect(await shared(url)).toEqual(["20260101000000", "20260103000000", "20260105000000"])
 			})
-		}, 90_000)
+		})
 
 		it("applies a later file of public's after c, and refuses one older than public's own latest", async () => {
 			await withDevAndTarget(async (dev, url) => {
@@ -153,7 +153,7 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 				await expect(applyWithAtlas(command(url, "public", pub))).rejects.toThrow(late)
 				expect(await query(url, "SELECT to_regclass('public.late') IS NULL AS absent")).toEqual([{ absent: true }])
 			})
-		}, 90_000)
+		})
 
 		it("refuses app's row as M76 does when app's own history records it with another hash", async () => {
 			await withDevAndTarget(async (dev, url) => {
@@ -162,6 +162,6 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 				await expect(applyWithAtlas(command(url, "public", pub))).rejects.toThrow(gone)
 				expect(await shared(url)).toEqual(["20260101000000", "20260105000000"])
 			})
-		}, 90_000)
+		})
 	})
 })

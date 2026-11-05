@@ -85,7 +85,7 @@ describe("migrate status, check and apply on Postgres: an applied file gone, or 
 					expect(await query(url, 'SELECT * FROM "a"')).toEqual([])
 				})
 			}
-		}, 120_000)
+		})
 	})
 })
 
@@ -115,7 +115,7 @@ describe("migrate status, check and apply on Postgres: an applied file renamed u
 					await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 				})
 			}
-		}, 120_000)
+		})
 
 		it("refuses an applied file named by its version alone that was edited since (M76)", async () => {
 			await withScratchDb(async (url) => {

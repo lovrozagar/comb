@@ -174,6 +174,7 @@ describe("a Postgres apply stopped by a signal while Atlas applies (PA4 of r22)"
 				}),
 			)
 		},
+		// room for until's 60 s wait for the held Atlas call, then STOP_WITHIN_MS's 20 s for the stop
 		90_000,
 	)
 })

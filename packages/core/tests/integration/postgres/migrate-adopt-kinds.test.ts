@@ -102,7 +102,7 @@ describe("migrate status on Postgres: a schema beside public's history holding o
 				const adopting = Object.fromEntries(Object.keys(KINDS).map((kind) => [kind, { pending: [], theirs: false }]))
 				expect(seen).toEqual(adopting)
 			})
-		}, 120_000)
+		})
 
 		it("migrates as empty a schema holding only default privileges, which are no object in it", async () => {
 			await withScratchDb(async (url) => {

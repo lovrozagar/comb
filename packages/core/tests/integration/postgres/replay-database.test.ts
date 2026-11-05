@@ -110,7 +110,7 @@ describe("the replay on a server dev and target share leaves what lies past its 
 				)
 			}),
 		)
-	}, 120_000)
+	})
 })
 
 describe("baseline's replay, and two at once, on a server dev and target share", () => {
@@ -136,7 +136,7 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 				expect(await settingsOf(target)).toEqual([])
 			}),
 		)
-	}, 120_000)
+	})
 
 	it("passes two replays at once whose history creates one role, and drops it after both", async () => {
 		const [made] = testRoles("comb_t_made")
@@ -150,7 +150,7 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 				expect(await roleOf(made)).toEqual([])
 			}),
 		)
-	}, 120_000)
+	})
 })
 
 describe("the replay's sweep", () => {
@@ -184,7 +184,7 @@ describe("the replay's sweep", () => {
 			`SELECT rolname FROM pg_roles WHERE rolname IN ('${stale}', '${fresh}', '${untagged}') ORDER BY rolname`,
 		)
 		expect(roles.map((row) => row["rolname"])).toEqual([fresh, untagged].sort())
-	}, 120_000)
+	})
 })
 
 describe("the replay's database", () => {
@@ -358,5 +358,5 @@ describe("two replays at once, one paused between the file making a role and the
 		} finally {
 			rmSync(other, { force: true, recursive: true })
 		}
-	}, 120_000)
+	})
 })

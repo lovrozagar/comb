@@ -96,7 +96,7 @@ describe(`comb migrate on Atlas v${ATLAS_FLOOR_VERSION} (PA5)`, () => {
 				}
 			}),
 		)
-	}, 120_000)
+	})
 
 	it("runs apply, then check and status, on a SQLite file", async () => {
 		const project = migrateProject(FILES)
@@ -109,5 +109,5 @@ describe(`comb migrate on Atlas v${ATLAS_FLOOR_VERSION} (PA5)`, () => {
 		} finally {
 			project.dispose()
 		}
-	}, 120_000)
+	})
 })

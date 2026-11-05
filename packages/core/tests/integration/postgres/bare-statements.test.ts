@@ -98,5 +98,5 @@ describe("the statements a txmode none replay runs bare (P1 of r21)", () => {
 				await admin.end()
 			}
 		})
-	}, 120_000)
+	})
 })
