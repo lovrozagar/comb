@@ -319,6 +319,29 @@ describe("README peer install upgrade item", () => {
 })
 
 /* K9 of r19: the table stopped at 0.14, and the three newest upgrade sections, read first, had no entry */
+/** The backticked names in `text` */
+const names = (text: string): Set<string> => new Set([...text.matchAll(/`([^`]+)`/g)].map((name) => name[1] as string))
+
+/* D6-5 of the area D round-six review: two "(step N)" citations went stale as steps were inserted before them */
+describe("README newest upgrade section's step citations", () => {
+	const at = README.indexOf("\n## Upgrading to ")
+	const section = README.slice(at, README.indexOf("\n## ", at + 1))
+	const steps = new Map(
+		[...section.matchAll(/^(\d+)\. ([\s\S]*?)(?=^\d+\. |(?![\s\S]))/gm)].map((step) => [step[1], step[2] as string]),
+	)
+
+	it("cites, in each sentence naming a step, a step that shares one of its backticked names", () => {
+		const cited = [...section.matchAll(/\(step (\d+)\)/g)].map((citation) => {
+			const sentenceAt = Math.max(section.lastIndexOf(". ", citation.index), section.lastIndexOf("\n", citation.index))
+			const sentence = names(section.slice(sentenceAt, citation.index))
+			const shared = [...names(steps.get(citation[1] as string) ?? "")].filter((name) => sentence.has(name))
+			return [citation[0], shared.length > 0]
+		})
+		expect(cited.length).toBeGreaterThan(0)
+		expect(cited.filter(([, shares]) => !shares)).toEqual([])
+	})
+})
+
 describe("README table of contents", () => {
 	it("lists every section, in the order the README has them", () => {
 		const prose = README.replaceAll(/^```[\s\S]*?^```$/gm, "")
