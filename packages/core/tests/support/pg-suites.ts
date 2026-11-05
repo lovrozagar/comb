@@ -13,7 +13,7 @@ export const PG_REACH =
 /** The suites, by directory and by name */
 export const PG_INTEGRATION = [
 	"tests/integration/postgres/**/*.test.ts",
-	"tests/integration/codegen/json-stored-document.test.ts",
+	"tests/integration/codegen/pg-json-stored-document.test.ts",
 	"tests/integration/codegen/pg-arrays.test.ts",
 	"tests/integration/codegen/pg-ip.test.ts",
 	"tests/integration/codegen/pg-plain-json.test.ts",

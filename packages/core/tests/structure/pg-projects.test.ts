@@ -7,11 +7,13 @@
  * file anywhere in the package reaches the server outside the lock, however it is run: one that does,
  * read from its code (support/pg-reach.ts), runs only in the locked projects or takes the lock itself
  * through tests/support/pg-lock.ts, as the bun:test, consumer and e2e suites run apart from vitest's.
+ * macOS's runners have no Postgres, so no file vitest.posix.config.ts runs reaches the server.
  */
 import { globSync, readdirSync, readFileSync } from "node:fs"
 import { join, matchesGlob } from "node:path"
 import { describe, expect, it } from "vitest"
 import config from "../../vitest.config.ts"
+import posixConfig from "../../vitest.posix.config.ts"
 import { DATE_KEYS } from "../support/off-utc.ts"
 import { PG_INTEGRATION, PG_REACH } from "../support/pg-suites.ts"
 import { reachesPg, readsPgVar, takesPgLock } from "./support/pg-reach.ts"
@@ -127,5 +129,26 @@ describe("every test file that reaches the Postgres test server", () => {
 		expect(takesPgLock(`${helper}\nbeforeAll(async () => { release = await acquirePgRunLock(url) })`)).toBe(true)
 		expect(takesPgLock(helper)).toBe(false)
 		expect(takesPgLock("const acquirePgRunLock = () => 0; acquirePgRunLock()")).toBe(false)
+	})
+})
+
+/* CI on 9857b8e0: the macOS integration job ran json-stored-document, whose Postgres half needs a server macOS has not */
+describe("the macOS suites (vitest.posix.config.ts)", () => {
+	const posix = (posixConfig.test?.projects ?? []).map((project) => (project as { test: Project }).test)
+	const runsOnMac = (file: string): boolean =>
+		posix.some(
+			(project) =>
+				(project.include ?? []).some((glob) => matchesGlob(file, glob)) &&
+				!(project.exclude ?? []).some((glob) => matchesGlob(file, glob)),
+		)
+
+	it("run no test file that reaches the Postgres test server, naming each that does", () => {
+		const onMac = testFiles.filter(runsOnMac)
+		expect(onMac.length).toBeGreaterThan(0)
+		expect(
+			onMac.filter(
+				(file) => file.startsWith("tests/integration/postgres/") || reachesPg(readFileSync(join(CORE, file), "utf8")),
+			),
+		).toEqual([])
 	})
 })
