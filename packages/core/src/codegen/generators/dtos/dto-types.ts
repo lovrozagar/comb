@@ -30,7 +30,7 @@ export type TableInfo = {
 
 /** Where the dtos generator writes each table's DTO schemas */
 export type DtosConfig = {
-	/** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
+	/** the stem of each file's name, `<filePrefix>.<table>.gen.ts`, `<table>` the table's kebab-case export name (`blog-posts`); each file is its directory's `index.gen.ts` when omitted */
 	filePrefix?: string | undefined
 	/** Package the generated meta stamp imports from. Matches EntitiesConfig. */
 	importFrom?: string | undefined
@@ -38,7 +38,7 @@ export type DtosConfig = {
 	output: string
 	/** where the relations generator writes, which the `./relations` export points at */
 	relationsOutput?: string | undefined
-	/** also export the files from the working directory's package.json, as `./dtos/<table>`, `./dtos/_shared`, `./relations` and `./tables`; warns when it has none */
+	/** also export the files from the working directory's package.json, as `./dtos/<table>`, `./dtos/_shared`, `./relations` and `./tables`, under `./<database>/` when one package.json exports several; warns when it has none */
 	updatePackageJson?: boolean | undefined
 }
 

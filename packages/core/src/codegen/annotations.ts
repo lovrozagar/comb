@@ -193,7 +193,7 @@ export function fieldConstraintsOf(
 	}: {
 		/** the column's property name; one starting with `_` is private */
 		fieldName: string
-		/** whether a default or hook fills the column, which turns `autogenerate` on unless it is declared false */
+		/** whether something other than the caller fills the column, a `c.createdAt`, `c.updatedAt` or `c.deletedAt` column, or a timestamp key's default or update hook, which turns `autogenerate` on unless it is declared false */
 		filled: boolean
 		/** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
 		helper: CombColumnKind | null

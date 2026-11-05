@@ -123,9 +123,9 @@ type ManifestEntity = {
 	idPrefix: string | null
 	/** Null when the table has a composite primary key — see meta-contract §6.4 */
 	identity: string | null
-	/** the soft-delete timestamp column, or null when rows are deleted outright or the column is private */
+	/** the soft-delete timestamp column, or null when rows are deleted outright, the column is private, or the table has no single-column primary key */
 	softDelete: string | null
-	/** the column that scopes rows to a tenant, or null when none, or more than one, is declared or it is private */
+	/** the column that scopes rows to a tenant, or null when none, or more than one, is declared, it is private, or the table has no single-column primary key */
 	tenantColumn: string | null
 	/** the primary key spans more than one column */
 	compositePrimaryKey: boolean
@@ -163,7 +163,7 @@ type ManifestEntity = {
 type Manifest = {
 	/** the format version, `MANIFEST_VERSION`: raised only when a field is removed or changes meaning, never when one is added */
 	v: number
-	/** the database's name in comb.config.ts */
+	/** the database's name: its key in comb.config.ts, or under `--tables` the one in the tables file's name (`core` for `db.core.tables.ts`) */
 	database: string
 	/** every table, sorted by `name`, so an unchanged schema regenerates an identical file */
 	entities: ManifestEntity[]

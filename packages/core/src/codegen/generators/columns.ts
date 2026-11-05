@@ -19,11 +19,11 @@ import { type ImportStyle, specifierFor } from "../utils/paths.ts"
 
 /** Where the columns generator writes each table's column references */
 export type ColumnsConfig = {
-	/** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
+	/** the stem of each file's name, `<filePrefix>.<table>.gen.ts`, `<table>` the table's kebab-case export name (`blog-posts`); each file is its directory's `index.gen.ts` when omitted */
 	filePrefix?: string | undefined
 	/** the directory `rqb-cols/`, `sql-cols/` and `table-names/` are written under, relative to the codegen working directory */
 	output: string
-	/** also export each file from the working directory's package.json, as `./rqb-cols/<table>`, `./sql-cols/<table>` and `./table-names`; nothing when it has none */
+	/** also export each file from the working directory's package.json, as `./rqb-cols/<table>`, `./sql-cols/<table>` and `./table-names`, under `./<database>/` when one package.json exports several; nothing when it has none */
 	updatePackageJson?: boolean | undefined
 }
 

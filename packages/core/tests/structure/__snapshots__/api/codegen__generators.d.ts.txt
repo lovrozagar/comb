@@ -33,11 +33,11 @@ export type { ImportStyle } from "../utils/paths.ts";
 import type { GeneratorContext } from "./context-types.ts";
 /** Where the columns generator writes each table's column references */
 export type ColumnsConfig = {
-    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
+    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`, `<table>` the table's kebab-case export name (`blog-posts`); each file is its directory's `index.gen.ts` when omitted */
     filePrefix?: string | undefined;
     /** the directory `rqb-cols/`, `sql-cols/` and `table-names/` are written under, relative to the codegen working directory */
     output: string;
-    /** also export each file from the working directory's package.json, as `./rqb-cols/<table>`, `./sql-cols/<table>` and `./table-names`; nothing when it has none */
+    /** also export each file from the working directory's package.json, as `./rqb-cols/<table>`, `./sql-cols/<table>` and `./table-names`, under `./<database>/` when one package.json exports several; nothing when it has none */
     updatePackageJson?: boolean | undefined;
 };
 /** Generate column refs and table names from analyzed tables */
@@ -223,9 +223,9 @@ type ManifestEntity = {
     idPrefix: string | null;
     /** Null when the table has a composite primary key — see meta-contract §6.4 */
     identity: string | null;
-    /** the soft-delete timestamp column, or null when rows are deleted outright or the column is private */
+    /** the soft-delete timestamp column, or null when rows are deleted outright, the column is private, or the table has no single-column primary key */
     softDelete: string | null;
-    /** the column that scopes rows to a tenant, or null when none, or more than one, is declared or it is private */
+    /** the column that scopes rows to a tenant, or null when none, or more than one, is declared, it is private, or the table has no single-column primary key */
     tenantColumn: string | null;
     /** the primary key spans more than one column */
     compositePrimaryKey: boolean;
@@ -261,7 +261,7 @@ type ManifestEntity = {
 type Manifest = {
     /** the format version, `MANIFEST_VERSION`: raised only when a field is removed or changes meaning, never when one is added */
     v: number;
-    /** the database's name in comb.config.ts */
+    /** the database's name: its key in comb.config.ts, or under `--tables` the one in the tables file's name (`core` for `db.core.tables.ts`) */
     database: string;
     /** every table, sorted by `name`, so an unchanged schema regenerates an identical file */
     entities: ManifestEntity[];
@@ -441,7 +441,7 @@ export type TableInfo = {
 };
 /** Where the dtos generator writes each table's DTO schemas */
 export type DtosConfig = {
-    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
+    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`, `<table>` the table's kebab-case export name (`blog-posts`); each file is its directory's `index.gen.ts` when omitted */
     filePrefix?: string | undefined;
     /** Package the generated meta stamp imports from. Matches EntitiesConfig. */
     importFrom?: string | undefined;
@@ -449,7 +449,7 @@ export type DtosConfig = {
     output: string;
     /** where the relations generator writes, which the `./relations` export points at */
     relationsOutput?: string | undefined;
-    /** also export the files from the working directory's package.json, as `./dtos/<table>`, `./dtos/_shared`, `./relations` and `./tables`; warns when it has none */
+    /** also export the files from the working directory's package.json, as `./dtos/<table>`, `./dtos/_shared`, `./relations` and `./tables`, under `./<database>/` when one package.json exports several; warns when it has none */
     updatePackageJson?: boolean | undefined;
 };
 /** Emitted code for a shared schema constant */
@@ -527,7 +527,7 @@ import type { CombColumnKind } from "../meta/column.ts";
  */
 /** Constraint annotations parsed from field type arguments */
 type FieldConstraintsMeta = {
-    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a column a default or hook fills */
+    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a `c.createdAt`, `c.updatedAt` or `c.deletedAt` column, and for any `createdAt`, `updatedAt` or `deletedAt` column a default or update hook fills */
     autogenerate: boolean;
     /** the generated DTOs take only an email address */
     email: boolean;
@@ -547,7 +547,7 @@ type FieldConstraintsMeta = {
     mutable: boolean;
     /** set at creation and never changed: the generated update DTO leaves it out */
     nomutate: boolean;
-    /** a stored password hash: kept as written and held only to its bounds and pattern */
+    /** a stored password hash: kept as written, with no transform, and held only to a plain text's rules: its bounds, at least 1 character when NOT NULL, its pattern and the text guard */
     password: boolean;
     /** the regex the generated DTOs hold the text to, as a `/source/flags` literal with the `u` flag; null when none */
     pattern: string | null;
@@ -561,7 +561,7 @@ type FieldConstraintsMeta = {
     trim: boolean;
     /** the generated DTOs uppercase the text before they check it */
     uppercase: boolean;
-    /** the generated DTOs take only a URL */
+    /** the generated create and update DTOs take only an https URL of 9 characters or more, trimmed and stripped of tabs and newlines first; a read takes what the column holds */
     url: boolean;
 };
 /** State machine declared on an enum column */
@@ -596,7 +596,7 @@ type ForeignKeyRef = {
     refColumn: string;
     /** the referenced table's export name in the tables file */
     refTable: string;
-    /** whether the referenced column is a c.id key, so the reference takes the same id format and prefix */
+    /** whether the referenced column is a c.id key, so the reference takes the id rule, 1 to 48 characters and no blank; its prefix is not checked */
     toId?: boolean | undefined;
     /** a composite foreign key's columns; absent for a single-column key */
     key?: {
@@ -614,7 +614,7 @@ type FieldMeta = {
     columnType: string;
     /** the `c` helper that built the column; null for a plain drizzle column */
     combKind: CombColumnKind | null;
-    /** the constraints the `c` helper declared, with comb's defaults applied; every flag off for a plain drizzle column */
+    /** the constraints the `c` helper declared, with comb's defaults applied; for a plain drizzle column, every flag off but `private` on a name starting with `_` and `autogenerate` on a filled timestamp key */
     constraints: FieldConstraintsMeta;
     /** drizzle's data type: `string`, `number int53`, `object json` */
     dataType: string;

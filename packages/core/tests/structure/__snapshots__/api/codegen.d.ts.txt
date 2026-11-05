@@ -84,7 +84,7 @@ import type { CombColumnKind } from "../meta/column.ts";
  */
 /** Constraint annotations parsed from field type arguments */
 type FieldConstraintsMeta = {
-    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a column a default or hook fills */
+    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a `c.createdAt`, `c.updatedAt` or `c.deletedAt` column, and for any `createdAt`, `updatedAt` or `deletedAt` column a default or update hook fills */
     autogenerate: boolean;
     /** the generated DTOs take only an email address */
     email: boolean;
@@ -104,7 +104,7 @@ type FieldConstraintsMeta = {
     mutable: boolean;
     /** set at creation and never changed: the generated update DTO leaves it out */
     nomutate: boolean;
-    /** a stored password hash: kept as written and held only to its bounds and pattern */
+    /** a stored password hash: kept as written, with no transform, and held only to a plain text's rules: its bounds, at least 1 character when NOT NULL, its pattern and the text guard */
     password: boolean;
     /** the regex the generated DTOs hold the text to, as a `/source/flags` literal with the `u` flag; null when none */
     pattern: string | null;
@@ -118,7 +118,7 @@ type FieldConstraintsMeta = {
     trim: boolean;
     /** the generated DTOs uppercase the text before they check it */
     uppercase: boolean;
-    /** the generated DTOs take only a URL */
+    /** the generated create and update DTOs take only an https URL of 9 characters or more, trimmed and stripped of tabs and newlines first; a read takes what the column holds */
     url: boolean;
 };
 /** State machine declared on an enum column */
@@ -153,7 +153,7 @@ type ForeignKeyRef = {
     refColumn: string;
     /** the referenced table's export name in the tables file */
     refTable: string;
-    /** whether the referenced column is a c.id key, so the reference takes the same id format and prefix */
+    /** whether the referenced column is a c.id key, so the reference takes the id rule, 1 to 48 characters and no blank; its prefix is not checked */
     toId?: boolean | undefined;
     /** a composite foreign key's columns; absent for a single-column key */
     key?: {
@@ -171,7 +171,7 @@ type FieldMeta = {
     columnType: string;
     /** the `c` helper that built the column; null for a plain drizzle column */
     combKind: CombColumnKind | null;
-    /** the constraints the `c` helper declared, with comb's defaults applied; every flag off for a plain drizzle column */
+    /** the constraints the `c` helper declared, with comb's defaults applied; for a plain drizzle column, every flag off but `private` on a name starting with `_` and `autogenerate` on a filled timestamp key */
     constraints: FieldConstraintsMeta;
     /** drizzle's data type: `string`, `number int53`, `object json` */
     dataType: string;
@@ -356,7 +356,7 @@ export declare const CONSTRAINT_KEYS: ConstraintKeys;
 export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, helper, measure, place, }: {
     /** the column's property name; one starting with `_` is private */
     fieldName: string;
-    /** whether a default or hook fills the column, which turns `autogenerate` on unless it is declared false */
+    /** whether something other than the caller fills the column, a `c.createdAt`, `c.updatedAt` or `c.deletedAt` column, or a timestamp key's default or update hook, which turns `autogenerate` on unless it is declared false */
     filled: boolean;
     /** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
     helper: CombColumnKind | null;
