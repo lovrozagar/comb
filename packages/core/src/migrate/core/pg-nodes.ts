@@ -4,6 +4,7 @@
  * leave (pg-history.ts).
  */
 import type { TriggerEvent } from "../types.ts"
+import type { ForeignKey, PrimaryKey } from "./pg-foreign.ts"
 
 type Node = Record<string, unknown>
 
@@ -43,9 +44,11 @@ const emptyFacts = (schema: string): Facts => ({
 	defaultPartitions: new Map(),
 	domains: new Map(),
 	eventTriggers: new Map(),
+	foreignKeys: [],
 	operators: new Map(),
 	parents: new Map(),
 	partitioned: new Set(),
+	primaryKeys: new Map(),
 	indexes: new Map(),
 	reads: new Map(),
 	routines: new Map(),
@@ -91,6 +94,8 @@ type Facts = {
 	columnTypes: Map<string, Map<string, ColumnType>>
 	/** each event trigger the history made, by name */
 	eventTriggers: Map<string, EventTrigger>
+	/** each foreign key, with its table and the table it references (gaps 1–4 of 0005 of r22b) */
+	foreignKeys: ForeignKey[]
 	/** every function, procedure and aggregate a migration defined, by each key it had */
 	defined: Set<string>
 	/** the functions and procedures the history leaves, by key, with their signatures (pg-routines.ts) */
@@ -103,6 +108,8 @@ type Facts = {
 	defaultPartitions: Map<string, string>
 	/** each partitioned table, by key (P18 of r19) */
 	partitioned: Set<string>
+	/** each table's primary key, which a REFERENCES without columns names */
+	primaryKeys: Map<string, PrimaryKey>
 	/** each index the history names, with its table: one on a partitioned table has no storage of its own (P19 of r19) */
 	indexes: Map<string, string>
 	/** each table's parents, and whether it is their partition */

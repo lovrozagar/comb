@@ -9,6 +9,7 @@ const FACTS: Facts = {
 	columnTypes: new Map(),
 	defined: new Set(),
 	eventTriggers: new Map(),
+	foreignKeys: [],
 	defaultPartitions: new Map(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
@@ -17,6 +18,7 @@ const FACTS: Facts = {
 	tables: new Map(),
 	views: new Map(),
 	partitioned: new Set(),
+	primaryKeys: new Map(),
 	indexes: new Map(),
 	parents: new Map([
 		["c", [{ parent: "p", partition: true }]],

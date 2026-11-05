@@ -12,7 +12,7 @@ import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { withScratchDb } from "../support/pg.ts"
-import { heldBy } from "../support/pg-locks.ts"
+import { heldBy, warningOf } from "../support/pg-locks.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -35,28 +35,7 @@ const HISTORY = [
 ].join("\n")
 
 const VALIDATE = "ALTER TABLE users VALIDATE CONSTRAINT pos;"
-const HELD = "those locks last to the file's COMMIT; validate in a later file"
 const [READS, WRITES] = ["reads and writes", "writes"]
-
-/** "a", "a and b", "a, b and c" */
-const listed = (names: readonly string[]): string =>
-	names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) as string}`
-
-/** comb's warning of the VALIDATE when its file holds `held`, as Postgres reports it; none when it holds nothing */
-function warningOf(held: Readonly<Record<string, string>>): string[] {
-	const names = Object.keys(held).toSorted()
-	if (names.length === 0) return []
-	const by = (blocks: string) => names.filter((name) => held[name] === blocks)
-	const [reads, writes] = [by(READS), by(WRITES)]
-	const holding =
-		names.length === 1 && names[0] === "users"
-			? `it locked against ${held["users"] as string}`
-			: [
-					...(reads.length > 0 ? [`${listed(reads)} locked against reads and writes`] : []),
-					...(writes.length > 0 ? [`${listed(writes)}${reads.length > 0 ? "" : " locked"} against writes`] : []),
-				].join(", and ")
-	return [`${VALIDATE.slice(0, -1)} (scans users while this file holds ${holding}; ${HELD})`]
-}
 
 /** comb's warnings of the VALIDATE after `first`, in its file */
 const validateWarnings = (first: string): string[] =>
@@ -134,7 +113,7 @@ describe("a VALIDATE after a statement of its file that holds a strong lock on P
 			await withScratchDb(async (url) => {
 				expect(await heldBy(url, [HISTORY], `${first}\n${VALIDATE}\n`)).toEqual(held)
 			})
-			expect(validateWarnings(first)).toEqual(warningOf(held))
+			expect(validateWarnings(first)).toEqual(warningOf({ table: "users", validate: VALIDATE }, held))
 		},
 		60_000,
 	)

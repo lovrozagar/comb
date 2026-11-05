@@ -6,13 +6,24 @@
  * ACCESS EXCLUSIVE blocks reads and writes; SHARE, SHARE ROW EXCLUSIVE and EXCLUSIVE block writes;
  * weaker blocks neither. A relation the file made, or a temporary one, no other session sees.
  */
+import {
+	changeLocks,
+	defaultOf,
+	EXCLUSIVE,
+	EXCLUSIVE_ALL,
+	keyLocks,
+	type Lock,
+	on,
+	partitionLocks,
+	reachLocks,
+	SHARE,
+	SHARE_ALL,
+	truncateLocks,
+} from "./pg-lock.ts"
 import { type Facts, keyOf, names, type Node, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
 
 /** The relations the open transaction holds locked, by key, each with whether reads wait too, and the relations it made */
 type Held = { locks: Map<string, boolean>; made: Set<string> }
-
-/** A lock a statement takes: the relation's key, and whether reads wait too */
-type Lock = readonly [key: string, reads: boolean]
 
 /** A transaction's start: nothing held, nothing made */
 const heldStart = (): Held => ({ locks: new Map(), made: new Set() })
@@ -26,43 +37,6 @@ function clearHeld(held: Held): void {
 /** `held` with `locks` taken, each but those on what the file made */
 function hold(held: Held, locks: readonly Lock[]): void {
 	for (const [key, reads] of locks) if (!held.made.has(key)) held.locks.set(key, reads || held.locks.get(key) === true)
-}
-
-/** Every table under `key`, its partitions and inheritance children, theirs with them */
-function descendants(key: string, facts: Facts, out = new Set<string>()): Set<string> {
-	for (const [child, parents] of facts.parents)
-		if (!out.has(child) && parents.some((each) => each.parent === key)) {
-			out.add(child)
-			descendants(child, facts, out)
-		}
-	return out
-}
-
-/** How a statement locks a relation: whether reads wait too, and whether its descendants are locked with it */
-type Mode = { reads: boolean; recurse: boolean }
-
-/* ACCESS EXCLUSIVE, and SHARE or the like, on a relation alone or with its descendants */
-const EXCLUSIVE: Mode = { reads: true, recurse: false }
-const EXCLUSIVE_ALL: Mode = { reads: true, recurse: true }
-const SHARE: Mode = { reads: false, recurse: false }
-const SHARE_ALL: Mode = { reads: false, recurse: true }
-
-/** The lock on `key`, as `mode` takes it */
-const keyLocks = (key: string, { reads, recurse }: Mode, facts: Facts): Lock[] => [
-	[key, reads],
-	...[...(recurse ? descendants(key, facts) : [])].map((child): Lock => [child, reads]),
-]
-
-/** The lock on a RangeVar's relation, as `mode` takes it, its descendants left out when it is named ONLY; none on a temporary one */
-function on(relation: unknown, facts: Facts, mode: Mode): Lock[] {
-	const { key, temp } = tableOf(relation, facts.schema)
-	return temp ? [] : keyLocks(key, { ...mode, recurse: mode.recurse && (relation as Node)["inh"] === true }, facts)
-}
-
-/** The lock on the DEFAULT partition of a RangeVar's partitioned table, which a new bound is checked against */
-function defaultOf(relation: unknown, facts: Facts): Lock[] {
-	const partition = facts.defaultPartitions.get(tableOf(relation, facts.schema).key)
-	return partition === undefined ? [] : [[partition, true]]
 }
 
 /** The tables with a column of the type keyed `type` */
@@ -95,7 +69,7 @@ function commandLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	if (subtype === "AT_AttachPartition" || subtype === "AT_DetachPartition") {
 		const partition = on((def["PartitionCmd"] as Node)["name"], facts, EXCLUSIVE)
 		const parent = subtype === "AT_DetachPartition" ? on(table, facts, EXCLUSIVE) : []
-		return [...parent, ...partition, ...defaultOf(table, facts)]
+		return [...parent, ...partition, ...defaultOf(table, facts), ...partitionLocks(table, facts)]
 	}
 	const constraint = def["Constraint"] as Node | undefined
 	if (constraint?.["contype"] === "CONSTR_FOREIGN")
@@ -104,6 +78,7 @@ function commandLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	return [
 		...on(table, facts, EXCLUSIVE_ALL),
 		...referenced(column?.["constraints"]).flatMap((pktable) => on(pktable, facts, SHARE)),
+		...changeLocks(table, cmd, facts),
 	]
 }
 
@@ -115,11 +90,23 @@ const alterLocks = (node: Node, cmd: Node, facts: Facts): Lock[] =>
 const dropped = (node: Node): string[][] =>
 	(node["objects"] as Array<{ List: Node }>).map((each) => names(each.List["items"]))
 
+/** The locks a DROP of the relation keyed `key` takes: its own, its descendants', a partition's parent's, and through a table's keys */
+function relationDrop(key: string, cascade: boolean, facts: Facts): Lock[] {
+	const parents = (facts.parents.get(key) ?? []).filter((each) => each.partition)
+	return [
+		...keyLocks(key, EXCLUSIVE_ALL, facts),
+		...parents.map((each): Lock => [each.parent, true]),
+		...reachLocks(key, { cascade, kind: "table" }, facts),
+	]
+}
+
 /** The locks a DROP takes: a relation's, an index's table, a trigger's, policy's or rule's table, and a CASCADE type's tables */
 function dropLocks(node: Node, facts: Facts): Lock[] {
 	const type = node["removeType"] as string
 	if (/^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/.test(type))
-		return dropped(node).flatMap((parts) => keyLocks(keyOf(parts, facts.schema), EXCLUSIVE_ALL, facts))
+		return dropped(node).flatMap((parts) =>
+			relationDrop(keyOf(parts, facts.schema), node["behavior"] === "DROP_CASCADE", facts),
+		)
 	if (type === "OBJECT_INDEX")
 		return dropped(node).flatMap((parts): Lock[] => {
 			const table = facts.indexes.get(keyOf(parts, facts.schema))
@@ -168,7 +155,9 @@ function createLocks(node: Node, facts: Facts): Lock[] {
 	const parent =
 		node["partbound"] === undefined ? undefined : (node["inhRelations"] as Array<{ RangeVar: Node }>)[0]?.RangeVar
 	return [
-		...(parent === undefined ? [] : [...on(parent, facts, EXCLUSIVE), ...defaultOf(parent, facts)]),
+		...(parent === undefined
+			? []
+			: [...on(parent, facts, EXCLUSIVE), ...defaultOf(parent, facts), ...partitionLocks(parent, facts)]),
 		...referenced(constraints).flatMap((pktable) => on(pktable, facts, SHARE)),
 	]
 }
@@ -217,8 +206,7 @@ const STATEMENTS: Readonly<Record<string, (node: Node, facts: Facts) => Lock[]>>
 	ReindexStmt: reindexLocks,
 	RenameStmt: renameLocks,
 	RuleStmt: (node, facts) => on(node["relation"], facts, EXCLUSIVE),
-	TruncateStmt: (node, facts) =>
-		(node["relations"] as Array<{ RangeVar: Node }>).flatMap((each) => on(each.RangeVar, facts, EXCLUSIVE_ALL)),
+	TruncateStmt: truncateLocks,
 	ViewStmt: (node, facts) =>
 		facts.views.has(tableOf(node["view"], facts.schema).key) ? on(node["view"], facts, EXCLUSIVE) : [],
 }

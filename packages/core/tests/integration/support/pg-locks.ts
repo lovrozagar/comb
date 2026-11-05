@@ -45,4 +45,32 @@ async function heldBy(url: string, setup: readonly string[], file: string): Prom
 	}
 }
 
-export { heldBy }
+/** "a", "a and b", "a, b and c" */
+const listed = (names: readonly string[]): string =>
+	names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) as string}`
+
+/**
+ * comb's warning of `validate`, a VALIDATE of a constraint on `table`, when its file holds `held`, as
+ * Postgres reports it; none when it holds nothing
+ */
+function warningOf(
+	{ table, validate }: { table: string; validate: string },
+	held: Readonly<Record<string, string>>,
+): string[] {
+	const names = Object.keys(held).toSorted()
+	if (names.length === 0) return []
+	const by = (blocks: string) => names.filter((name) => held[name] === blocks)
+	const [reads, writes] = [by("reads and writes"), by("writes")]
+	const holding =
+		names.length === 1 && names[0] === table
+			? `it locked against ${held[table] as string}`
+			: [
+					...(reads.length > 0 ? [`${listed(reads)} locked against reads and writes`] : []),
+					...(writes.length > 0 ? [`${listed(writes)}${reads.length > 0 ? "" : " locked"} against writes`] : []),
+				].join(", and ")
+	return [
+		`${validate.slice(0, -1)} (scans ${table} while this file holds ${holding}; those locks last to the file's COMMIT; validate in a later file)`,
+	]
+}
+
+export { heldBy, warningOf }
