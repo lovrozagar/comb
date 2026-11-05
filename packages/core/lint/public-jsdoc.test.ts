@@ -238,6 +238,12 @@ describe("comb/public-jsdoc: internal references", () => {
 		["a two-digit finding id", "/** The size, per AD14. */\nexport const size = 1\n"],
 		["a lettered finding id", "/** The size, per PA3n. */\nexport const size = 1\n"],
 		["a step id", "/** The size, per B2-3. */\nexport const size = 1\n"],
+		["a one-letter finding id", "/** Load it in `cwd` (F58). */\nexport const size = 1\n"],
+		["a one-letter, one-digit finding id", "/** The size C7 published. */\nexport const size = 1\n"],
+		["a lettered one-letter finding id", "/** The size, per S1n. */\nexport const size = 1\n"],
+		["a one-digit milestone", "/** The size M5 set. */\nexport const size = 1\n"],
+		["a three-digit milestone", "/** The size M123 set. */\nexport const size = 1\n"],
+		["an id beside a look-alike", "/** The size D1 keeps (K7). */\nexport const size = 1\n"],
 		["a tag's text", "/** The most that fits.\n * @see QL5\n */\nexport const size = 1\n"],
 	])("rejects %s", (_, code) => {
 		expect(messages(code)).toEqual([internal("size")])
@@ -246,7 +252,7 @@ describe("comb/public-jsdoc: internal references", () => {
 	it.each([
 		["a Postgres version", "/** The size PG17 keeps. */\nexport const size = 1\n"],
 		["a one-digit round", "/** The size of r2, the second register. */\nexport const size = 1\n"],
-		["a one-digit milestone", "/** The size of an M5 bolt. */\nexport const size = 1\n"],
+		["Cloudflare D1", "/** The size a D1 database keeps. */\nexport const size = 1\n"],
 		["a plan with no number", "/** The size the plan allows. */\nexport const size = 1\n"],
 		["RE2", "/** The pattern, as RE2 reads it. */\nexport const size = 1\n"],
 		["an SQLSTATE", "/** The size past which Postgres raises XX000. */\nexport const size = 1\n"],
