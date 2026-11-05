@@ -169,7 +169,8 @@ declare function checkPrefix(prefix: string): void;
 /**
  * A ULID source whose ids strictly increase: within one millisecond the random part counts up
  * by one, a clock that steps back is held at the last time issued, and a random part that cannot
- * count up any further moves on to the next millisecond.
+ * count up any further moves on to the next millisecond. A clock reading outside ULID's milliseconds,
+ * 0 to 2^48 - 1, throws a RangeError, as does a move past the last of them.
  */
 declare function createUlidFactory(options?: UlidFactoryOptions): {
     id: (prefix: string) => string;
