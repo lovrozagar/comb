@@ -128,6 +128,26 @@ describe("the replay's session is the one Atlas applies a file on (PR3 of r22b; 
 	}, 60_000)
 })
 
+describe("the replay refuses a schema Atlas's URL cannot carry unquoted, as apply does (PR3 of r22b)", () => {
+	/* the replay sends search_path as Atlas's URL carries it, unquoted, so a name that needs quoting must reach neither */
+	it.each(["AppData", "app-data"])(
+		"refuses schema %s on check as apply refuses it, before either opens a session",
+		async (schema) => {
+			await write([PROBE])
+			const { apply, check } = await withScratchDb((dev) =>
+				withScratchDb(async (url) => {
+					await query(url, `CREATE SCHEMA "${schema}"`)
+					return checkThenApply(dev, url, schema)
+				}),
+			)
+			expect(check).toEqual(apply)
+			expect(apply).toContain('schema must be a lowercase plain name such as "public"')
+			expect(apply).not.toContain("session<")
+		},
+		60_000,
+	)
+})
+
 describe("the replay reads a date as Atlas's session does, whatever devUrl's server defaults to (PR3 of r22b)", () => {
 	it.each([
 		["13/01/2026", false],
