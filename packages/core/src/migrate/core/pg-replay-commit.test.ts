@@ -38,6 +38,7 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 		seen: new Map([["role kept", { names: ["kept"], row: { rolconnlimit: -1 } }]]),
 		sql,
 		strays: { databases: [], roles: [], slots: [] },
+		tablespaces: new Set(),
 		superuser: false,
 	}
 	return { run, sent }

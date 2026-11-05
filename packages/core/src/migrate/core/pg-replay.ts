@@ -55,7 +55,10 @@ import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-tra
 import { claim, copyExtensions, extensionsOf, makeDatabase, replayOptions, type Sql } from "./pg-replay-database.ts"
 import { cleanUp, leaving, sweep } from "./pg-replay-drops.ts"
 import { localeClause, targetLocale } from "./pg-replay-locale.ts"
-import { devRoleOf, grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
+import { runsOnMade } from "./pg-replay-made.ts"
+import { devRoleOf, type Run } from "./pg-replay-roles.ts"
+import { type Refuse, type Replay, type Replaying, runStatement } from "./pg-replay-statement.ts"
+import { leaveOutTablespace } from "./pg-replay-tablespaces.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
@@ -67,41 +70,6 @@ type HistoryFile = { name: string; sql: string }
 
 /* why comb loads postgres.js here */
 const REPLAYS = "replay the history on devUrl, and read what it leaves, in a baseline"
-
-/** How the replay words what it does, and where it says what it left out */
-type Replay = {
-	/** what the replay was doing, as a refusal names it */
-	doing: string
-	/** a statement left out, from `file`, and what it is */
-	leftOut(file: string, sent: string, what: string): void
-	/** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
-	madeBare?: ((file: string, sent: string) => void) | undefined
-	/** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
-	adopted?: ((file: string, role: string) => void) | undefined
-	/** what a refusal stops */
-	stops: string
-}
-
-/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes (PR1 of r22b) */
-type Replaying = Replay & { refused: Refuse; waits: (sql: Sql) => Promise<void> }
-
-/** `sent` run on the replay's connection, comb's own CREATE ROLE and GRANT of a role it made as comb runs them */
-async function runStatement(
-	run: Run,
-	{ name, node, sent, type }: { name: string; node: Record<string, unknown>; sent: string; type: string },
-	replay: Replaying,
-): Promise<void> {
-	try {
-		if (type === "CreateRoleStmt") {
-			if (await ownRole(run, node)) replay.madeBare?.(name, sent)
-		} else if (type === "GrantRoleStmt") await ownGrant(run, node, sent)
-		else await run.sql.unsafe(sent, [])
-	} catch (error) {
-		throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
-	}
-	/* an extension devUrl's database holds that requires the one just made follows it, as on the target */
-	if (type === "CreateExtensionStmt") await replay.waits(run.sql)
-}
 
 /**
  * `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it
@@ -121,8 +89,9 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 	if (inFile) await begin(run)
 	for (const { sent, tree } of pgRead(text).statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
-		const beyond = grantsMade(run, type, node) ? undefined : beyondDatabase(type, node)
+		const beyond = (await runsOnMade(run, type, node)) ? undefined : beyondDatabase(type, node)
 		if (beyond !== undefined) {
+			leaveOutTablespace(run.tablespaces, type, node)
 			replay.leftOut(name, sent, beyond)
 			continue
 		}
@@ -183,9 +152,6 @@ async function prepare(
  */
 const ATLAS_SESSION = { DateStyle: "ISO, MDY" } as const
 
-/** A refusal: what failed, with devUrl's error, and what that stops */
-type Refuse = (what: string, error: unknown) => ReplayFailed
-
 /**
  * The replay's database made on `admin`'s server at `target`'s database's locale, and its run on it:
  * a connection there searching `target`'s schema, and how each later session opens
@@ -217,6 +183,7 @@ async function opening(
 		seen: new Map(),
 		sql: open(),
 		strays: { databases: [], roles: [], slots: [] },
+		tablespaces: new Set(),
 		...(await devRoleOf(admin)),
 	}
 	return { open, run }

@@ -6,7 +6,8 @@
  * grant or an owner, so it makes the role NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS whatever
  * the history says (P3 of r21), keeping only its memberships among roles it made itself: no role
  * the history logs in as, a superuser one least of all, exists on devUrl's server while a check
- * runs. A GRANT or REVOKE of roles the replay made runs, as their drop undoes it (P6 of r21).
+ * runs. A statement on roles the replay made alone runs, as their drop undoes it (P6 of r21, PR5 of
+ * r22b, pg-replay-made.ts).
  *
  * A role a statement the replay cannot leave out adds, such as `DO … IF NOT EXISTS … CREATE ROLE`,
  * is adopted as one comb made when nothing else changed beside it (P5 of r22): made bare, tagged,
@@ -38,6 +39,8 @@ type Run = {
 	seen: Snapshot
 	sql: Sql
 	strays: Strays
+	/** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead (PR5 of r22b) */
+	tablespaces: Set<string>
 	superuser: boolean
 }
 
@@ -170,24 +173,6 @@ async function ownRole(run: Run, node: Record<string, unknown>): Promise<boolean
 	return made && !whole
 }
 
-/* the roles a GRANT or REVOKE of a role names; a membership in one the replay made dies with it (P6 of r21) */
-const grantedOf = (node: Record<string, unknown>): string[] =>
-	(node["granted_roles"] as Array<{ AccessPriv: { priv_name: string } }>).map(({ AccessPriv }) => AccessPriv.priv_name)
-
-/** Whether `type` is a GRANT or REVOKE of roles this replay made alone, which it runs, as their drop undoes it */
-const grantsMade = (run: Run, type: string, node: Record<string, unknown>): boolean =>
-	type === "GrantRoleStmt" && grantedOf(node).every((role) => run.created.includes(role))
-
-/** A history GRANT or REVOKE of roles this replay made: the memberships in them are comb's own */
-const ownGrant = (run: Run, node: Record<string, unknown>, sent: string): Promise<void> =>
-	own(
-		run,
-		async () => {
-			await run.sql.unsafe(sent, [])
-		},
-		(subject) => grantedOf(node).some((role) => subject.startsWith(`membership ${role} to `)),
-	)
-
 /**
  * `roles` of the replay's, changed in its open transaction, made bare again before it commits: no
  * login, no password, and none of the attributes BARE denies, each said only where the role has it,
@@ -229,4 +214,4 @@ async function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string
 	return new Set((await sql.unsafe(HELD, [[...roles]])).map((row) => String(row["rolname"])))
 }
 
-export { adopt, bareAgain, bareRole, createRole, devRoleOf, grantsMade, heldRoles, ownGrant, ownRole, type Run }
+export { adopt, bareAgain, bareRole, createRole, devRoleOf, heldRoles, own, ownRole, type Run }

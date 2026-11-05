@@ -225,23 +225,11 @@ import { type PgTarget } from "./atlas-target.ts";
 import { type Connect } from "./pg-live-objects.ts";
 import type { LiveObjects } from "./pg-live-types.ts";
 import { type Sql } from "./pg-replay-database.ts";
+import { type Replay } from "./pg-replay-statement.ts";
 /** A history file as baseline reads it */
 type HistoryFile = {
     name: string;
     sql: string;
-};
-/** How the replay words what it does, and where it says what it left out */
-type Replay = {
-    /** what the replay was doing, as a refusal names it */
-    doing: string;
-    /** a statement left out, from `file`, and what it is */
-    leftOut(file: string, sent: string, what: string): void;
-    /** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
-    madeBare?: ((file: string, sent: string) => void) | undefined;
-    /** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
-    adopted?: ((file: string, role: string) => void) | undefined;
-    /** what a refusal stops */
-    stops: string;
 };
 /**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
@@ -458,6 +446,48 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
 }): Promise<(to: Sql) => Promise<void>>;
 export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, type Sql, STALE_MS, TAG, };
 
+// migrate/core/pg-replay-statement.d.ts
+/**
+ * One statement of a history file as the dev replay runs it (pg-replay.ts): a statement on roles as
+ * pg-replay-made.ts runs it, one in a tablespace the replay left out in pg_default
+ * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
+ */
+import type { Sql } from "./pg-replay-database.ts";
+import type { Run } from "./pg-replay-roles.ts";
+import type { ReplayFailed } from "./replay-failed.ts";
+/** How the replay words what it does, and where it says what it left out */
+type Replay = {
+    /** what the replay was doing, as a refusal names it */
+    doing: string;
+    /** a statement left out, from `file`, and what it is */
+    leftOut(file: string, sent: string, what: string): void;
+    /** a CREATE ROLE or ALTER ROLE `sent` from `file` the replay ran without some of what it says */
+    madeBare?: ((file: string, sent: string) => void) | undefined;
+    /** a statement `sent` from `file` the replay ran in pg_default, not in the tablespaces `names` it left out */
+    movedTo?: ((file: string, sent: string, names: readonly string[]) => void) | undefined;
+    /** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
+    adopted?: ((file: string, role: string) => void) | undefined;
+    /** what a refusal stops */
+    stops: string;
+};
+/** A refusal: what failed, with devUrl's error, and what that stops */
+type Refuse = (what: string, error: unknown) => ReplayFailed;
+/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes (PR1 of r22b) */
+type Replaying = Replay & {
+    refused: Refuse;
+    waits: (sql: Sql) => Promise<void>;
+};
+/** A statement of `name`: its type and node, as nodeOf reads its parse tree, and what Atlas sends */
+type Sent = {
+    name: string;
+    node: Record<string, unknown>;
+    sent: string;
+    type: string;
+};
+/** `statement` run on the replay's connection, a statement on roles as the replay runs it (pg-replay-made.ts) */
+declare function runStatement(run: Run, statement: Sent, replay: Replaying): Promise<void>;
+export { type Refuse, type Replay, type Replaying, runStatement };
+
 // migrate/core/pg-live-catalog.d.ts
 /**
  * The one catalog read a Postgres baseline makes (pg-live-objects.ts), in one round trip, of what
@@ -494,3 +524,213 @@ export declare const ARM_KINDS: ReadonlyArray<readonly [what: string, kinds: rea
 export declare const COMPARED: string;
 /** `live` read on dev, with dev's role named as the target's wherever a policy names it (the reviewer's addition A) */
 export declare function asTarget(live: LiveObjects, targetUser: string): LiveObjects;
+
+// migrate/core/pg-replay-roles.d.ts
+import { type Sql } from "./pg-replay-database.ts";
+import { type Rows, type Writes } from "./pg-server-writes.ts";
+import type { Snapshot, Strays } from "./pg-server-snapshot.ts";
+/**
+ * One replay's state: its connection, the server as committed (`admin`), its database, the backend
+ * that owns it, its role (`role`, which CURRENT_USER and its kin name in a file), whether that role
+ * is a superuser, which reads pg_authid, and the roles it made; the
+ * open transaction's own writes, comb's CREATE ROLEs', with the rows they left; the shared catalogs
+ * as last read committed (`seen`), and the roles, databases and replication slots a refused window
+ * added (`strays`), which the cleanup drops
+ */
+type Run = {
+    admin: Sql;
+    created: string[];
+    database: string;
+    ours: {
+        rows: Rows;
+        writes: Writes;
+    };
+    owner: string;
+    role: string;
+    seen: Snapshot;
+    sql: Sql;
+    strays: Strays;
+    /** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead (PR5 of r22b) */
+    tablespaces: Set<string>;
+    superuser: boolean;
+};
+/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, and whether it is a superuser */
+declare function devRoleOf(sql: Sql): Promise<{
+    role: string;
+    superuser: boolean;
+}>;
+/** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
+declare function own(run: Run, act: () => Promise<void>, mine: (subject: string) => boolean): Promise<void>;
+/**
+ * The CREATE ROLE a replay runs for a history's `node`: the role with BARE's attributes and the
+ * memberships among roles in `made`; `whole` when it leaves out nothing the history said
+ */
+declare function bareRole(node: Record<string, unknown>, made: readonly string[]): {
+    sql: string;
+    whole: boolean;
+    within: string[];
+};
+/**
+ * The CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used, any
+ * other made by `sent` and tagged with its `owner`, and either held by a grant on `database`;
+ * whether the role is a replay's, which the replay then drops, so whichever of two replays using
+ * one role ends last drops it. It runs in a transaction, as every statement a transaction allows
+ * does (P1 of r21), and each try is a savepoint, so a role another replay made or dropped since the
+ * read is read again
+ */
+declare function createRole(sql: Sql, { database, owner, role, sent }: {
+    database: string;
+    owner: string;
+    role: string;
+    sent: string;
+}): Promise<boolean>;
+/**
+ * A history CREATE ROLE of `node` run bare: the role, its tag, the memberships it keeps and the
+ * grant on the replay's database; whether the replay made it without some of what the history said
+ */
+declare function ownRole(run: Run, node: Record<string, unknown>): Promise<boolean>;
+/**
+ * `roles` of the replay's, changed in its open transaction, made bare again before it commits: no
+ * login, no password, and none of the attributes BARE denies, each said only where the role has it,
+ * as a role that is not a superuser may not name one it lacks (PR6 of r22b)
+ */
+declare function bareAgain(run: Run, roles: readonly string[]): Promise<void>;
+/**
+ * `roles` the open transaction added, adopted as the replay's own before it commits (P5 of r22):
+ * tagged with its owner, held by a grant on its database, and dropped with the roles it made
+ */
+declare function adopt(run: Run, roles: readonly string[]): Promise<void>;
+/** Which of `roles` the server holds, a replay's own left out: another replay's role is gone once it ends */
+declare function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string>>;
+export { adopt, bareAgain, bareRole, createRole, devRoleOf, heldRoles, own, ownRole, type Run };
+
+// migrate/core/replay-failed.d.ts
+/** The dev database could not be readied, or the history could not be replayed on it, or the target read: nothing was compared */
+declare class ReplayFailed extends Error {
+    constructor(message: string, options?: ErrorOptions);
+}
+export { ReplayFailed };
+
+// migrate/core/pg-server-writes.d.ts
+/**
+ * What a replayed transaction wrote past its database (P1 of r21), read from Postgres, never from the
+ * file's text: a DO block, a function, EXECUTE and CALL hide a role's or a database's change from the
+ * parse tree. `pg_stat_xact_sys_tables` counts this backend's own writes to each shared catalog in the
+ * open transaction, for any role and before COMMIT, so another session's work never trips it;
+ * pg_shdepend is left out, which a GRANT on a table or an owner moves. The catalogs devUrl's role can
+ * read then name the change: the open transaction sees it, a second connection sees the server as it
+ * was. A role cannot read pg_authid unless it is a superuser, so a role is read from pg_roles, and a
+ * write it does not show, such as a password, is named as one; a superuser reads pg_authid, a
+ * password as its hash, so a password's change is named by its role (PR6 of r22b). Probed on Postgres 17 as a superuser
+ * and as a CREATEDB CREATEROLE role (.tmp/grunt/r21-premise/p1-xact-stats.log, p1-snapshot.log).
+ */
+import type { Sql } from "./pg-replay-database.ts";
+/** Writes by shared catalog: how many rows the open transaction inserted, updated or deleted in each */
+type Writes = Map<string, number>;
+/**
+ * Whether the server counts this backend's writes, which with `track_counts` off read as none, and
+ * the open transaction's writes to each shared catalog, pg_shdepend aside
+ */
+declare function counts(sql: Sql): Promise<{
+    on: boolean;
+    writes: Writes;
+}>;
+/** The writes in `after` that `before` does not account for, by catalog */
+declare function writesSince(after: Writes, before: Writes): Writes;
+/** `more` added into `into` */
+declare function addWrites(into: Writes, more: Writes): void;
+declare const CATALOGS: Readonly<Record<string, Catalog>>;
+/** How a catalog's rows read: the names each is about, what a row is, and its query */
+type Catalog = {
+    names: string;
+    noun: string;
+    query: string;
+};
+/** The shared catalogs as devUrl's role reads them: pg_authid itself when it is a `superuser` */
+declare const catalogsOf: (superuser: boolean) => Readonly<Record<string, Catalog>>;
+/** The fields of a row that differ, in order */
+declare const changedFields: (before: Record<string, unknown>, after: Record<string, unknown>) => string[];
+/** Rows by subject, each as JSON: what comb's own CREATE ROLE left them */
+type Rows = Map<string, string>;
+/** One row's change: its kind, its subject, the names it is about, the fields that changed, none when added or removed, and how it reads */
+type Change = {
+    fields: string[];
+    kind: "added" | "changed" | "removed";
+    names: ReadonlyArray<string | null>;
+    said: string;
+    subject: string;
+};
+/** Whether a change is the replay's own */
+type Own = (change: Change) => boolean;
+/** The rows of the catalogs `written` that `mine` names, as the open transaction on `sql` reads them through `catalogs` */
+declare function subjectRows({ catalogs, sql }: {
+    catalogs: Readonly<Record<string, Catalog>>;
+    sql: Sql;
+}, written: Writes, mine: (subject: string) => boolean): Promise<Rows>;
+/**
+ * What the `counted` writes changed, by catalog in order, as the open transaction on `sql` sees the
+ * server against the committed server `was` reads, through `catalogs`, one change per row; a row
+ * still as comb's own CREATE ROLE left it (`ours`) is comb's, and no change. The committed server is
+ * read before the transaction's read and after it, and a change is one only against both: what
+ * another session commits meanwhile, on a server others share, is in one of them
+ */
+declare function rowChanges({ catalogs, sql, was }: {
+    catalogs: Readonly<Record<string, Catalog>>;
+    sql: Sql;
+    was: Sql;
+}, counted: Writes, ours: Rows): Promise<Map<string, Change[]>>;
+/**
+ * The changes of `byCatalog` the replay must refuse: each that is not its `own`, and a counted
+ * catalog with no row to name, a write devUrl's role cannot see; a catalog whose every change is
+ * the replay's own counted no other
+ */
+declare function refusedChanges(byCatalog: ReadonlyMap<string, Change[]>, own: Own): string[];
+/** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
+declare function refuseUncounted(sql: Sql, stops: string): Promise<void>;
+export { addWrites, CATALOGS, type Catalog, catalogsOf, type Change, changedFields, counts, refusedChanges, refuseUncounted, type Own, rowChanges, type Rows, subjectRows, type Writes, writesSince, };
+
+// migrate/core/pg-server-snapshot.d.ts
+/**
+ * The server's shared catalogs read as committed, in one query (P1 and P2 of r22): what a bare
+ * statement changed, which no transaction counts, and what a second connection committed, which this
+ * backend's counts never see (pg-server-writes.ts). The read is the server's, another session's work
+ * in it too, so each row carries the names of the objects it is about, and a change is a file's only
+ * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out, but
+ * for the fields of its own database's row that keep the cleanup from dropping it, which only that
+ * replay changes. Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog
+ * holds.
+ */
+import type { Sql } from "./pg-replay-database.ts";
+/**
+ * The server's shared catalogs as committed, a replay's own rows left out: each row's JSON by its
+ * subject, with the names of the roles, databases or other objects the row is about, as stored
+ */
+type Snapshot = Map<string, {
+    names: readonly string[];
+    row: Record<string, unknown>;
+}>;
+/**
+ * The read prepared on `admin` for snapshot, as its role reads it, with the replay's own
+ * `database`'s row: planning it is half its time, and a replay reads it around every file and bare
+ * statement
+ */
+declare function prepareSnapshot(admin: Sql, { database, superuser }: {
+    database: string;
+    superuser: boolean;
+}): Promise<void>;
+/** The shared catalogs as `admin`, a connection with no transaction open that prepareSnapshot prepared, reads them committed */
+declare function snapshot(admin: Sql): Promise<Snapshot>;
+/**
+ * What changed from `before` to `after`, one change per subject, in order: of a subject about a
+ * name in `names`, the names a file spells (P2 of r22), when given
+ */
+declare function snapshotChanges(before: Snapshot, after: Snapshot, names?: ReadonlySet<string>): string[];
+/** What the cleanup drops, by the noun its subject starts with */
+type Strays = {
+    databases: string[];
+    roles: string[];
+    slots: string[];
+};
+/** The roles, databases and replication slots named in `names` that `after` holds and `before` does not */
+declare function added(before: Snapshot, after: Snapshot, names: ReadonlySet<string>): Strays;
+export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays };

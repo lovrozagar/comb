@@ -27,7 +27,8 @@ const REPLAYS: Readonly<Record<string, string>> = {
 	pg_auth_members: `m.roleid IN ${TAGGED} OR m.member IN ${TAGGED}`,
 	pg_authid: `r.oid IN ${TAGGED}`,
 	pg_database: "d.datname LIKE 'comb\\_replay\\_%'",
-	pg_db_role_setting: `${REPLAY_SETTING} AND (setrole = 0 OR setrole IN ${TAGGED})`,
+	/* a role it tagged takes each of its settings with it, every database's too, as an ALTER ROLE … SET of a role it made writes (PR5 of r22b) */
+	pg_db_role_setting: `(${REPLAY_SETTING} AND setrole = 0) OR setrole IN ${TAGGED}`,
 	pg_shdescription: REPLAY_SHARED,
 	pg_shseclabel: REPLAY_SHARED,
 }

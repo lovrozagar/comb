@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { coded, fake } from "../__fixtures__/pg-admin.ts"
-import { cleanUp, dropRole, leaving, sweep, sweepDev } from "./pg-replay-drops.ts"
+import { cleanUp, dropMade, dropRole, leaving, sweep, sweepDev } from "./pg-replay-drops.ts"
 import { STALE_MS } from "./pg-replay-database.ts"
 
 describe("dropRole", () => {
@@ -278,5 +278,16 @@ describe("sweepDev that cannot sweep", () => {
 			),
 		])
 		expect(said[0]).not.toContain("hunter2")
+	})
+})
+
+describe("dropMade", () => {
+	it("drops a role the replay tagged, and leaves one it did not, as a renamed name may now be another session's", async () => {
+		const tagged = fake((query) => (query.startsWith("SELECT 1") ? [{ "?column?": 1 }] : []))
+		await dropMade(tagged.sql, "r")
+		expect(tagged.sent.at(-1)).toBe('DROP ROLE IF EXISTS "r"')
+		const untagged = fake(() => [])
+		await dropMade(untagged.sql, "r")
+		expect(untagged.sent.filter((query) => query.startsWith("DROP"))).toEqual([])
 	})
 })

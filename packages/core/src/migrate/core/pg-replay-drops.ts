@@ -70,6 +70,18 @@ async function dropRole(admin: Sql, role: string): Promise<void> {
 	}
 }
 
+/* whether a role is a replay's, tagged with the backend that made it */
+const TAGGED_ROLE =
+	"SELECT 1 FROM pg_roles r JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE r.rolname = $1 AND d.description LIKE 'comb\\_replay %'"
+
+/**
+ * Drop `role`, one the replay made or adopted, while it is still a replay's: a name the replay
+ * renamed or dropped may since name another session's role, which is not the replay's to drop
+ */
+async function dropMade(admin: Sql, role: string): Promise<void> {
+	if ((await admin.unsafe(TAGGED_ROLE, [role])).length > 0) await dropRole(admin, role)
+}
+
 /**
  * Drop what replays over at `now` left, each drop that fails `leave`d: every replay database this
  * role may drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are
@@ -160,7 +172,7 @@ async function cleanUp(run: Run, leave: Leave): Promise<void> {
 		run.admin.unsafe(`DROP DATABASE IF EXISTS ${run.database} WITH (FORCE)`, []),
 	)
 	for (const role of run.created)
-		await dropOr(leave, { swept: true, what: `role ${role}` }, () => dropRole(run.admin, role))
+		await dropOr(leave, { swept: true, what: `role ${role}` }, () => dropMade(run.admin, role))
 	for (const name of run.strays.databases)
 		await dropOr(leave, { swept: false, what: `database ${name}` }, () =>
 			run.admin.unsafe(`DROP DATABASE IF EXISTS ${sqlIdentifier(name)}`, []),
@@ -169,4 +181,4 @@ async function cleanUp(run: Run, leave: Leave): Promise<void> {
 		await dropOr(leave, { swept: false, what: `role ${role}` }, () => dropRole(run.admin, role))
 }
 
-export { cleanUp, dropOr, dropRole, dropSlot, type Leave, leaving, settle, sweep, sweepDev }
+export { cleanUp, dropMade, dropOr, dropRole, dropSlot, type Leave, leaving, settle, sweep, sweepDev }

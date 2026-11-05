@@ -130,6 +130,10 @@ async function replayPending(
 			print(
 				`Check made the role of ${JSON.stringify(sent)} in ${file} NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS, in no role the replay did not make, on devUrl: the replay needs only its name, so apply alone gives it the rest`,
 			),
+		movedTo: (file, sent, names) =>
+			print(
+				`Check ran ${JSON.stringify(sent)} in ${file} in pg_default on devUrl, not in ${names.map((name) => `tablespace ${name}`).join(" or ")}, as the replay left out the CREATE of that: where a relation lives changes nothing check reads, so apply alone runs it as written`,
+			),
 		stops: STOPS,
 	})
 }

@@ -47,6 +47,8 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				if (query.startsWith(COUNTS)) return [{ on: "on", writes: {} }]
 				if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
 				if (query.endsWith("WHERE d.datname = current_database()")) return [LIBC]
+				/* every role the replay made carries its tag, so its cleanup drops each */
+				if (query.startsWith("SELECT 1 FROM pg_roles r JOIN pg_shdescription")) return [{ "?column?": 1 }]
 				return query === CATALOG ? rows : []
 			},
 		}
@@ -216,8 +218,9 @@ describe("replayCatalog on a dev that fails past a refusal", () => {
 		await expect(replay).rejects.toThrow(
 			/^1_a\.sql: devUrl refused "CREATE VIEW v AS SELECT nope" as baseline replayed/,
 		)
-		expect(dev.queries().slice(-3)).toEqual([
+		expect(dev.queries().slice(-4)).toEqual([
 			DROPPED,
+			expect.stringMatching(/^SELECT 1 FROM pg_roles r JOIN pg_shdescription .* LIKE 'comb\\_replay %'$/),
 			'DROP ROLE IF EXISTS "r"',
 			"SELECT 1 FROM pg_roles WHERE rolname = $1",
 		])
