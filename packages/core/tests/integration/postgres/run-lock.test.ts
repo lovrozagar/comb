@@ -37,16 +37,16 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** A run's window, as run-window.ts takes it, but for the log and the setup */
-type Window = { hold: number; name: string; peer: string; projects: number }
+type Window = { hold: number; name: string; peer: string; projects: number; settle?: number }
 
 /** A run's window in a child on the server at `url`: its stderr, how it ended, and a kill */
-function window(url: string, { hold, name, peer, projects }: Window) {
+function window(url: string, { hold, name, peer, projects, settle = 0 }: Window) {
 	const setup = setupOf("tests/integration/postgres/keyset.test.ts")
 	const child = spawn(
 		"bun",
 		[
 			join(import.meta.dirname, "../support/run-window.ts"),
-			JSON.stringify({ hold, log: join(dir, "log"), name, peer, projects, setup }),
+			JSON.stringify({ hold, log: join(dir, "log"), name, peer, projects, settle, setup }),
 		],
 		{ env: { ...process.env, COMB_TEST_PG_URL: url }, stdio: ["ignore", "ignore", "pipe"] },
 	)
@@ -92,6 +92,17 @@ describe("two runs of the Postgres suites on one server", () => {
 		},
 		60_000,
 	)
+
+	/* the holder's teardown lets the waiter in however long the waiter then takes to open its window */
+	it("lets the second in at the first's teardown, the first still running until the second opens", async () => {
+		await withScratchDb(async (url) => {
+			const first = window(url, { hold: 3000, name: "a", peer: "b", projects: 1 })
+			await until(() => lines().includes("start a"))
+			const second = window(url, { hold: 3000, name: "b", peer: "a", projects: 1, settle: 10_500 })
+			expect(await Promise.all([first.ended, second.ended])).toEqual([0, 0])
+			expect(lines()).toEqual(["start a", "end a", "start b", "exit a", "end b", "exit b"])
+		})
+	}, 60_000)
 
 	it("lets the waiting run in once the holding run's process is killed, Postgres freeing the lock with its session", async () => {
 		await withScratchDb(async (url) => {
