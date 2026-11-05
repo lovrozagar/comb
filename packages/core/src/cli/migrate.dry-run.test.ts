@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { stopsEnded } from "../migrate/core/cleanup.ts"
 import type { RunResult } from "../migrate/core/process.ts"
 import { diffProject as diffProjectIn, fakeAtlas } from "./__fixtures__/diff.ts"
 import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
@@ -150,6 +151,7 @@ describe("comb migrate diff --dry-run stopped by a signal (KC5 of r22b; sibling:
 					left: [],
 				})
 			} finally {
+				await stopsEnded()
 				kill.mockRestore()
 				vi.unstubAllEnvs()
 				process.removeAllListeners(signal)

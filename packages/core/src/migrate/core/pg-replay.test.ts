@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest"
+import { stopsEnded } from "./cleanup.ts"
 import { readLiveObjects } from "./pg-live-objects.ts"
 import { CATALOG } from "./pg-live-catalog.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
@@ -321,6 +322,7 @@ async function signalled(signal: NodeJS.Signals, host: (() => void) | undefined,
 		await new Promise((done) => setImmediate(done))
 		return kill.mock.calls
 	} finally {
+		await stopsEnded()
 		kill.mockRestore()
 		process.removeAllListeners(signal)
 		for (const listener of listeners) process.on(signal, listener)

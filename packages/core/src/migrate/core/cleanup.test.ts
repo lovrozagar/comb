@@ -193,6 +193,36 @@ describe("a signal (S2, KC5 and PA4 of r22)", () => {
 	})
 })
 
+describe("stubKill, past a stop whose step outlasts the test", () => {
+	/*
+	 * registered before stubKill's, so it runs after stubKill's restore (vitest runs after-hooks as a
+	 * stack): an end the stop asks for past that restore reaches the real process.kill, which here
+	 * records it and spares the worker that a real one would end ("Worker exited unexpectedly")
+	 */
+	let late: unknown[][] = []
+	afterEach(async () => {
+		const real = vi.spyOn(process, "kill").mockImplementation(() => true)
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			late = real.mock.calls.filter(([pid]) => pid === process.pid)
+		} finally {
+			real.mockRestore()
+		}
+		expect(late).toEqual([])
+	})
+	const kill = stubKill()
+
+	it("keeps the stub until the stop has asked for its end", async () => {
+		const release = hold(() => new Promise((resolve) => setTimeout(resolve, 10)))
+		try {
+			await deliver("SIGTERM")
+		} finally {
+			release()
+		}
+		expect(kill.calls()).toEqual([])
+	})
+})
+
 describe("a signal, on what comb holds and with a host listening", () => {
 	const kill = stubKill()
 

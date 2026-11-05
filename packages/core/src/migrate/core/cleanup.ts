@@ -32,6 +32,9 @@ let gate: Gate | undefined
 // per-process-constant: the steps of every stop so far, the last signal's at the end, which alone ends the stop
 let stopping: Promise<void> | undefined
 
+// per-process-constant: the end of the last stop begun, which settles after every stop before it
+let lastEnd: Promise<void> = /* @__PURE__ */ Promise.resolve()
+
 function newGate(): Gate {
 	let release: (() => void) | undefined
 	const open = new Promise<void>((resolve) => {
@@ -67,7 +70,7 @@ function stop(signal: NodeJS.Signals): void {
 	const current = (gate ??= newGate())
 	const ending = (stopping ?? Promise.resolve()).then(() => inStep.run(true, () => runSteps(steps, signal)))
 	stopping = ending
-	void ending.then(() => {
+	lastEnd = ending.then(() => {
 		/* a later signal came while these steps ran: its stop ends this one, after its own steps */
 		if (stopping !== ending) return
 		stopping = undefined
@@ -77,6 +80,15 @@ function stop(signal: NodeJS.Signals): void {
 		for (const each of SIGNALS) process.off(each, stop)
 		process.kill(process.pid, signal)
 	})
+}
+
+/**
+ * Settles once every stop begun so far has ended: asked for the process's end, or let a host that
+ * listens keep it. A test that stubs process.kill around a signal restores it only past this, so
+ * the end a slow step delays never reaches the real process.kill and ends the test's worker.
+ */
+export function stopsEnded(): Promise<void> {
+	return lastEnd
 }
 
 /**

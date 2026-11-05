@@ -3,7 +3,7 @@
  * process.kill stubbed so the end comb asks for is read rather than done (S2, KC5 and PA4 of r22)
  */
 import { afterEach, beforeEach, type MockInstance, vi } from "vitest"
-import { hold, pastStop } from "../../src/migrate/core/cleanup.ts"
+import { hold, pastStop, stopsEnded } from "../../src/migrate/core/cleanup.ts"
 
 /** One turn of the event loop, after the promise callbacks queued before it */
 export const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
@@ -29,7 +29,11 @@ export function stubKill(): { calls: () => unknown[][] } {
 	beforeEach(() => {
 		kill = vi.spyOn(process, "kill").mockImplementation(() => true)
 	})
-	afterEach(() => kill?.mockRestore())
+	/* past the end of every stop, so a step that outlasts the test still asks the stub, never the worker */
+	afterEach(async () => {
+		await stopsEnded()
+		kill?.mockRestore()
+	})
 	return { calls: () => kill?.mock.calls ?? [] }
 }
 

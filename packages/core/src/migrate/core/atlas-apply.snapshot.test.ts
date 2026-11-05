@@ -7,6 +7,7 @@ import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { stopsEnded } from "./cleanup.ts"
 import { fakeAtlas, revision, status } from "../../../tests/support/fake-atlas.ts"
 import { noLive } from "../__fixtures__/live-objects.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
@@ -64,6 +65,7 @@ describe("a snapshot's hold, once the run that made it ends", () => {
 				.map(([target]) => String(target))
 				.filter((target) => target.includes("comb-migrate-snapshot-"))
 		} finally {
+			await stopsEnded()
 			rm.mockRestore()
 			kill.mockRestore()
 			for (const listener of others) process.on("SIGINT", listener)
