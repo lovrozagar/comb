@@ -50,26 +50,31 @@ function snapshot(db: LocalDb): Map<string, Shape> {
 			type: "table",
 		})),
 	)
-	for (const { name } of live.filter((object) => !isMirror(object))) {
-		const info = db.all(`PRAGMA main.table_xinfo(${quote(name)})`).filter((row) => row["hidden"] === 0)
-		const columns = info.map((row) => String(row["name"]))
-		const rows = db
-			.all(
-				`SELECT ${columns.map((column) => `quote(${quote(column)}) AS ${quote(column)}`).join(", ")} FROM main.${quote(name)}`,
-			)
-			.map((row) => columns.map((column) => String(row[column])))
-		out.set(asciiFold(name), {
-			columns,
-			defaults: new Map(
-				info.map((row) => [String(row["name"]), row["dflt_value"] === null ? null : String(row["dflt_value"])]),
-			),
-			nullable: new Set(
-				info.filter((row) => row["notnull"] === 0 && row["pk"] === 0).map((row) => String(row["name"])),
-			),
-			rows,
-		})
-	}
+	for (const { name } of live.filter((object) => !isMirror(object)))
+		out.set(
+			asciiFold(name),
+			named(name, () => shapeOf(db, name)),
+		)
 	return out
+}
+
+/** Table `name`'s stored columns and rows; throws what SQLite answers when it cannot read them */
+function shapeOf(db: LocalDb, name: string): Shape {
+	const info = db.all(`PRAGMA main.table_xinfo(${quote(name)})`).filter((row) => row["hidden"] === 0)
+	const columns = info.map((row) => String(row["name"]))
+	const rows = db
+		.all(
+			`SELECT ${columns.map((column) => `quote(${quote(column)}) AS ${quote(column)}`).join(", ")} FROM main.${quote(name)}`,
+		)
+		.map((row) => columns.map((column) => String(row[column])))
+	return {
+		columns,
+		defaults: new Map(
+			info.map((row) => [String(row["name"]), row["dflt_value"] === null ? null : String(row["dflt_value"])]),
+		),
+		nullable: new Set(info.filter((row) => row["notnull"] === 0 && row["pk"] === 0).map((row) => String(row["name"]))),
+		rows,
+	}
 }
 
 /** What a copy of `objects` is made on: the engine, the pending files, and the columns they read as JSON */
@@ -157,6 +162,46 @@ async function* turns<T>(files: readonly T[]): AsyncGenerator<T> {
 }
 
 /**
+ * The copy's tables after a file, or why SQLite cannot read one: a file can leave a table no read
+ * opens, as an fts5vocab table over a dropped fts table, which fails on the live database at its
+ * first read (AC3-7 of area C round 3)
+ */
+function snapshotAfter(db: Copy["db"]): Map<string, Shape> | string {
+	try {
+		return snapshot(db)
+	} catch (error) {
+		return (error as Error).message
+	}
+}
+
+/** The proof of a file that applied as `run`, from the copy's tables and mirrored rows before it and its tables after */
+function appliedProof(
+	copy: Copy,
+	run: ReturnType<typeof applyToCopy>,
+	{
+		after,
+		before,
+		mirrors,
+	}: { after: Map<string, Shape>; before: Map<string, Shape>; mirrors: ReturnType<typeof mirrorRows> },
+): Proof {
+	const found = compare(copy.db, new Map([...before].filter(([table]) => !copy.unproven.has(table))), after)
+	const steps = engineFindings(run.steps, run.start)
+	return {
+		cautious: [...steps.cautious, ...found.cautious],
+		unproven: unprovenOf(copy),
+		unsafe: [...steps.unsafe, ...found.unsafe, ...mirrorFindings(mirrors, mirrorRows(copy.db))],
+	}
+}
+
+/** A file's proof that failed for `why`, which is unsafe */
+const failedProof = (copy: Copy, why: string): Proof => ({
+	cautious: [],
+	failed: why,
+	unproven: unprovenOf(copy),
+	unsafe: [why],
+})
+
+/**
  * Prove each pending file, in order, on a seeded scratch copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
  * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
@@ -180,7 +225,7 @@ async function provePending(
 	try {
 		for await (const { name, sql } of turns(files)) {
 			if (failed !== undefined) {
-				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [failed] })
+				proofs.set(name, failedProof(copy, failed))
 				continue
 			}
 			let [before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
@@ -193,8 +238,10 @@ async function provePending(
 				run = applyToCopy(copy.db, sql)
 			}
 			if (run.error !== undefined) {
-				const why = `comb could not run this in the proof copy on ${copy.db.engine}: ${run.error}`
-				proofs.set(name, { cautious: [], failed: why, unproven: unprovenOf(copy), unsafe: [why] })
+				proofs.set(
+					name,
+					failedProof(copy, `comb could not run this in the proof copy on ${copy.db.engine}: ${run.error}`),
+				)
 				/* the later files are proven on the schema this one leaves, seeded fresh (M13) */
 				const after = await schemaAfter(objects, [...applied, sql], { engine, engineTables })
 				if (after === undefined) {
@@ -202,23 +249,21 @@ async function provePending(
 					continue
 				}
 				copy.db.close()
-				objects = after
-				applied = []
+				;[objects, applied] = [after, []]
 				copy = await scopedCopy(objects, 0, making)
 				continue
 			}
 			applied.push(sql)
-			const found = compare(
-				copy.db,
-				new Map([...before].filter(([table]) => !copy.unproven.has(table))),
-				snapshot(copy.db),
-			)
-			const steps = engineFindings(run.steps, run.start)
-			proofs.set(name, {
-				cautious: [...steps.cautious, ...found.cautious],
-				unproven: unprovenOf(copy),
-				unsafe: [...steps.unsafe, ...found.unsafe, ...mirrorFindings(mirrors, mirrorRows(copy.db))],
-			})
+			const after = snapshotAfter(copy.db)
+			if (typeof after === "string") {
+				proofs.set(
+					name,
+					failedProof(copy, `this applies in the proof copy on ${copy.db.engine}, then SQLite cannot read ${after}`),
+				)
+				failed = `an earlier pending file, ${name}, left a table SQLite cannot read, so this one is unproven`
+				continue
+			}
+			proofs.set(name, appliedProof(copy, run, { after, before, mirrors }))
 		}
 	} finally {
 		copy.db.close()

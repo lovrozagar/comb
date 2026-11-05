@@ -72,3 +72,22 @@ describe("provePending after a file the copy refuses (M7)", () => {
 		)
 	})
 })
+
+describe("provePending after a file that leaves a table SQLite cannot read", () => {
+	/* AC3-7 of area C round 3: SQLite reads an fts5vocab table only while its fts table stands */
+	it("fails a file that leaves a table SQLite cannot read, and every file after it, without throwing", async () => {
+		const live = `CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);
+CREATE VIRTUAL TABLE f0 USING fts5(a);
+CREATE VIRTUAL TABLE fv USING fts5vocab(f0, row);`
+		const proofs = await prove(live, [
+			["1_drop.sql", "DROP TABLE f0;\nINSERT INTO t (a) VALUES ('fv');"],
+			["2_after.sql", "DELETE FROM t;"],
+		])
+		expect(proofs.get("1_drop.sql")?.failed).toMatch(
+			/^this applies in the proof copy on SQLite \d+\.\d+\.\d+, then SQLite cannot read fv: no such fts5 table: main\.f0$/,
+		)
+		expect(proofs.get("2_after.sql")?.failed).toBe(
+			"an earlier pending file, 1_drop.sql, left a table SQLite cannot read, so this one is unproven",
+		)
+	})
+})
