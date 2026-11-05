@@ -1,15 +1,14 @@
 /* an expiry is a time, or Infinity for an entry that never expires: `now > Infinity` is never true */
 type LruEntry<V> = { hardExpiry: number; softExpiry: number; value: V }
 
-type LruMeta<V> = { stale: boolean; value: V }
+/** An entry as `getWithMeta` returns it, with whether it is past its soft TTL */
+type LruMeta<V> = {
+	/** True between the entry's soft and hard expiry: serve `value`, and refresh it */
+	stale: boolean
+	/** The value the entry was set with */
+	value: V
+}
 
-/**
- * LRU (Least Recently Used) cache with optional TTL + Stale-While-Revalidate support.
- * Bounds cache size and auto-evicts stale entries.
- *
- * When hardTtlMs is set, getWithMeta() returns stale entries between soft and hard expiry
- * so callers can serve stale data while revalidating in the background.
- */
 const isPositive = (value: number | undefined) => value === undefined || (Number.isFinite(value) && value > 0)
 
 /**
@@ -35,6 +34,14 @@ function checkOptions({
 	}
 }
 
+/**
+ * A least-recently-used cache with a bounded size, an optional soft TTL and an optional hard TTL,
+ * for stale-while-revalidate. Past its soft TTL an entry is stale: `get` and `has` miss it, and
+ * `getWithMeta` still returns it, marked stale, until its hard TTL evicts it. With a hard TTL, an
+ * entry's soft TTL is at most the hard one, and an entry with none is fresh until the hard expiry.
+ * A `set` on a full cache evicts the least recently read or set entry. Times are read from
+ * `Date.now()`.
+ */
 class LruCache<K, V> {
 	private cache: Map<K, LruEntry<V>>
 	private readonly hardTtlMs: number | undefined
@@ -42,11 +49,17 @@ class LruCache<K, V> {
 	private readonly ttlMs: number | undefined
 
 	/**
-	 * @param maxSize - Maximum number of entries
-	 * @param ttlMs - Soft TTL: entry considered stale after this (used by get())
-	 * @param hardTtlMs - Hard TTL: entry fully evicted after this (used by getWithMeta())
+	 * An empty cache. Throws `RangeError` for a `maxSize` that is not a positive integer, a TTL that
+	 * is not a positive finite number, or a `hardTtlMs` shorter than `ttlMs`.
 	 */
-	constructor(options: { hardTtlMs?: number | undefined; maxSize: number; ttlMs?: number | undefined }) {
+	constructor(options: {
+		/** Milliseconds after a set when the entry is evicted, whatever reads it; none when omitted */
+		hardTtlMs?: number | undefined
+		/** The most entries the cache holds, a positive integer */
+		maxSize: number
+		/** Milliseconds after a set when the entry turns stale, unless `set` is given its own; never when omitted and no `hardTtlMs` is set */
+		ttlMs?: number | undefined
+	}) {
 		checkOptions(options)
 		this.maxSize = options.maxSize
 		this.ttlMs = options.ttlMs

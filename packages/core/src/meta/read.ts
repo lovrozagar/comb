@@ -14,6 +14,7 @@ import {
 	type CombStatesMeta,
 } from "./contract.ts"
 
+/** How readCombMeta, readCombEntityMeta and readCombQueryMeta read a payload */
 type ReadOptions = {
 	/**
 	 * Highest contract version this reader understands. A payload newer than

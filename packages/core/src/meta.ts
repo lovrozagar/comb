@@ -31,13 +31,17 @@ import { isRecord, readCombEntityMeta, readCombMeta, readCombQueryMeta } from ".
  * does not forward the base's metadata to the output view. See docs §3.1.
  */
 function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>
+/** Build the stamp for a list query schema's `.meta()` call; `v` is stamped for you */
 function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>
 function combMeta(meta: CombMetaInput): CombMetaStamp {
 	return { [COMB_META_KEY]: { ...meta, v: COMB_META_VERSION } as CombMeta }
 }
 
 /** Minimal shape of a Zod schema, so this module needs no zod import. */
-export type MetaCarrier<T> = { meta: (m: Record<string, unknown>) => T }
+export type MetaCarrier<T> = {
+	/** Zod's `.meta()`: returns a copy of the schema carrying `m` */
+	meta: (m: Record<string, unknown>) => T
+}
 
 /**
  * Re-stamp `to` with the facts `from` carries.

@@ -17,16 +17,20 @@ const COMB_META_KEY = "x-comb"
  */
 const COMB_META_VERSION = 1
 
+/** Which payload a stamp carries: facts about a table (`entity`) or about a list query (`query`) */
 type CombMetaKind = "entity" | "query"
 
 /** Filter grammar comb's parser implements — `field.op.value`. */
 const COMB_FILTER_GRAMMAR = "postgrest"
 
+/** The filter grammar a query meta names, `postgrest`: `field.op.value` */
 type CombFilterGrammar = typeof COMB_FILTER_GRAMMAR
 
 /** Facts about an entity, derived from its table definition. */
 type CombEntityMeta = {
+	/** The contract version the payload was stamped with, `COMB_META_VERSION` */
 	v: number
+	/** Always `entity` */
 	kind: "entity"
 	/** Entity name — the SQL table name */
 	name: string
@@ -66,16 +70,23 @@ type CombEntityMeta = {
 
 /** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
 type CombStatesMeta = {
+	/** The column the machine governs */
 	column: string
+	/** Every legal value, in declaration order */
 	values: string[]
+	/** The value a row starts at, or null when the machine declares none */
 	initial: string | null
+	/** The values no transition may leave; empty when none are declared */
 	terminal: string[]
 }
 
 /** One filterable field with the operators its type accepts. */
 type CombFilterField = {
+	/** The field's name, as a filter names it */
 	field: string
+	/** The field's filter type: `string`, `number`, `boolean`, `date` or `enum` */
 	type: string
+	/** The operators a filter may apply to the field, such as `eq` or `in` */
 	ops: string[]
 }
 
@@ -85,26 +96,35 @@ type CombFilterField = {
  * them ignores them, which is why adding them did not bump `v`.
  */
 type CombQueryMeta = {
+	/** The contract version the payload was stamped with, `COMB_META_VERSION` */
 	v: number
+	/** Always `query` */
 	kind: "query"
+	/** The fields a `filter` may name */
 	filterable: string[]
 	/** `filterable` with types and operators */
 	filterFields?: CombFilterField[] | undefined
+	/** The fields an `order` may name */
 	sortable: string[]
 	/** Null placements every sortable field accepts */
 	nulls?: Array<"first" | "last"> | undefined
+	/** Conditions one `filter` may hold */
 	maxFilterConditions?: number | undefined
+	/** Nested `or()` and `and()` groups one `filter` may hold below its top level */
 	maxFilterDepth?: number | undefined
 	/** Values one filter binds in all, every in/nin member counted */
 	maxFilterValues?: number | undefined
+	/** Values one `in` or `nin` list may hold */
 	maxInValues?: number | undefined
+	// Q8
 	/**
 	 * UTF-8 bytes of the escaped pattern of a `like` or `ilike` value with a `*` inside it, as SQLite
 	 * reads it: a `[` in a `like` is the three bytes `[[]`, a `%` or `_` in an `ilike` two. A value whose
-	 * only `*` are at its ends is no pattern and takes no cap. Not the raw value's characters (Q8)
+	 * only `*` are at its ends is no pattern and takes no cap. Not the raw value's characters.
 	 */
 	maxPatternBytes?: number | undefined
-	/** Bytes one `filter` may take however a client encodes it (U28), beside its character cap */
+	// U28
+	/** Bytes one `filter` may take however a client encodes it, beside its character cap */
 	maxFilterBytes?: number | undefined
 	/** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */
 	maxQueryBytes?: number | undefined
@@ -112,10 +132,13 @@ type CombQueryMeta = {
 	maxSearchTerms?: number | undefined
 	/** Bytes one `q` may take however a client encodes it */
 	maxSearchBytes?: number | undefined
+	/** Keys one `order` may hold */
 	maxSortKeys?: number | undefined
 	/** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
 	searchable: string[] | null
+	/** The fields a `select` may name */
 	selectable: string[]
+	/** The largest `limit` a request may ask for */
 	maxLimit: number
 	/** The last page offset pagination serves; past it, a client pages by cursor */
 	maxPage?: number | undefined
@@ -123,14 +146,18 @@ type CombQueryMeta = {
 	defaultOrder: string
 	/** Tiebreak column for keyset pagination */
 	stableTiebreak: string
+	/** The filter grammar `filter` is parsed with */
 	grammar: CombFilterGrammar
 }
 
+/** A comb meta payload: an entity's or a list query's, told apart by `kind` */
 type CombMeta = CombEntityMeta | CombQueryMeta
 
 /** Payload accepted by combMeta() — the version is stamped for you. */
 type CombEntityMetaInput = Omit<CombEntityMeta, "v">
+/** A query payload as combMeta() takes it, without `v` */
 type CombQueryMetaInput = Omit<CombQueryMeta, "v">
+/** A payload as combMeta() takes it, entity or query, without `v` */
 type CombMetaInput = CombEntityMetaInput | CombQueryMetaInput
 
 /** The object combMeta() produces, ready for `.meta()`. */

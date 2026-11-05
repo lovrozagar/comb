@@ -20,6 +20,7 @@ const PREFIX_PATTERN = /^[a-z][a-z0-9]{1,9}$/
 /** The last millisecond a ULID's 48-bit time holds */
 const MAX_TIME = 2 ** 48 - 1
 
+/** The clock and the randomness a ULID factory reads, each replaceable for tests or a runtime without them */
 type UlidFactoryOptions = {
 	/** The clock, ms since epoch, a fraction read at its millisecond; `Date.now` by default */
 	now?: (() => number) | undefined
@@ -90,7 +91,15 @@ function checkPrefix(prefix: string): void {
  * count up any further moves on to the next millisecond. A clock reading outside ULID's milliseconds,
  * 0 to 2^48 - 1, throws a RangeError, as does a move past the last of them.
  */
-function createUlidFactory(options: UlidFactoryOptions = {}): { id: (prefix: string) => string; ulid: () => string } {
+function createUlidFactory(options: UlidFactoryOptions = {}): {
+	/**
+	 * A prefixed id, `{prefix}_{ulid}`, from this factory's ULIDs; throws for a prefix that is not 2 to
+	 * 10 lowercase letters and digits starting with a letter
+	 */
+	id: (prefix: string) => string
+	/** The next ULID, 26 base32 characters, greater than every one this factory issued; throws `RangeError` for a clock reading outside a ULID's time */
+	ulid: () => string
+} {
 	const now = options.now ?? Date.now
 	const random = options.random ?? webRandom
 	let lastTime = -1

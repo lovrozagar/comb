@@ -17,10 +17,18 @@ const BCRYPT_BYTES = 72
 export type PasswordHash = "bcrypt"
 
 /** What a typed password is held to: the most characters, and the scheme it is hashed with */
-export type TypedPasswordOptions = { hash?: PasswordHash | undefined; max?: number | undefined }
+export type TypedPasswordOptions = {
+	/** The scheme the password is hashed with; `bcrypt` also refuses a password past the 72 UTF-8 bytes bcrypt reads */
+	hash?: PasswordHash | undefined
+	/** The most characters, counted by code point after NFC normalization; a whole number from 1, 128 by default */
+	max?: number | undefined
+}
 
 /** What a password set is held to: a typed one's, and the fewest characters */
-export type PasswordTextOptions = TypedPasswordOptions & { min?: number | undefined }
+export type PasswordTextOptions = TypedPasswordOptions & {
+	/** The fewest characters, counted as `max` is; a whole number from 0 up to `max`, 15 by default, and at most 72 under `bcrypt` */
+	min?: number | undefined
+}
 
 const utf8Bytes = (value: string): number => new TextEncoder().encode(value).length
 
@@ -81,4 +89,7 @@ function set({ hash, max = 128, min = 15 }: PasswordTextOptions = {}): z.ZodStri
 }
 
 /** A password set, and `typed` for one typed to sign in */
-export const passwordText: typeof set & { typed: typeof typed } = /* @__PURE__ */ Object.assign(set, { typed })
+export const passwordText: typeof set & {
+	/** A password typed to sign in: storable, NFC, at most `max` characters (128 by default), and bcrypt's bytes under it; it holds no minimum, so a password set before one still signs in */
+	typed: typeof typed
+} = /* @__PURE__ */ Object.assign(set, { typed })

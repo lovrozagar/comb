@@ -8,7 +8,8 @@
  */
 import * as z from "zod"
 
-/* how JSON Schema names the rule, a refine it cannot publish as a pattern (F56) */
+// F56: a refine, never a pattern
+/** The `x-comb-text` value a storable text schema publishes in JSON Schema, which names the rule a pattern cannot express */
 export const STORABLE_TEXT_RULE = "no U+0000 or unpaired surrogate"
 
 /** Whether every engine stores `value` as sent: it holds no U+0000 and no lone surrogate */

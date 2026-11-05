@@ -60,10 +60,11 @@ const CHECKED: WeakSet<ConstraintMap> = /* @__PURE__ */ new WeakSet()
 // lookup-table: each malformed key reported, by its text, as a map spread per call is a new map each time (Q4 of r21); keys are the app's source text, so it stays that small
 const WARNED: Set<string> = /* @__PURE__ */ new Set()
 
+// Q4 of r19
 /**
  * The maps an app passes its error handlers, every key checked where it builds them, at module load:
- * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation
- * (Q4 of r19). The array comes back frozen, and no handler checks it again.
+ * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation.
+ * The array comes back frozen, and no handler checks it again.
  */
 export function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[] {
 	const bad = maps.flatMap((map) => Object.keys(map)).find(malformed)
