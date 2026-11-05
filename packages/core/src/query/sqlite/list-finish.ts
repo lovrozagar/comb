@@ -17,7 +17,7 @@ import { DateKey, readsBack, refersBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import { familyOf, keyTextsSQL, storageOf, storedTextOf, textKeysSQL } from "./key-texts.ts"
 import type { SortKey } from "./keyset.ts"
-import { holdsText } from "./timestamp-column.ts"
+import { heldApart } from "./timestamp-column.ts"
 
 type Keyset = {
 	/** Present only when every key is a real column a predicate can compare. */
@@ -132,9 +132,12 @@ function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	return { _combKeyTexts: keyTextsSQL(keys, list.dialect, asRead).as("_combKeyTexts") }
 }
 
-/** The extra that carries each SQLite timestamp key's TEXT the list reads back (textKeysSQL); none where no key is one */
+/**
+ * The extra that carries each stored value a key the list reads back holds apart from its read, a
+ * SQLite timestamp's TEXT or a boolean's value but 0 or 1 (textKeysSQL); none where no key is one
+ */
 function textKeysOf(list: Finish, keys: readonly SortKey[]): ListExtras {
-	const held = (column: SQLWrapper) => holdsText(column) && !boundAsRead(list, column)
+	const held = (column: SQLWrapper) => heldApart(column) && !boundAsRead(list, column)
 	if (list.dialect !== "sqlite" || !keys.some(({ column }) => held(column))) return {}
 	return { _combTextKeys: textKeysSQL(keys, held).as("_combTextKeys") }
 }

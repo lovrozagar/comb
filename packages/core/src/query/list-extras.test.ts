@@ -196,3 +196,51 @@ describe("typedKeys, carriedTexts and malformed: _combTextKeys (B2-3 of area B; 
 			expect(malformed({ _combId: 1, _combTextKeys: texts }, SORT)).toBe(`_combTextKeys ${JSON.stringify(texts)}`)
 	})
 })
+
+/* AB3-2 of area B: a SQLite boolean key holding a value but 0 or 1, which drizzle reads as false */
+/** A row whose boolean key `k` read false, holding `stored` and `text` */
+const held = (stored: string, text: string) => ({
+	_combId: 1,
+	_combTextKeys: JSON.stringify([[stored, text], null]),
+	k: false,
+	name: "a",
+})
+
+describe("typedKeys, carriedTexts and malformed: a boolean's stored value (AB3-2 of area B; sibling: _combTextKeys)", () => {
+	it("puts a read-back key's stored value in place of the false read, by its storage class, and flags it as carried", () => {
+		for (const [stored, text, value] of [
+			["integer", "-1", -1],
+			["integer", "9007199254740993", 9007199254740993n],
+			["real", "1.5", 1.5],
+			["real", "9e999", Number.POSITIVE_INFINITY],
+			["text", "yes", "yes"],
+			["blob", "01FF", Uint8Array.of(1, 255)],
+			["blob", "", new Uint8Array()],
+		] as const) {
+			expect(typedKeys(held(stored, text), SORT), `${stored} ${text}`).toEqual({ ...held(stored, text), k: value })
+			expect(carriedTexts(held(stored, text), SORT)).toEqual(new Set(["k"]))
+		}
+	})
+
+	it("answers a 500 naming the key where an as-read list marked a value but 0 or 1, under the classes or none", () => {
+		const cause = expect.stringContaining("k stores a value other than 0 or 1")
+		for (const row of [
+			{ _combId: 1, _combKeyTexts: "!b,", k: false, name: "a" },
+			{ _combId: 1, _combKeyTexts: "!b,", _combKeyTypes: "integer,text,integer", k: false, name: "a" },
+		])
+			expect(() => typedKeys(row, SORT)).toThrow(
+				expect.objectContaining({ cause, errorKey: "sort_not_wired", status: 500 }),
+			)
+	})
+
+	it("takes a storage class and its text a key, and names a pair of another shape or class as its alias", () => {
+		expect(malformed(held("integer", "2"), SORT)).toBeUndefined()
+		for (const texts of [
+			'[["integer"],null]',
+			'[["float","1"],null]',
+			'[["integer",1],null]',
+			'[["text","a","b"],null]',
+		])
+			expect(malformed({ _combId: 1, _combTextKeys: texts }, SORT)).toBe(`_combTextKeys ${JSON.stringify(texts)}`)
+	})
+})

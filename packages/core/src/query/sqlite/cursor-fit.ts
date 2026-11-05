@@ -12,7 +12,7 @@ import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
-import { carriedText, holdsText, inSeconds } from "./timestamp-column.ts"
+import { carriedStored, carriedText, holdsText, inSeconds } from "./timestamp-column.ts"
 
 /**
  * What a column of each drizzle `dataType` family holds, given its full `dataType`. Keyed by drizzle's
@@ -144,8 +144,8 @@ const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
  * (`asRead`) its stored value too (carriedTime); a key declared as time, a Date or the epoch
  * milliseconds its row selected; any other SQL expression (a derived sort) only what every driver
  * binds: a string, a number, a bigint, a boolean or bytes (bun:sqlite and D1 refuse a Date that libsql
- * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp
- * the list reads back the TEXT it carried (`carried`), which the row held (B2-3 of area B)
+ * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp's
+ * TEXT or a boolean's value but 0 or 1 that a list reading it back carried (`carried`), as the row held it (B2-3, AB3-2 of area B)
  */
 function fits(
 	column: SQLWrapper,
@@ -157,7 +157,7 @@ function fits(
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (asRead && carriedTime(column, value)) return true
 	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
-	if (carriedText(column, value, { asRead, carried })) return true
+	if (carriedText(column, value, { asRead, carried }) || carriedStored(column, value, { asRead, carried })) return true
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
 	return ["string", "number", "boolean", "bigint"].includes(typeof value) || value instanceof Uint8Array
 }
@@ -201,6 +201,11 @@ const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
  */
 function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
 	if (carriedText(column, value, { asRead: false, carried })) return sql`${value}`
+	/* a boolean's mapper binds any value as 0 or 1; D1 binds no bigint, so one past 2^53 goes as its digits */
+	if (carriedStored(column, value, { asRead: false, carried }))
+		return typeof value === "bigint" && !Number.isSafeInteger(Number(value))
+			? sql`cast(${String(value)} as integer)`
+			: sql`${bindable(value)}`
 	if (!carried || typeof value !== "string" || !NUMERIC_TEXT.test(value)) return value
 	if (readsRounded(column)) return sql`${value}::numeric`
 	return carriesOpaque(column) ? sql`${value}` : value

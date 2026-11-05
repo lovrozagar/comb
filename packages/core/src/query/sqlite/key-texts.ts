@@ -8,7 +8,7 @@ import { Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import type { ListDialect } from "../list-dialect.ts"
 import { carriesOpaque, DateKey, readsRounded } from "./cursor-fit.ts"
 import type { SortKey } from "./keyset.ts"
-import { holdsText } from "./timestamp-column.ts"
+import { heldApart, holdsText, inBoolean } from "./timestamp-column.ts"
 
 /**
  * The storage class SQLite holds a key in, a REAL ±Infinity as `+inf` or `-inf`, which D1's JSON
@@ -58,6 +58,7 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
 	if (dialect === "sqlite") {
 		if (!asRead) return null
+		if (inBoolean(column)) return sql`case when ${readAsStored(column)} then '' else '!b' end`
 		return holdsText(column)
 			? sql`case when typeof(${column}) in ('integer', 'real') and abs(${column}) < 9e999 then printf('%!.17g', ${column}) when typeof(${column}) = 'text' then '!' else '' end`
 			: null
@@ -68,6 +69,19 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	const time = asRead && !carriesOpaque(column) ? sql` when ${isTime(column)} then ${isoText(column)}` : sql``
 	return sql`coalesce(case when ${roundsOnRead(column)} then (${column})::text${time} end, '')`
 }
+
+/* whether a SQLite boolean's row holds what drizzle's read of it binds back: NULL, or a number that is 0 or 1 */
+const readAsStored = (column: SQLWrapper): SQL =>
+	sql`(${column} is null or (typeof(${column}) in ('integer', 'real') and ${column} in (0, 1)))`
+
+/**
+ * A SQLite boolean's stored value, where drizzle's read of it binds another (readAsStored), as its
+ * storage class and its text: an integer's digits, a REAL at 17 significant digits, which a double
+ * reads back exactly, ±Infinity as the 9e999 SQLite reads as it, a TEXT itself and a blob's hex;
+ * null where the read binds it (AB3-2 of area B)
+ */
+const booleanStored = (column: SQLWrapper): SQL =>
+	sql`case when ${readAsStored(column)} then null when typeof(${column}) = 'integer' then json_array('integer', cast(${column} as text)) when typeof(${column}) = 'real' then json_array('real', case when abs(${column}) < 9e999 then printf('%!.17g', ${column}) when ${column} > 0 then '9e999' else '-9e999' end) when typeof(${column}) = 'text' then json_array('text', ${column}) else json_array('blob', hex(${column})) end`
 
 /* B2-7 of area B: a time's ::text follows DateStyle, whose zone abbreviation (IST, PST) reads back as another zone */
 const isoText = (column: SQLWrapper): SQL => sql`(to_json(${column}) #>> '{}')`
@@ -91,17 +105,19 @@ function keyTextsSQL(
 }
 
 /**
- * The TEXT each SQLite timestamp key `held` names holds, a JSON array with null for every other key,
- * so a cursor binds a TEXT row's own text, exact with the row gone (a reference past the cap): SQLite
- * orders every TEXT after every number, which no Date's milliseconds place. It is never comma-joined,
- * as a TEXT may hold a comma (B2-3 of area B). Empty where no key is held, which a Postgres table's
+ * The stored value each key `held` names carries apart, a JSON array with null for every other key,
+ * so a cursor binds the row's own value, exact with the row gone (a reference past the cap): a SQLite
+ * timestamp's TEXT, which SQLite orders after every number and no Date's milliseconds place (B2-3 of
+ * area B), and a SQLite boolean's value but 0 or 1 as its class and text (booleanStored). It is never
+ * comma-joined, as a TEXT may hold a comma. Empty where no key is held, which a Postgres table's
  * never is, and no Postgres before 16 has json_array
  */
-function textKeysSQL(keys: readonly SortKey[], held: (column: SQLWrapper) => boolean = holdsText): SQL<string> {
+function textKeysSQL(keys: readonly SortKey[], held: (column: SQLWrapper) => boolean = heldApart): SQL<string> {
 	if (!keys.some(({ column }) => held(column))) return sql<string>`''`
-	const each = keys.map(({ column }) =>
-		held(column) ? sql`case when typeof(${column}) = 'text' then ${column} end` : sql`null`,
-	)
+	const each = keys.map(({ column }) => {
+		if (!held(column)) return sql`null`
+		return inBoolean(column) ? booleanStored(column) : sql`case when typeof(${column}) = 'text' then ${column} end`
+	})
 	return sql<string>`json_array(${sql.join(each, sql`, `)})`
 }
 

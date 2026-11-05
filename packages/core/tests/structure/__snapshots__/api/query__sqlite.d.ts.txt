@@ -984,8 +984,9 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
  * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite timestamp holding TEXT the TEXT
- * `_combTextKeys` carries (B2-3 of area B). A text key that looks like a number stays
+ * stored value `_combKeyTexts` carries (QL2 of r22b), a SQLite timestamp holding TEXT the TEXT
+ * `_combTextKeys` carries (B2-3 of area B), and a SQLite boolean holding a value but 0 or 1 the value
+ * it carries (AB3-2 of area B). A text key that looks like a number stays
  * text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;

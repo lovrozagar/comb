@@ -121,30 +121,62 @@ function malformed(row: object, sort: readonly SortField[]): string | undefined 
 
 /* what a SQLite timestamp key holding TEXT carries in `_combKeyTexts` on a list that binds it as read (B2-3 of area B) */
 const TEXT_MARK = "!"
+/* what a SQLite boolean key holding a value but 0 or 1 carries there (AB3-2 of area B) */
+const BOOLEAN_MARK = "!b"
+
+/** A key's stored value `_combTextKeys` carries: a timestamp's TEXT, or a boolean's storage class and text */
+type HeldKey = string | readonly [StoredClass, string] | null
+type StoredClass = "blob" | "integer" | "real" | "text"
+// lookup-table: the storage classes a boolean key's stored value carries in _combTextKeys (AB3-2 of area B)
+const STORED_CLASSES: ReadonlySet<unknown> = /* @__PURE__ */ new Set(["blob", "integer", "real", "text"])
+
+/** Whether `key` is one key's value in `_combTextKeys`: null, a TEXT, or a storage class and its text */
+const isHeldKey = (key: unknown): key is HeldKey =>
+	key === null ||
+	typeof key === "string" ||
+	(Array.isArray(key) && key.length === 2 && STORED_CLASSES.has(key[0]) && typeof key[1] === "string")
 
 /**
- * Whether `value` is `_combTextKeys` as a builder selects it for `sort`: a JSON array, a TEXT or null
- * a key, or empty where listOptions' table has no key that holds TEXT
+ * Whether `value` is `_combTextKeys` as a builder selects it for `sort`: a JSON array of a held key
+ * each (isHeldKey), or empty where listOptions' table has no key that holds one
  */
 function isTextKeys(value: unknown, sort: readonly SortField[]): boolean {
 	if (typeof value !== "string") return false
 	if (value === "") return true
 	try {
 		const keys: unknown = JSON.parse(value)
-		return (
-			Array.isArray(keys) && keys.length === sort.length && keys.every((key) => key === null || typeof key === "string")
-		)
+		return Array.isArray(keys) && keys.length === sort.length && keys.every(isHeldKey)
 	} catch {
 		// reason: a value that is no JSON, such as the alias rendered by hand, is no _combTextKeys, which malformed names
 		return false
 	}
 }
 
-/** Each sort key's TEXT from the row's `_combTextKeys`, null for a key holding none; none where no key holds any */
-const textKeysOf = (row: Record<string, unknown>): readonly (string | null)[] | undefined =>
+/** Each sort key's held value from the row's `_combTextKeys`, null for a key holding none; none where no key holds any */
+const textKeysOf = (row: Record<string, unknown>): readonly HeldKey[] | undefined =>
 	typeof row["_combTextKeys"] === "string" && row["_combTextKeys"] !== ""
-		? (JSON.parse(row["_combTextKeys"]) as (string | null)[])
+		? (JSON.parse(row["_combTextKeys"]) as HeldKey[])
 		: undefined
+
+/**
+ * A held key as the cursor carries it: a TEXT itself; a boolean's stored integer as a number, or a
+ * bigint past 2^53, a REAL as its double (9e999 as Infinity), a TEXT itself and a blob as its bytes
+ */
+function heldValue(key: string | readonly [StoredClass, string]): unknown {
+	if (typeof key === "string") return key
+	const [stored, text] = key
+	if (stored === "integer") return Number.isSafeInteger(Number(text)) ? Number(text) : BigInt(text)
+	if (stored === "real") return Number(text)
+	return stored === "blob" ? Uint8Array.from(text.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16)) : text
+}
+
+/** The 500 for a SQLite boolean key holding a value but 0 or 1 on a list that binds it as read: its read binds 0 */
+const storesOther = (field: string): CombError =>
+	new CombError({
+		cause: `${field} stores a value other than 0 or 1, which drizzle's boolean mode reads as false and no cursor bound as read places: store 0 or 1, or sort by another column`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
 
 /** The 500 for a SQLite timestamp key holding TEXT on a list that binds it as read: no cursor binds a Date past it */
 const storesText = (field: string): CombError =>
@@ -171,8 +203,9 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
  * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite timestamp holding TEXT the TEXT
- * `_combTextKeys` carries (B2-3 of area B). A text key that looks like a number stays
+ * stored value `_combKeyTexts` carries (QL2 of r22b), a SQLite timestamp holding TEXT the TEXT
+ * `_combTextKeys` carries (B2-3 of area B), and a SQLite boolean holding a value but 0 or 1 the value
+ * it carries (AB3-2 of area B). A text key that looks like a number stays
  * text. The merge compares rows through it (Q2 of r20).
  */
 function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown> {
@@ -183,10 +216,12 @@ function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Re
 	const carried = typeof texts === "string" ? texts.split(",") : []
 	const text = sort.find((_, i) => carried[i] === TEXT_MARK)
 	if (text !== undefined) throw storesText(text.field)
+	const other = sort.find((_, i) => carried[i] === BOOLEAN_MARK)
+	if (other !== undefined) throw storesOther(other.field)
 	const typed = [...sort.map(({ field }) => field), COMB_ID]
 		.map((field, i) => {
 			const own = held?.[i]
-			if (typeof own === "string") return [field, own] as const
+			if (own !== undefined && own !== null) return [field, heldValue(own)] as const
 			const value = stored === undefined ? row[field] : storedValue(row[field], stored[i])
 			return [field, storedText(value, stored?.[i], carried[i])] as const
 		})
@@ -209,7 +244,8 @@ function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]):
 		sort
 			.map(({ field }) => field)
 			.filter(
-				(field, i) => typeof held?.[i] === "string" || (typed[field] !== row[field] && typed[field] === carried[i]),
+				(field, i) =>
+					(held?.[i] !== undefined && held[i] !== null) || (typed[field] !== row[field] && typed[field] === carried[i]),
 			),
 	)
 }
