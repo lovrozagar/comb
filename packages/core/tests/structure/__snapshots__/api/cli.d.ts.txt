@@ -17,7 +17,7 @@ export type CliIo = {
     out(line: string): void;
     /** Writes one line of diagnostics, a refusal or a question's context, with no trailing newline; never part of --json output */
     err(line: string): void;
-    /** How the CLI starts a process (atlas, wrangler, drizzle-kit), spawnSync unless the embedder supplies one */
+    /** How the CLI starts a process (atlas, wrangler, drizzle-kit): comb's own, which spawns it and resolves with its exit code and output, unless the embedder supplies one */
     run?: Run | undefined;
     /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
     confirm?: ((question: string) => Promise<boolean>) | undefined;
