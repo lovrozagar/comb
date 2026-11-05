@@ -27,7 +27,7 @@ en-US English everywhere — code, comments, docs, commit messages.
 
 ## Git
 
-Stay on `main`. Don't create, switch, or delete branches.
+Stay on `main`. Don't create, switch, or delete branches, except the local `wt/<name>` branch that `node .rulesync/scripts/worktree.mjs add <name>` makes for a worktree in `.worktrees/<name>`. Never push a `wt/` branch, and remove it with its worktree once its work has landed on main.
 
 Fine without asking: `status`, `diff`, `log`, `add`, `commit`, `push`.
 
