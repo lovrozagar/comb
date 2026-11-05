@@ -900,14 +900,14 @@ declare const MAX_CURSOR_LENGTH = 8192;
  */
 type CursorPayload = {
     c?: boolean[] | undefined;
-    d?: Array<number | "invalid" | null> | undefined;
+    d?: Array<[unknown] | number | "invalid" | null> | undefined;
     i: CursorId;
     s: string;
     v: unknown[];
 };
 /** An opened cursor, as `readCursor` returns it */
 type DecodedCursor = {
-    /** per sort value, true where it is the stored text of its key rather than the value as read */
+    /** per sort value, true where it is its key's stored text, which the next page binds as itself; false where it is the value as the row read it */
     carried: boolean[];
     /** the tiebreak id of the row the next page starts after */
     id: CursorId;
@@ -917,7 +917,7 @@ type DecodedCursor = {
     values: CursorValue[];
 };
 type OpenedCursor = DecodedCursor & {
-    read?: Array<Date | null> | undefined;
+    read?: Array<readonly [CursorValue] | null> | undefined;
 };
 /** PostgreSQL semantics: nulls sort last ascending and first descending. */
 declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
@@ -938,7 +938,7 @@ declare const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a 
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
- * the row as the driver read it, whose Date readCursor returns for a key `record` binds otherwise
+ * the row as the driver read it, whose value readCursor returns for a key `record` binds otherwise
  */
 declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
     carried?: ReadonlySet<string> | undefined;
@@ -956,8 +956,8 @@ declare function openCursor(cursor: string, options: CursorOptions): OpenedCurso
 declare function readKeyset(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): OpenedCursor;
 /**
  * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. Each key is
- * as the cursor's row read it: a time key is the Date the driver read, an Invalid one included,
- * where the list pages by the value it stores. A value may be a CursorRef: a long sort value
+ * as the cursor's row read it, where the list pages by another value: a time key is the Date the
+ * driver read, an Invalid one included, and bytes are a Uint8Array. A value may be a CursorRef: a long sort value
  * carried by reference, its prefix and length, which a keyset of its own must read from the
  * cursor's row (cursor-ref.ts), never bind as it is.
  */
@@ -989,7 +989,7 @@ declare function createCursor(row: Record<string, unknown>, sort: readonly SortF
 }): string;
 /**
  * createCursor for the row paginate typed, bound by its stored values: `read` is the row as the driver
- * read it, whose Date readCursor returns for a key bound otherwise
+ * read it, whose value readCursor returns for a key bound otherwise
  */
 declare function fitCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof createCursor>[2] & {
     read?: Record<string, unknown> | undefined;
@@ -1239,9 +1239,11 @@ declare function encodeValue(value: unknown): unknown;
 declare function decodeValue(value: unknown): CursorValue | undefined;
 /** The tiebreak id from the wire: a string, a finite number, or a tagged bigint */
 declare function decodeId(value: unknown): CursorId | undefined;
+/** Whether `back`, what a cursor read back, is `value` itself: the same bytes, time, reference or value */
+declare function sameValue(value: unknown, back: unknown): boolean;
 /** Whether a cursor carries `value` as itself: `decode` reads its encoding back as it */
 declare function carried(value: unknown, decode: (wire: unknown) => unknown): boolean;
-export { carried, CursorRef, decodeId, decodeValue, encodeValue, type CursorId, type CursorValue };
+export { carried, CursorRef, decodeId, decodeValue, encodeValue, sameValue, type CursorId, type CursorValue };
 
 // query/list-schema.d.ts
 /**

@@ -107,4 +107,4 @@ function carried(value: unknown, decode: (wire: unknown) => unknown): boolean {
 	return json !== undefined && sameValue(value, decode(JSON.parse(json)))
 }
 
-export { carried, CursorRef, decodeId, decodeValue, encodeValue, type CursorId, type CursorValue }
+export { carried, CursorRef, decodeId, decodeValue, encodeValue, sameValue, type CursorId, type CursorValue }

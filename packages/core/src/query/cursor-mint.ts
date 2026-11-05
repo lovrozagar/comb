@@ -6,6 +6,7 @@
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { CursorRef, MAX_CURSOR_LENGTH, mintCursor } from "./cursor.ts"
+import { readsApart } from "./cursor-reads.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
 import { roundedKey } from "./rounded-key.ts"
 import type { SortField } from "./types.ts"
@@ -74,10 +75,10 @@ function createCursor(
 	return fitCursor(row, sort, options)
 }
 
-// B2-6 of area B: paginate mints through here so readCursor returns the Date its row read
+// B2-6 and AB3-3 of area B: paginate mints through here so readCursor returns the value its row read
 /**
  * createCursor for the row paginate typed, bound by its stored values: `read` is the row as the driver
- * read it, whose Date readCursor returns for a key bound otherwise
+ * read it, whose value readCursor returns for a key bound otherwise
  */
 function fitCursor(
 	row: Record<string, unknown>,
@@ -101,7 +102,16 @@ function fitCursor(
 	/* a key bound as the driver read it skips rows or repeats one once rounded (Q1 of r19, QL1 of r22b) */
 	const rounded = roundedKey(row, sort, derived ? "derived" : { unread: asRead })
 	if (rounded !== undefined) throw rounded
-	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, options)
+	/* options a JS caller left out are refused by mintCursor, by name */
+	const settled = options && {
+		...options,
+		read: readsApart(
+			options.read,
+			row,
+			sort.map(({ field }) => field),
+		),
+	}
+	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, settled)
 	const fits = (record: Record<string, unknown>) => mint(record).length <= MAX_CURSOR_LENGTH
 	const whole = mint(row)
 	if (whole.length <= MAX_CURSOR_LENGTH) return whole

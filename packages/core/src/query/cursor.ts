@@ -18,7 +18,7 @@ import {
 	type CursorId,
 	type CursorValue,
 } from "./cursor-codec.ts"
-import { readOf, readTime } from "./cursor-dates.ts"
+import { readOf, readSlot } from "./cursor-reads.ts"
 import { assertCursorWired, type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
@@ -50,8 +50,8 @@ const MAX_CURSOR_LENGTH = 8192
 type CursorPayload = {
 	/* per key, whether its value is the stored text the list carried rather than the value as read; left out when none is (comb-9d's AB2 ruling) */
 	c?: boolean[] | undefined
-	/* per key, the Date its row read where the value is another, as epoch milliseconds or "invalid", else null; left out when no key has one (B2-6 of area B) */
-	d?: Array<number | "invalid" | null> | undefined
+	/* per key, the value its row read where the keyset binds another, encoded alone in an array, else null; left out when no key has one (AB3-3 of area B); a cursor minted before holds a Date's epoch milliseconds or "invalid" */
+	d?: Array<[unknown] | number | "invalid" | null> | undefined
 	i: CursorId
 	s: string
 	v: unknown[]
@@ -59,7 +59,7 @@ type CursorPayload = {
 
 /** An opened cursor, as `readCursor` returns it */
 type DecodedCursor = {
-	/** per sort value, true where it is the stored text of its key rather than the value as read */
+	/** per sort value, true where it is its key's stored text, which the next page binds as itself; false where it is the value as the row read it */
 	carried: boolean[]
 	/** the tiebreak id of the row the next page starts after */
 	id: CursorId
@@ -69,8 +69,8 @@ type DecodedCursor = {
 	values: CursorValue[]
 }
 
-/* a cursor as the keyset binds it, and per key the Date its row read where the value is another, null else; none when no key has one */
-type OpenedCursor = DecodedCursor & { read?: Array<Date | null> | undefined }
+/* a cursor as the keyset binds it, and per key the value its row read where the keyset binds another, null else; none when no key has one */
+type OpenedCursor = DecodedCursor & { read?: Array<readonly [CursorValue] | null> | undefined }
 
 /** PostgreSQL semantics: nulls sort last ascending and first descending. */
 function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls {
@@ -106,7 +106,7 @@ function decodePayload(bytes: Uint8Array): OpenedCursor | null {
 		if (id === undefined || typeof s !== "string" || !Array.isArray(v)) return null
 		const values = v.map(decodeValue)
 		const flags = carriedOf(c, v.length)
-		const read = readOf(d, v.length)
+		const read = readOf(d, v.length, decodeValue)
 		/* a value the database cannot compare would reach the driver and fail there with a 500 */
 		if (values.includes(undefined) || flags === undefined || read === null) return null
 		return { carried: flags, id, ...(read && { read }), sort: s, values: values as CursorValue[] }
@@ -192,7 +192,7 @@ function refuseUncarried(record: Record<string, unknown>, parsedSort: readonly S
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
- * the row as the driver read it, whose Date readCursor returns for a key `record` binds otherwise
+ * the row as the driver read it, whose value readCursor returns for a key `record` binds otherwise
  */
 function mintCursor(
 	record: Record<string, unknown>,
@@ -205,14 +205,14 @@ function mintCursor(
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
 	const flags = parsedSort.map(({ field }) => options?.carried?.has(field) ?? false)
-	const read = parsedSort.map(({ field }) => readTime(options?.read?.[field], record[field]))
+	const read = parsedSort.map(({ field }) => readSlot(options?.read?.[field], record[field]))
 	refuseComputedSort(parsedSort)
 	refuseRoundedId(record, idField)
 	refuseUncarried(record, parsedSort, idField)
 	return encodeCursor(
 		{
 			...(flags.includes(true) && { c: flags }),
-			...(read.some((time) => time !== null) && { d: read }),
+			...(read.some((slot) => slot !== null) && { d: read }),
 			i: record[idField] as CursorId,
 			s: sortSignature(parsedSort),
 			v: parsedSort.map(({ field }) => record[field]),
@@ -253,8 +253,8 @@ function readKeyset(cursor: string, parsedSort: readonly SortField[], options: C
 
 /**
  * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. Each key is
- * as the cursor's row read it: a time key is the Date the driver read, an Invalid one included,
- * where the list pages by the value it stores. A value may be a CursorRef: a long sort value
+ * as the cursor's row read it, where the list pages by another value: a time key is the Date the
+ * driver read, an Invalid one included, and bytes are a Uint8Array. A value may be a CursorRef: a long sort value
  * carried by reference, its prefix and length, which a keyset of its own must read from the
  * cursor's row (cursor-ref.ts), never bind as it is.
  */
@@ -264,7 +264,7 @@ function readCursor(cursor: string, parsedSort: readonly SortField[], options: C
 	return {
 		...decoded,
 		carried: decoded.carried.map((flag, i) => flag && read[i] === null),
-		values: decoded.values.map((value, i) => read[i] ?? value),
+		values: decoded.values.map((value, i) => (read[i] ? read[i][0] : value)),
 	}
 }
 

@@ -28,9 +28,9 @@ export const OFF_UTC_UNIT = [
 	"src/pg/columns.meta.test.ts",
 	"src/pg/columns.test.ts",
 	"src/query/cursor-codec.test.ts",
-	"src/query/cursor-dates.test.ts",
 	"src/query/cursor-mint.test.ts",
 	"src/query/cursor-precision.test.ts",
+	"src/query/cursor-reads.test.ts",
 	"src/query/cursor-ref.test.ts",
 	"src/query/cursor.test.ts",
 	"src/query/drizzle.test.ts",
@@ -76,4 +76,5 @@ export const OFF_UTC_POSTGRES = [
 	"tests/integration/postgres/keyset-infinity-date.test.ts",
 	"tests/integration/postgres/keyset-nonfinite.test.ts",
 	"tests/integration/postgres/keyset.test.ts",
+	"tests/integration/postgres/read-cursor.test.ts",
 ]
