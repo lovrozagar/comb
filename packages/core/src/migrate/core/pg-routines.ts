@@ -9,7 +9,7 @@
  * reading a call needs (M83).
  */
 import { movedKey } from "./pg-names.ts"
-import { type Facts, keyOf, names, type Node, type Routines, typeOf, type Volatility } from "./pg-nodes.ts"
+import { type Facts, flag, keyOf, names, type Node, type Routines, typeOf, type Volatility } from "./pg-nodes.ts"
 
 // lookup-table: the parameter modes a signature leaves out, as Postgres does in identifying a routine
 const OUTPUT_MODES: ReadonlySet<string> = /* @__PURE__ */ new Set(["FUNC_PARAM_OUT", "FUNC_PARAM_TABLE"])
@@ -32,7 +32,7 @@ function signatureOf(parameters: unknown, schema: string): string {
 		.map((parameter) => {
 			const type = parameter["argType"] as Node
 			const bounds = "[]".repeat(((type["arrayBounds"] as unknown[] | undefined) ?? []).length)
-			return `${typeOf(type, schema)}${type["pct_type"] === true ? "%TYPE" : ""}${bounds}`
+			return `${typeOf(type, schema)}${flag(type["pct_type"]) ? "%TYPE" : ""}${bounds}`
 		})
 		.join(",")
 }
@@ -43,7 +43,7 @@ function named(object: unknown, schema: string): { key: string; signature: strin
 	const key = keyOf(names(routine["objname"]), schema)
 	return {
 		key,
-		signature: routine["args_unspecified"] === true ? undefined : signatureOf(routine["objfuncargs"], schema),
+		signature: flag(routine["args_unspecified"]) ? undefined : signatureOf(routine["objfuncargs"], schema),
 	}
 }
 
@@ -113,7 +113,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 /** `facts.routines` after a statement that defines, alters, drops, renames or moves a function or procedure */
 function followRoutine(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateFunctionStmt") {
-		const kind = node["is_procedure"] === true ? "procedure" : "function"
+		const kind = flag(node["is_procedure"]) ? "procedure" : "function"
 		const signature = signatureOf(node["parameters"], facts.schema)
 		const volatility = volatilityOf(node["options"]) ?? "volatile"
 		put(facts.routines, keyOf(names(node["funcname"]), facts.schema), { kind, signatures: [[signature, volatility]] })

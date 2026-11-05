@@ -45,6 +45,12 @@ describe("outsideOnly", () => {
 		).toEqual(Array(4).fill(undefined))
 	})
 
+	/* a float or an operator is no Integer node: it reads as its text, which is no boolean Postgres takes */
+	it.each(["0.0", "+"])("reads an option whose value is %s as written, not off", (value) => {
+		const refresh = `ALTER SUBSCRIPTION s SET PUBLICATION p WITH (refresh = ${value})`
+		expect(outside(refresh)).toBe(outside("ALTER SUBSCRIPTION s SET PUBLICATION p WITH (refresh = true)"))
+	})
+
 	it("leaves out what a transaction holds", () => {
 		expect(
 			[

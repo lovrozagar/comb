@@ -32,6 +32,7 @@ import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
+import { flag } from "./pg-nodes.ts"
 
 type Node = Record<string, unknown>
 
@@ -100,7 +101,7 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 		return [{ level: "unsafe", note: `writes through the view ${named.key}, which comb cannot follow to one table` }]
 	const table = { key: base.key, name: named.name }
 	/* a write without ONLY reaches the table's partitions and inheritance children */
-	const target = { inh: (node["relation"] as { inh?: boolean | undefined }).inh === true, key: named.key }
+	const target = { inh: flag((node["relation"] as Node)["inh"]), key: named.key }
 	if (type === "DeleteStmt")
 		return [{ level: "unsafe", note: `deletes rows of ${table.key}` }, ...reachFindings(target, ["delete"], ctx)]
 	if (type === "UpdateStmt")
@@ -152,7 +153,7 @@ function replicationFinding(node: Node, ctx: TreeContext): Finding | undefined {
 
 /** A function or procedure the file creates: its finding, its name kept as one a migration defined */
 function routineFinding(node: Node, ctx: TreeContext): Finding {
-	const kind = node["is_procedure"] === true ? "procedure" : "function"
+	const kind = flag(node["is_procedure"]) ? "procedure" : "function"
 	const name = names(node["funcname"])
 	ctx.facts.defined.add(keyOf(name, ctx.facts.schema))
 	return { level: "unsafe", note: `creates ${kind} ${name.join(".")}, whose body comb does not read` }

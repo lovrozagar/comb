@@ -25,6 +25,7 @@
  * server (pg-server-calls.ts) reaches as far (PR2 of r22b), unless the statement only defines it.
  */
 import { serverCallIn } from "./pg-server-calls.ts"
+import { flag, num } from "./pg-nodes.ts"
 
 type Node = Record<string, unknown>
 
@@ -49,24 +50,24 @@ function optionsOf(node: Node, field = "options"): Map<string, unknown> {
 function isOff(value: unknown): boolean {
 	if (value === true || value === undefined) return false
 	const node = value as Node
+	const integer = node["Integer"] as Node | undefined
+	/* an option's value is a word, a number or an operator: only a word or an integer can be off */
 	const word =
 		((node["String"] as Node | undefined)?.["sval"] as string | undefined) ??
 		(((node["TypeName"] as Node | undefined)?.["names"] as Array<{ String: Node }> | undefined)?.at(-1)?.String[
 			"sval"
 		] as string | undefined) ??
-		/* an option's value is a word or an integer */
-		String(((node["Integer"] as Node)["ival"] as number | undefined) ?? 0)
-	return /^(?:false|off|0)$/i.test(word)
+		(integer === undefined ? undefined : String(num(integer["ival"])))
+	return word !== undefined && /^(?:false|off|0)$/i.test(word)
 }
 
 /** Whether a node is built CONCURRENTLY, as its parse tree marks it: an index's build, drop or reindex, a partition's detach */
 function concurrent(type: string, node: Node): boolean {
-	if (type === "IndexStmt" || type === "DropStmt") return node["concurrent"] === true
+	if (type === "IndexStmt" || type === "DropStmt") return flag(node["concurrent"])
 	if (type === "AlterTableStmt")
 		return commandsOf(node).some(
 			(cmd) =>
-				cmd["subtype"] === "AT_DetachPartition" &&
-				((cmd["def"] as Node)["PartitionCmd"] as Node)["concurrent"] === true,
+				cmd["subtype"] === "AT_DetachPartition" && flag(((cmd["def"] as Node)["PartitionCmd"] as Node)["concurrent"]),
 		)
 	return type === "ReindexStmt" && optionsOf(node, "params").has("concurrently")
 }
@@ -132,7 +133,7 @@ const OUTSIDE: Readonly<Record<string, (node: Node, partitioned: Partitioned) =>
 		({ TRANS_STMT_COMMIT_PREPARED: "COMMIT PREPARED", TRANS_STMT_ROLLBACK_PREPARED: "ROLLBACK PREPARED" })[
 			String(node["kind"])
 		],
-	VacuumStmt: (node) => (node["is_vacuumcmd"] === true ? "VACUUM" : undefined),
+	VacuumStmt: (node) => (flag(node["is_vacuumcmd"]) ? "VACUUM" : undefined),
 }
 
 // lookup-table: how Postgres's refusal names each CONCURRENTLY statement
@@ -173,7 +174,7 @@ function blockAfter(open: boolean, type: string, node: Node): boolean {
 	if (type !== "TransactionStmt") return open
 	const kind = String(node["kind"])
 	if (kind === "TRANS_STMT_BEGIN" || kind === "TRANS_STMT_START") return true
-	if (kind === "TRANS_STMT_COMMIT" || kind === "TRANS_STMT_ROLLBACK") return node["chain"] === true
+	if (kind === "TRANS_STMT_COMMIT" || kind === "TRANS_STMT_ROLLBACK") return flag(node["chain"])
 	/* a prepared transaction leaves the session, which is then in none */
 	if (kind === "TRANS_STMT_PREPARE") return false
 	return open
@@ -233,7 +234,7 @@ const BEYOND: Readonly<Record<string, (node: Node) => string | undefined>> = {
 	CommentStmt: /* @__PURE__ */ onShared("COMMENT on", "objtype"),
 	/* the server's own files and programs */
 	CopyStmt: (node) =>
-		node["filename"] !== undefined && (node["is_program"] === true || node["is_from"] !== true)
+		node["filename"] !== undefined && (flag(node["is_program"]) || !flag(node["is_from"]))
 			? "COPY with a server file or program"
 			: undefined,
 	CreateSubscriptionStmt: () => "CREATE SUBSCRIPTION",
@@ -264,7 +265,7 @@ const DEFINES: Readonly<Record<string, (node: Node) => boolean>> = {
 	CreateFunctionStmt: () => true,
 	CreatePolicyStmt: () => true,
 	CreateStmt: () => true,
-	CreateTableAsStmt: (node) => (node["into"] as Node)["skipData"] === true,
+	CreateTableAsStmt: (node) => flag((node["into"] as Node)["skipData"]),
 	CreateTrigStmt: () => true,
 	ExplainStmt: (node) => {
 		const analyze = optionsOf(node).get("analyze")

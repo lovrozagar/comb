@@ -74,13 +74,21 @@ const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean 
 	[...columns.values()].some((column) => column.type === type)
 
 /**
+ * A number or flag of a parse node, as Postgres set it: libpg-query's JSON leaves out every field
+ * at its zero value (proto3's default), so an absent number reads 0 and an absent flag false. Every
+ * read of a number or flag field goes through one of these (tests/structure/pg-scalar-fields.test.ts)
+ */
+const num = (value: unknown): number => (value as number | undefined) ?? 0
+const flag = (value: unknown): boolean => value === true
+
+/**
  * A type name's modifiers, the integers it is written with: varchar(20) has [20], numeric(12, 2)
  * [12, 2]; libpg-query writes a 0 as an ival with no value, and any other modifier reads as NaN
  */
 const modsOf = (typeName: unknown): number[] =>
 	(((typeName as Node)["typmods"] as Node[] | undefined) ?? []).map((mod) => {
 		const ival = (mod["A_Const"] as Node | undefined)?.["ival"] as Node | undefined
-		return ival === undefined ? Number.NaN : Number((ival["ival"] as number | undefined) ?? 0)
+		return ival === undefined ? Number.NaN : num(ival["ival"])
 	})
 
 /** A routine's volatility, as its CREATE or an ALTER FUNCTION declares it */
@@ -216,6 +224,7 @@ export {
 	type ColumnType,
 	type Domain,
 	emptyFacts,
+	flag,
 	type EventTrigger,
 	type Facts,
 	functionBehind,
@@ -224,6 +233,7 @@ export {
 	names,
 	type Node,
 	nodesOf,
+	num,
 	type Reads,
 	type Routines,
 	tableOf,

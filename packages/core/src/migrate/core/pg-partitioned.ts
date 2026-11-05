@@ -5,7 +5,7 @@
  * so each is keyed as a relation; an index is its table's, in its table's schema, and moves with it.
  * Each follows its table's or its own RENAME, SET SCHEMA and DROP.
  */
-import { type Facts, keyOf, names, type Node, tableOf, written } from "./pg-nodes.ts"
+import { type Facts, flag, keyOf, names, type Node, tableOf, written } from "./pg-nodes.ts"
 
 /** `name` keyed in the schema the relation `table`'s key names, as an index lives in its table's */
 function besideTable(table: string, name: string, schema: string): string {
@@ -120,13 +120,13 @@ function dropRefusal(node: Node, facts: Facts): string | undefined {
  */
 function partitionedRefusal(type: string, node: Node, facts: Facts): string | undefined {
 	if (type === "DropStmt")
-		return node["removeType"] === "OBJECT_INDEX" && node["concurrent"] === true ? dropRefusal(node, facts) : undefined
+		return node["removeType"] === "OBJECT_INDEX" && flag(node["concurrent"]) ? dropRefusal(node, facts) : undefined
 	if (type !== "IndexStmt" && type !== "AlterTableStmt") return undefined
 	const { key, name } = tableOf(node["relation"], facts.schema)
 	if (!facts.partitioned.has(key)) return undefined
 	const table = written(node["relation"])
 	if (type === "IndexStmt")
-		return node["concurrent"] === true
+		return flag(node["concurrent"])
 			? `Postgres refuses CREATE INDEX CONCURRENTLY on partitioned ${table} ("cannot create index on partitioned table "${name}" concurrently"); ${indexRoute(table)}`
 			: undefined
 	return (node["cmds"] as Node[]).some(usingIndex)

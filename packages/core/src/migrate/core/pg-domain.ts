@@ -6,7 +6,7 @@
  * as the ADD would have, in any file: no NOT VALID form avoids that lock (PA9 of r22b).
  */
 import type { Finding } from "./classify-alter.ts"
-import { names, type Node } from "./pg-nodes.ts"
+import { flag, names, type Node } from "./pg-nodes.ts"
 
 /** An ALTER DOMAIN, rated as its column twin (P16): every column of the domain holds what it changes */
 function domainFindings(node: Node): Finding[] {
@@ -18,7 +18,7 @@ function domainFindings(node: Node): Finding[] {
 	/* T is SET or DROP DEFAULT, O SET NOT NULL, C ADD CONSTRAINT, X DROP CONSTRAINT, V VALIDATE CONSTRAINT */
 	if (subtype === "T") return node["def"] === undefined ? [{ level: "cautious" }] : []
 	if (subtype === "O") return [{ level: "unsafe" }, scan]
-	if (subtype === "C") return ((node["def"] as Node)["Constraint"] as Node)["skip_validation"] === true ? [] : [scan]
+	if (subtype === "C") return flag(((node["def"] as Node)["Constraint"] as Node)["skip_validation"]) ? [] : [scan]
 	if (subtype === "V") return [scan]
 	return subtype === "X" ? [{ level: "cautious" }] : []
 }

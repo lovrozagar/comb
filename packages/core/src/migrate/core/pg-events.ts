@@ -9,7 +9,7 @@
  */
 import type { Finding } from "./classify-alter.ts"
 import { ddlFindings, REWRITES } from "./pg-ddl.ts"
-import { type EventTrigger, type Facts, names, type Node } from "./pg-nodes.ts"
+import { type EventTrigger, type Facts, flag, names, type Node } from "./pg-nodes.ts"
 
 /** A command whose tag comb does not know: every trigger takes it for its own */
 const UNKNOWN = "?"
@@ -95,10 +95,10 @@ const word = (kind: unknown): string =>
 
 // lookup-table: the tags a node type reads from its fields; a SELECT is a command only with INTO
 const READ_TAGS: Readonly<Record<string, (node: Node) => string | undefined>> = {
-	CreateFunctionStmt: (node) => (node["is_procedure"] === true ? "CREATE PROCEDURE" : "CREATE FUNCTION"),
+	CreateFunctionStmt: (node) => (flag(node["is_procedure"]) ? "CREATE PROCEDURE" : "CREATE FUNCTION"),
 	CreateTableAsStmt: (node) => (node["objtype"] === "OBJECT_MATVIEW" ? "CREATE MATERIALIZED VIEW" : "CREATE TABLE AS"),
 	DefineStmt: (node) => `CREATE ${word(node["kind"])}`,
-	GrantStmt: (node) => (node["is_grant"] === true ? "GRANT" : "REVOKE"),
+	GrantStmt: (node) => (flag(node["is_grant"]) ? "GRANT" : "REVOKE"),
 	SelectStmt: (node) => (node["intoClause"] === undefined ? undefined : "SELECT INTO"),
 }
 

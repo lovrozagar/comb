@@ -6,7 +6,7 @@
 import type { TriggerEvent } from "../types.ts"
 import { moveReads } from "./pg-cascade.ts"
 import { moveDomains } from "./pg-domains.ts"
-import { type Facts, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
+import { type Facts, flag, keyOf, names, type Node, num, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the bits of a trigger's events, as pg_trigger numbers them
 const EVENTS: ReadonlyArray<[number, TriggerEvent]> = [
@@ -93,10 +93,9 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateTrigStmt") {
 		const table = tableOf(node["relation"], facts.schema).key
 		const name = String(node["trigname"])
-		const events = EVENTS.filter(([bit]) => ((node["events"] as number) & bit) !== 0).map(([, event]) => event)
+		const events = EVENTS.filter(([bit]) => (num(node["events"]) & bit) !== 0).map(([, event]) => event)
 		/* tgtype as Postgres builds it: FOR EACH ROW's bit, the timing's (none for AFTER), the events' */
-		const tgtype =
-			(node["row"] === true ? 1 : 0) | ((node["timing"] as number | undefined) ?? 0) | (node["events"] as number)
+		const tgtype = (flag(node["row"]) ? 1 : 0) | num(node["timing"]) | num(node["events"])
 		const kept = (facts.triggers.get(table) ?? []).filter((each) => each.name !== name)
 		const fn = keyOf(names(node["funcname"]), facts.schema)
 		facts.triggers.set(table, [...kept, { enabled: true, events, fn, name, type: tgtype }])

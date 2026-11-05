@@ -5,7 +5,7 @@
  * an ATTACH PARTITION, which scans the partition (P1 of the 0.15.0 review).
  */
 import type { Finding } from "./classify-alter.ts"
-import { type Facts, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
+import { type Facts, flag, type Node, nodesOf, num, tableOf } from "./pg-nodes.ts"
 
 const LOCKED: Finding = { level: "lock", note: "holds an exclusive lock while it runs" }
 
@@ -13,7 +13,7 @@ const LOCKED: Finding = { level: "lock", note: "holds an exclusive lock while it
 function isOn(arg: unknown): boolean {
 	if (arg === undefined) return true
 	const value = arg as { Integer?: { ival?: number | undefined } | undefined; String?: { sval: string } | undefined }
-	if (value.Integer !== undefined) return (value.Integer.ival ?? 0) !== 0
+	if (value.Integer !== undefined) return num(value.Integer.ival) !== 0
 	return /^(?:true|on|yes)$/i.test(value.String?.sval ?? "")
 }
 
@@ -48,7 +48,7 @@ function createFindings(node: Node, facts: Facts): Finding[] {
 		(each) => tableOf(each["RangeVar"], facts.schema).key,
 	)
 	const defaulted = parent === undefined ? undefined : facts.defaultPartitions.get(parent)
-	if (bound === undefined || bound["is_default"] === true || defaulted === undefined) return []
+	if (bound === undefined || flag(bound["is_default"]) || defaulted === undefined) return []
 	const table = tableOf(node["relation"], facts.schema).key
 	return [
 		{
@@ -63,7 +63,7 @@ const [SHARE_LOCK, ACCESS_EXCLUSIVE_LOCK] = [5, 8]
 
 /** A LOCK's finding: what its mode blocks, until the file's transaction ends */
 function lockFindings(node: Node): Finding[] {
-	const mode = Number(node["mode"])
+	const mode = num(node["mode"])
 	if (mode < SHARE_LOCK) return []
 	const tables = nodesOf(node["relations"]).map(([, rel]) =>
 		[rel["schemaname"], rel["relname"]].filter((part) => part !== undefined).join("."),
@@ -86,7 +86,7 @@ const PREPARES: Finding = {
 function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "VacuumStmt") return turnsOn(node["options"], "full") ? [LOCKED] : []
 	if (type === "ReindexStmt") return turnsOn(node["params"], "concurrently") ? [] : [LOCKED]
-	if (type === "RefreshMatViewStmt") return node["concurrent"] === true ? [] : [LOCKED]
+	if (type === "RefreshMatViewStmt") return flag(node["concurrent"]) ? [] : [LOCKED]
 	if (type === "LockStmt") return lockFindings(node)
 	/* a PREPARE runs nothing itself: the EXECUTE that runs it is rated by what it runs (P21 of r19) */
 	if (type === "PrepareStmt") return [PREPARES]

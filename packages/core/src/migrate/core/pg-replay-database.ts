@@ -26,6 +26,7 @@ import type { Connect } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
+import { flag } from "./pg-nodes.ts"
 
 type Sql = ReturnType<Connect>
 
@@ -172,7 +173,7 @@ const extensionsOf = (texts: readonly string[]): Set<string> =>
 		texts.flatMap((text) =>
 			pgRead(text).statements.flatMap(({ tree }) => {
 				const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
-				return type === "CreateExtensionStmt" && node["if_not_exists"] !== true ? [String(node["extname"])] : []
+				return type === "CreateExtensionStmt" && !flag(node["if_not_exists"]) ? [String(node["extname"])] : []
 			}),
 		),
 	)

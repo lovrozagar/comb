@@ -18,6 +18,7 @@ import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { codeOf, literal, type Sql, TAG } from "./pg-replay-database.ts"
 import { addWrites, catalogsOf, counts, type Rows, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
 import type { Snapshot, Strays } from "./pg-server-snapshot.ts"
+import { flag } from "./pg-nodes.ts"
 
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
@@ -94,7 +95,7 @@ function bareRole(
 	for (const { DefElem } of (node["options"] ?? []) as Option[]) {
 		const clause = MEMBERSHIPS[DefElem.defname]
 		if (clause === undefined) {
-			whole &&= SAID.has(DefElem.defname) && DefElem.arg?.Boolean?.boolval !== true
+			whole &&= SAID.has(DefElem.defname) && !flag(DefElem.arg?.Boolean?.boolval)
 			continue
 		}
 		/* a membership option names its roles as a list, always */

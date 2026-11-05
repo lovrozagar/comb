@@ -20,7 +20,7 @@ import {
 	SHARE_ALL,
 	truncateLocks,
 } from "./pg-lock.ts"
-import { type Facts, keyOf, names, type Node, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
+import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
 
 /** The relations the open transaction holds locked, by key, each with whether reads wait too, and the relations it made */
 type Held = { locks: Map<string, boolean>; made: Set<string> }
@@ -123,7 +123,7 @@ function dropLocks(node: Node, facts: Facts): Lock[] {
 
 /** The locks a LOCK takes by its mode, on a view's every relation through its query too */
 function lockLocks(node: Node, facts: Facts): Lock[] {
-	const mode = node["mode"] as number
+	const mode = num(node["mode"])
 	if (mode < 5) return []
 	return (node["relations"] as Array<{ RangeVar: Node }>).flatMap(({ RangeVar: relation }) => {
 		const reached = new Set<string>()
@@ -187,7 +187,7 @@ const renameLocks = (node: Node, facts: Facts): Lock[] =>
 function domainLocks(node: Node, facts: Facts): Lock[] {
 	const constraint = (node["def"] as Node | undefined)?.["Constraint"] as Node | undefined
 	const subtype = node["subtype"]
-	const scans = subtype === "O" || subtype === "V" || (subtype === "C" && constraint?.["skip_validation"] !== true)
+	const scans = subtype === "O" || subtype === "V" || (subtype === "C" && !flag(constraint?.["skip_validation"]))
 	return scans ? typedTables(keyOf(names(node["typeName"]), facts.schema), facts).map((table) => [table, false]) : []
 }
 
@@ -200,9 +200,9 @@ const STATEMENTS: Readonly<Record<string, (node: Node, facts: Facts) => Lock[]>>
 	CreateStmt: createLocks,
 	CreateTrigStmt: (node, facts) => on(node["relation"], facts, SHARE_ALL),
 	DropStmt: dropLocks,
-	IndexStmt: (node, facts) => (node["concurrent"] === true ? [] : on(node["relation"], facts, SHARE_ALL)),
+	IndexStmt: (node, facts) => (flag(node["concurrent"]) ? [] : on(node["relation"], facts, SHARE_ALL)),
 	LockStmt: lockLocks,
-	RefreshMatViewStmt: (node, facts) => on(node["relation"], facts, node["concurrent"] === true ? SHARE : EXCLUSIVE),
+	RefreshMatViewStmt: (node, facts) => on(node["relation"], facts, flag(node["concurrent"]) ? SHARE : EXCLUSIVE),
 	ReindexStmt: reindexLocks,
 	RenameStmt: renameLocks,
 	RuleStmt: (node, facts) => on(node["relation"], facts, EXCLUSIVE),

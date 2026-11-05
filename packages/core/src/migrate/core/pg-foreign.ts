@@ -9,7 +9,7 @@
  * not reached through it.
  */
 import { movedKey } from "./pg-names.ts"
-import { type Facts, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
+import { type Facts, flag, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
 
 /** A foreign key: its name, its table and columns, and the table it references with the columns there, [] for its primary key */
 type ForeignKey = { columns: string[]; name: string; references: string; table: string; to: string[] }
@@ -226,7 +226,7 @@ function copyPrimaryKey(table: string, like: Node, facts: Facts): void {
 /** A CREATE TABLE's keys, declared on its columns and on itself; one the history holds stays as it was through IF NOT EXISTS */
 function followKeyCreate(node: Node, facts: Facts): void {
 	const table = tableOf(node["relation"], facts.schema).key
-	if (node["if_not_exists"] === true && facts.tables.has(table)) return
+	if (flag(node["if_not_exists"]) && facts.tables.has(table)) return
 	dropKeys(table, { cascade: false, kind: "table" }, facts)
 	for (const element of (node["tableElts"] as Node[] | undefined) ?? []) {
 		const column = element["ColumnDef"] as Node | undefined

@@ -5,7 +5,7 @@
  * its table (pg-foreign.ts), on tables the statement does not name.
  */
 import { type Change, keyReach, partitionReach, truncated } from "./pg-foreign.ts"
-import { type Facts, type Node, tableOf } from "./pg-nodes.ts"
+import { type Facts, flag, type Node, tableOf } from "./pg-nodes.ts"
 
 /** A lock a statement takes: the relation's key, and whether reads wait too */
 type Lock = readonly [key: string, reads: boolean]
@@ -38,7 +38,7 @@ const keyLocks = (key: string, { reads, recurse }: Mode, facts: Facts): Lock[] =
 /** The lock on a RangeVar's relation, as `mode` takes it, its descendants left out when it is named ONLY; none on a temporary one */
 function on(relation: unknown, facts: Facts, mode: Mode): Lock[] {
 	const { key, temp } = tableOf(relation, facts.schema)
-	return temp ? [] : keyLocks(key, { ...mode, recurse: mode.recurse && (relation as Node)["inh"] === true }, facts)
+	return temp ? [] : keyLocks(key, { ...mode, recurse: mode.recurse && flag((relation as Node)["inh"]) }, facts)
 }
 
 /** The lock on the DEFAULT partition of a RangeVar's partitioned table, which a new bound is checked against */

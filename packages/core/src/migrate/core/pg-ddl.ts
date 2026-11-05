@@ -21,7 +21,7 @@ import { attachFindings, createFindings, maintenanceFindings } from "./pg-mainte
 import { partitionedKeyRecipe } from "./pg-partitioned.ts"
 import { retypeFindings } from "./pg-retype.ts"
 import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
-import { type Facts, names, type Node, nodesOf, tableOf, written } from "./pg-nodes.ts"
+import { type Facts, flag, names, type Node, nodesOf, num, tableOf, written } from "./pg-nodes.ts"
 
 // lookup-table: the kinds a rename or a move to another schema of loses what names them: unsafe
 const UNSAFE_RENAMES = /* @__PURE__ */ new Set([
@@ -91,7 +91,7 @@ function always(cmd: Node): Finding[] {
 					([type, node]) =>
 						type === "DefElem" &&
 						node["defname"] === "generated" &&
-						((node["arg"] as Node)["Integer"] as Node)["ival"] === "a".charCodeAt(0),
+						num(((node["arg"] as Node)["Integer"] as Node)["ival"]) === "a".charCodeAt(0),
 				)
 	if (!made) return []
 	return [
@@ -110,7 +110,7 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_AddColumn: addColumn,
 	AT_AttachPartition: (cmd, _table, { facts, key }) => {
 		const partition = (cmd["def"] as Node)["PartitionCmd"] as Node
-		const isDefault = (partition["bound"] as Node | undefined)?.["is_default"] === true
+		const isDefault = flag((partition["bound"] as Node | undefined)?.["is_default"])
 		return attachFindings(written(partition["name"]), isDefault ? "default" : facts.defaultPartitions.get(key))
 	},
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
@@ -143,7 +143,7 @@ const partitionsFirst = (table: string): string =>
 function addConstraint(cmd: Node, table: string, { facts, key }: On): Finding[] {
 	const constraint = (cmd["def"] as Node)["Constraint"] as Node
 	const partitioned = constraint["contype"] === "CONSTR_FOREIGN" && facts.partitioned.has(key)
-	if (constraint["skip_validation"] === true) {
+	if (flag(constraint["skip_validation"])) {
 		if (!partitioned) return []
 		throw new Error(
 			`Postgres refuses a NOT VALID foreign key on the partitioned table ${table}: ${partitionsFirst(table)}`,
@@ -266,7 +266,7 @@ function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Fi
 	if (node["objtype"] !== "OBJECT_TABLE" || fresh.tables.has(tableOf(node["relation"], facts.schema).key)) return []
 	const table = written(node["relation"])
 	const partitioned = facts.partitioned.has(tableOf(node["relation"], facts.schema).key)
-	if (partitioned && (node["relation"] as Node)["inh"] !== true) return []
+	if (partitioned && !flag((node["relation"] as Node)["inh"])) return []
 	return (node["cmds"] as Node[]).flatMap((each): Finding[] => {
 		const cmd = each["AlterTableCmd"] as Node
 		/* an added column's inline primary key or unique builds its index as ADD CONSTRAINT does (P6) */

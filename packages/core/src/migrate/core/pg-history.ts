@@ -22,6 +22,7 @@ import {
 	columnTypeOf,
 	emptyFacts,
 	type Facts,
+	flag,
 	keyOf,
 	names,
 	type Node,
@@ -68,7 +69,7 @@ function followPartition(table: string, cmd: Node, facts: Facts): void {
 		return
 	}
 	facts.parents.set(child, [...(facts.parents.get(child) ?? []), { parent: table, partition: true }])
-	if ((partition["bound"] as Node | undefined)?.["is_default"] === true) facts.defaultPartitions.set(table, child)
+	if (flag((partition["bound"] as Node | undefined)?.["is_default"])) facts.defaultPartitions.set(table, child)
 }
 
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
@@ -83,7 +84,7 @@ function followCreate(node: Node, facts: Facts): void {
 			table,
 			parents.map((parent) => ({ parent, partition: node["partbound"] !== undefined })),
 		)
-	if ((node["partbound"] as Node | undefined)?.["is_default"] === true)
+	if (flag((node["partbound"] as Node | undefined)?.["is_default"]))
 		facts.defaultPartitions.set(parents[0] as string, table)
 	for (const element of (node["tableElts"] as Node[] | undefined) ?? []) {
 		if (element["ColumnDef"] !== undefined) followColumn(table, element["ColumnDef"] as Node, facts)

@@ -13,6 +13,7 @@ import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { blockAfter, nodeOf } from "./pg-outside-transaction.ts"
 import { segments } from "../../sql-lexer.ts"
 import { hashedSql, normalizeSql } from "./sql-scan.ts"
+import { flag } from "./pg-nodes.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_TABLE = /* @__PURE__ */ new RegExp(
@@ -240,8 +241,8 @@ function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void {
 		const [type, node] = nodeOf(read.tree)
 		if (!blockAfter(opener !== undefined, type, node)) opener = undefined
 		/* a BEGIN in an open block only warns; a COMMIT or ROLLBACK AND CHAIN opens the next */
-		else if (opener === undefined || node["chain"] === true)
-			opener = { name: `${read.control}${node["chain"] === true ? " AND CHAIN" : ""}`, read }
+		else if (opener === undefined || flag(node["chain"]))
+			opener = { name: `${read.control}${flag(node["chain"]) ? " AND CHAIN" : ""}`, read }
 	}
 	if (opener === undefined) return
 	throw new Error(
