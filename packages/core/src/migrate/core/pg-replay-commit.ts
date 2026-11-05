@@ -112,7 +112,7 @@ const ROLE_AT: ReadonlyArray<[noun: string, at: readonly number[]]> = [
 /**
  * Which changes are the replay's own, one rule: a change whose subject is what the replay drops
  * after it, so nothing outlives the check. The database it runs in: its row, but a field
- * that keeps the cleanup from dropping it, its settings for every role, and its comment and security
+ * that keeps the cleanup from dropping it, every role's settings in it, and its comment and security
  * labels. And each of `roles`, those it made or adopts: its row, a
  * membership in it or of it, its settings in any database, and its comment and security labels
  */
@@ -120,7 +120,7 @@ function ownOf(run: Run, roles: ReadonlySet<string>): Own {
 	const database = `database ${run.database}`
 	return ({ fields, names, subject }) =>
 		(subject === database && fields.length > 0 && !fields.some((field) => UNDROPPABLE.has(field))) ||
-		subject === `setting ${run.database} for every role` ||
+		subject.startsWith(`setting ${run.database} for `) ||
 		subject === `comment on ${database}` ||
 		subject.startsWith(`security label on ${database} by `) ||
 		(ROLE_AT.find(([noun]) => subject.startsWith(noun))?.[1] ?? []).some((at) => roles.has(names[at] ?? ""))

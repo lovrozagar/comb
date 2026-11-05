@@ -29,24 +29,45 @@ describe("a change to the replay's own database is the replay's (P3; sibling: a 
 	)
 })
 
-describe("what the replay's database needs to be dropped, and another role, stay refused (P3's constraint)", () => {
+describe("what the replay's database needs to be dropped stays refused (P3's constraint)", () => {
 	const pre = unique("comb_t_pre")
 	afterEach(() => dropRoles(pre))
 
 	it.each([
 		["IS_TEMPLATE", () => "ALTER DATABASE %I IS_TEMPLATE true", "changed (datistemplate)"],
 		["OWNER TO", () => `ALTER DATABASE %I OWNER TO ${pre}`, "changed (datdba)"],
-		[
-			"ALTER ROLE … IN DATABASE of a role the replay did not make",
-			() => `ALTER ROLE ${pre} IN DATABASE %I SET work_mem = ''8MB''`,
-			`for ${pre} added`,
-		],
 	])(
 		"refuses %s on current_database(), naming it",
 		async (_, statement, said) => {
 			await query(pgUrl(), `CREATE ROLE ${pre}`)
 			const { refused } = await checked(T, onOwn(statement()))
 			expect(refused).toContain(said)
+		},
+		60_000,
+	)
+})
+
+/* AE2-8 of r22: a role's setting in a database is that database's, and dies with its DROP DATABASE */
+describe("a setting of another role in the replay's database is the replay's (AE2-8; sibling: its setting for every role)", () => {
+	const pre = unique("comb_t_dbs")
+	afterEach(() => dropRoles(pre))
+
+	it.each([
+		["in a transaction", ""],
+		["in a txmode none file whose DO commits", "-- atlas:txmode none\n\n"],
+	])(
+		"passes ALTER ROLE … IN DATABASE current_database() %s, as apply runs it, and leaves no setting",
+		async (_, head) => {
+			await query(pgUrl(), `CREATE ROLE ${pre} NOLOGIN`)
+			const commit = head === "" ? "" : "COMMIT; "
+			const set = `ALTER ROLE ${pre} IN DATABASE %I SET work_mem = ''8MB''`
+			const file = `${head}-- comb:allow-unsafe: the test's change\nDO $$ BEGIN ${commit}EXECUTE format('${set}', current_database()); END $$;\n`
+			const ran = await checkThenApply(T, file)
+			const left = await query(
+				pgUrl(),
+				`SELECT 1 FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase WHERE s.setrole = '${pre}'::regrole AND d.datname LIKE 'comb\\_replay\\_%'`,
+			)
+			expect({ left, ran }).toEqual({ left: [], ran: { apply: undefined, check: undefined } })
 		},
 		60_000,
 	)
