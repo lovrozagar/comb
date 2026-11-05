@@ -162,13 +162,21 @@ export type ConstraintMap = {
 export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;
 
 // pg/read-error.d.ts
+/**
+ * A Postgres server error read into one shape, whichever driver raised it: node-postgres,
+ * postgres.js and Bun.SQL name its fields differently. A field the server left out, or sent
+ * empty, is undefined
+ */
 type PgErrorRead = {
+    /** the SQLSTATE, five characters such as `23505` for a unique violation */
     code: string;
+    /** the column the server names, as a not-null violation does */
     column: string | undefined;
+    /** the name of the violated constraint, index or key, when the server names one */
     constraint: string | undefined;
     /** the columns in `detail`'s `Key (a, b)=(…)`, its expressions left out */
     keyColumns: string[];
-    /** the key holds an expression, an expression index's, which may spell any column (Q3 of the 0.14.1 review) */
+    /** the key holds an expression, an expression index's, which may spell any column */
     keyExpression: boolean;
     /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
     message: string | undefined;
@@ -176,8 +184,9 @@ type PgErrorRead = {
     query?: string | undefined;
     /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
     referenced: boolean;
-    /** the violated table's schema, which a pgSchema's table is keyed by in the maps (F51) */
+    /** the violated table's schema, which a pgSchema's table is keyed by in the maps */
     schema: string | undefined;
+    /** the violated table's name, without its schema */
     table: string | undefined;
 };
 /**
