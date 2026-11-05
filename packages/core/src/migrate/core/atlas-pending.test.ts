@@ -1,5 +1,5 @@
 /**
- * classifyPending (atlas-pending.ts): each pending file of a Postgres snapshot read once and
+ * readPending (atlas-pending.ts): each pending file of a Postgres snapshot read once and
  * classified against the schema the files before it leave, keyed under the target's schema, and a
  * file that cannot run refused from the file alone, before anything replays it (PA2 of r22b)
  */
@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { classifyPending } from "./atlas-pending.ts"
+import { readPending } from "./atlas-pending.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 
 beforeAll(loadPostgresParser)
@@ -25,9 +25,9 @@ function write(files: readonly string[]): void {
 
 /** The pending `names` of the snapshot classified for a target in `schema` */
 const classify = (names: readonly string[], schema = "public") =>
-	classifyPending({ target: { schema } }, copy, new Set(names))
+	readPending({ target: { schema } }, copy, new Set(names))()
 
-describe("classifyPending", () => {
+describe("readPending", () => {
 	it("classifies the pending files alone, in order, each against the schema the files before it leave", () => {
 		write([
 			"CREATE TABLE a (id int);\n",

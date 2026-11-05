@@ -1,11 +1,13 @@
 /**
  * The pending files of a Postgres apply or check, each read once from the snapshot and classified
- * against the schema the files before it leave (atlas-apply.ts), before anything replays or runs them
+ * against the schema the files before it leave (atlas-apply.ts), before anything replays or runs
+ * them, and on a check again after its replay
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { ParsedMigration } from "../migration-types.ts"
 import { sqlFiles } from "./atlas-dir.ts"
+import type { Measured } from "./pg-check-replay.ts"
 import { extractSchema, parseRead } from "./parse.ts"
 import { pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
@@ -20,21 +22,23 @@ function named<T>(name: string, read: () => T): T {
 }
 
 /**
- * Each pending file read from the snapshot, classified as Postgres against the schema the files
- * before it leave, names keyed under the target's schema; a statement no approval clears is
- * refused here, from the file alone (PA2 of r22b)
+ * Each pending file read once from the snapshot (M86), against the schema the files before it
+ * leave, names keyed under the target's schema; returns its classifier, which classifies each as
+ * Postgres and refuses a statement no approval clears, from the file alone (PA2 of r22b). A check
+ * that replays the files on devUrl classifies them again with what the replay `measured` of each,
+ * where Postgres decides what the history's text cannot show (pg-scope.ts, pg-replay-held.ts)
  */
-export function classifyPending(
+export function readPending(
 	options: { target: { schema: string } },
 	copy: string,
 	waiting: ReadonlySet<string>,
-): ParsedMigration[] {
+): (measured?: Measured) => ParsedMigration[] {
 	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
 	const readAs = { dialect: "postgres" as const, schema: options.target.schema }
 	let schema = extractSchema("", undefined, readAs)
 	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown (M75) */
 	let unread: string | undefined
-	const migrations: ParsedMigration[] = []
+	const reads: { before: typeof schema; file: Parameters<typeof parseRead>[0] }[] = []
 	for (const Name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, Name), "utf8")
 		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
@@ -45,7 +49,14 @@ export function classifyPending(
 		const { unreadable } = file.read
 		unread ??=
 			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
-		if (waiting.has(Name)) migrations.push(parseRead({ ...file, filename: Name }, { before, schema: readAs.schema }))
+		if (waiting.has(Name)) reads.push({ before, file: { ...file, filename: Name } })
 	}
-	return migrations
+	return (measured) =>
+		reads.map(({ before, file }) =>
+			parseRead(
+				file,
+				{ before, schema: readAs.schema },
+				measured === undefined ? undefined : (measured.get(file.filename) ?? { held: new Map() }),
+			),
+		)
 }

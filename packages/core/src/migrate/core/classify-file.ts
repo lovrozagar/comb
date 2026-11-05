@@ -8,7 +8,7 @@ import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasHeader, outsideTransaction } from "./atlas-header.ts"
-import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
+import { nameKey, type namingOf, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { blockAfter, nodeOf } from "./pg-outside-transaction.ts"
 import { segments } from "../../sql-lexer.ts"
@@ -180,6 +180,10 @@ function refuseUnrunnable(
 	refuseOutOfScope({ control, inside, outside, refused, stmt }, outsideTransaction(sql))
 }
 
+/** Why `stmt`, which Postgres runs only outside a transaction as `outside`, cannot run in its file's */
+const outsideRefusal = (stmt: string, outside: string): string =>
+	`${preview(stmt)}: Postgres runs ${outside} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`
+
 /**
  * Refuses a Postgres statement the transaction Atlas runs its file in, or the lack of one in a
  * txmode none file (`bare`), cannot hold
@@ -203,11 +207,7 @@ function refuseOutOfScope(
 		)
 	}
 	/* P8 of r19: from the parse tree, so DETACH CONCURRENTLY, a bare CLUSTER and a REINDEX of a schema are caught too */
-	if (outside !== undefined && !bare) {
-		throw new Error(
-			`${preview(stmt)}: Postgres runs ${outside} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`,
-		)
-	}
+	if (outside !== undefined && !bare) throw new Error(outsideRefusal(stmt, outside))
 	/* PA13 of r22b: Atlas sends a txmode none file's statements bare, so Postgres refuses these there */
 	if (inside !== undefined && bare) {
 		throw new Error(
@@ -262,8 +262,31 @@ function refuseHeader(sql: string, dialect: Dialect): void {
 	)
 }
 
+/**
+ * What check's replay on devUrl read of a file it replays (pg-replay-held.ts): what the file's
+ * transaction held, from pg_locks, before each statement it read that at, by the statement's index
+ */
+type Replayed = { held: ReadonlyMap<number, ReadonlyMap<string, boolean>> }
+
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const CREATE_TABLE = /* @__PURE__ */ new RegExp(
+	`^CREATE (?:(?:TEMP|TEMPORARY|UNLOGGED) )?TABLE (?:IF NOT EXISTS )?(${QNAME})`,
+	"i",
+)
+
+/** The tables a file's statements create, each by its key under `naming` */
+const createdOf = (codes: readonly string[], naming: ReturnType<typeof namingOf>): Set<string> =>
+	new Set(
+		codes.flatMap((code) => {
+			const table = CREATE_TABLE.exec(code)?.[1]
+			return table === undefined ? [] : [nameKey(table, naming)]
+		}),
+	)
+
 export {
+	createdOf,
 	ftsCommandFindings,
+	outsideRefusal,
 	preview,
 	PROCESS_PRAGMAS,
 	type ReadStatement,
@@ -271,4 +294,5 @@ export {
 	refuseOpenBlock,
 	refuseUnrunnable,
 	reindexedOf,
+	type Replayed,
 }

@@ -6,6 +6,7 @@ import { strayDirective } from "./atlas-header.ts"
 import { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings } from "./classify.ts"
 import { takenOptions } from "./classify-options.ts"
 import { classificationOf } from "./classify-verdict.ts"
+import type { Replayed } from "./classify-file.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
 import { hashedSql, splitSqlStatements } from "./sql-scan.ts"
@@ -104,14 +105,22 @@ function refuseStrayDirective(sql: string, filename: string): void {
 	)
 }
 
-/** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
+/**
+ * parseMigration of a file its caller has read: on Postgres its one parse (M86), with what check's
+ * replay on devUrl measured of it when it `replayed` the file
+ */
 export function parseRead(
 	file: FileRead & { filename: string },
 	{ before, kind, schema }: Omit<ClassifyOptions, "dialect">,
+	replayed?: Replayed,
 ): ParsedMigration {
 	const { dialect, filename, sql } = file
 	refuseStrayDirective(sql, filename)
-	const reads = readings(sql, { before, dialect, schema }, dialect === "postgres" ? file.read : undefined)
+	const reads = readings(
+		sql,
+		{ before, dialect, schema },
+		{ read: dialect === "postgres" ? file.read : undefined, replayed },
+	)
 	return {
 		classification: classificationOf(reads, sql, { kind }),
 		drops: dropsOf(reads),

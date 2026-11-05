@@ -154,6 +154,7 @@ export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExpor
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
+import type { Replayed } from "./classify-file.ts";
 import { type FileRead } from "./pg-split.ts";
 import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
@@ -192,10 +193,13 @@ export { classifyMigration, extractDropStatements };
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
-/** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
+/**
+ * parseMigration of a file its caller has read: on Postgres its one parse (M86), with what check's
+ * replay on devUrl measured of it when it `replayed` the file
+ */
 export declare function parseRead(file: FileRead & {
     filename: string;
-}, { before, kind, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
+}, { before, kind, schema }: Omit<ClassifyOptions, "dialect">, replayed?: Replayed): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -670,6 +674,7 @@ export type CircuitBreakerState = {
  */
 import type { ExtractedSchema, MigrationClassification } from "../migration-types.ts";
 import type { Dialect } from "../types.ts";
+import { type Replayed } from "./classify-file.ts";
 import type { TargetKind } from "./classify-target.ts";
 import { type Read } from "./classify-verdict.ts";
 import { type PgRead } from "./pg-split.ts";
@@ -686,9 +691,13 @@ type ClassifyOptions = {
 };
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
+ * Postgres `read` is the file's one parse, its caller's when it holds one (M86), and what check's
+ * replay on devUrl measured of it, when it `replayed` the file
  */
-declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, read?: PgRead | undefined) => Read[];
+declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, { read, replayed }?: {
+    read?: PgRead | undefined;
+    replayed?: Replayed | undefined;
+}) => Read[];
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
 /** The drops the readings of a file find */
@@ -953,6 +962,83 @@ export type MigrateDiffResult = {
 };
 export declare function generateIncrementalMigration(options: MigrateDiffOptions): Promise<MigrateDiffResult>;
 
+// migrate/core/classify-file.d.ts
+/**
+ * The file-level rules of the destructive-change gate: a statement Postgres runs only outside a
+ * transaction is refused unless its file runs outside one, an external-content FTS5 index the
+ * file creates again and rebuilds is known to lose nothing when it is dropped, and an FTS5 command
+ * that removes indexed rows is unsafe.
+ */
+import type { Dialect } from "../types.ts";
+import type { Finding } from "./classify-alter.ts";
+import { type namingOf } from "./sql-code.ts";
+import { type TargetKind } from "./classify-target.ts";
+/**
+ * An FTS5 command, an insert into the table's own hidden column, that removes indexed rows
+ * ('delete', 'delete-all') or whose command comb cannot read is unsafe. SQLite runs it as an
+ * insert, so the proof's engine pass sees no deletion; the command is its value.
+ */
+declare function ftsCommandFindings(stmt: string): Finding[];
+/** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
+declare function preview(stmt: string): string;
+/**
+ * The external-content FTS5 tables a file creates and then rebuilds from their content table:
+ * such a table holds only an index of rows kept elsewhere
+ */
+declare function reindexedOf(statements: readonly string[]): Set<string>;
+/** A statement as the gate read it: its code, its text, and the dialect it was read as */
+/** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
+/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
+type ReadStatement = {
+    code: string;
+    /** on Postgres, the BEGIN, COMMIT, ROLLBACK or PREPARE TRANSACTION the statement is */
+    control?: string | undefined;
+    dialect: Dialect;
+    inside?: string | undefined;
+    /** on Postgres, the line, from 1, the statement starts on in its file */
+    line?: number | undefined;
+    outside?: string | undefined;
+    /** on Postgres, why Postgres refuses the statement in any file, with comb's route */
+    refused?: string | undefined;
+    stmt: string;
+    tree?: unknown;
+};
+/**
+ * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
+ * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
+ * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
+ * running engines). A read of one is any other pragma.
+ */
+declare const PROCESS_PRAGMAS: ReadonlySet<string>;
+/**
+ * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
+ * overrides this
+ */
+declare function refuseUnrunnable({ code, control, dialect, inside, outside, refused, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
+/** Why `stmt`, which Postgres runs only outside a transaction as `outside`, cannot run in its file's */
+declare const outsideRefusal: (stmt: string, outside: string) => string;
+/**
+ * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
+ * records the file after its last statement, in that transaction, and closing the connection rolls
+ * back both, so apply would say the file ran with nothing of it kept
+ */
+declare function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void;
+/**
+ * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
+ * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
+ */
+declare function refuseHeader(sql: string, dialect: Dialect): void;
+/**
+ * What check's replay on devUrl read of a file it replays (pg-replay-held.ts): what the file's
+ * transaction held, from pg_locks, before each statement it read that at, by the statement's index
+ */
+type Replayed = {
+    held: ReadonlyMap<number, ReadonlyMap<string, boolean>>;
+};
+/** The tables a file's statements create, each by its key under `naming` */
+declare const createdOf: (codes: readonly string[], naming: ReturnType<typeof namingOf>) => Set<string>;
+export { createdOf, ftsCommandFindings, outsideRefusal, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseOpenBlock, refuseUnrunnable, reindexedOf, type Replayed, };
+
 // migrate/core/pg-split.d.ts
 import type { Dialect } from "../types.ts";
 type RawStmt = {
@@ -1210,6 +1296,25 @@ declare function splitTopLevel(code: string): string[];
 declare function topLevel(code: string): string;
 export { asciiFold, dialectOf, IDENT, lastPart, nameKey, namesIn, type Naming, namingOf, type Pragma, pragmaOf, QNAME, qualifiedKey, splitTopLevel, sqliteNames, topLevel, unquote, };
 
+// migrate/core/classify-alter.d.ts
+/** What one statement or action makes of the migration: its level, the drops it names, and why */
+type Finding = {
+    drops?: string[] | undefined;
+    level: "cautious" | "lock" | "unsafe";
+    note?: string | undefined;
+    /** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
+    pending?: true | undefined;
+};
+/** What the rules need from the file: the SQLite rebuilds it makes */
+type AlterContext = {
+    rebuilds: ReadonlyMap<string, ReadonlyArray<{
+        temp: string;
+    }>>;
+};
+/** The findings of an ALTER TABLE, action by action; one unsafe finding for an ALTER TABLE comb cannot read */
+declare function alterTableFindings(code: string, ctx: AlterContext): Finding[];
+export { alterTableFindings, type Finding };
+
 // migrate/drivers/local-db.d.ts
 /** What comb does with a private database */
 export type LocalDb = {
@@ -1241,87 +1346,3 @@ export declare function openMemory(): Promise<LocalDb>;
  * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
  */
 export declare function openScratch(engine?: ScratchEngine): Promise<ScratchDb>;
-
-// migrate/core/classify-alter.d.ts
-/** What one statement or action makes of the migration: its level, the drops it names, and why */
-type Finding = {
-    drops?: string[] | undefined;
-    level: "cautious" | "lock" | "unsafe";
-    note?: string | undefined;
-    /** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
-    pending?: true | undefined;
-};
-/** What the rules need from the file: the SQLite rebuilds it makes */
-type AlterContext = {
-    rebuilds: ReadonlyMap<string, ReadonlyArray<{
-        temp: string;
-    }>>;
-};
-/** The findings of an ALTER TABLE, action by action; one unsafe finding for an ALTER TABLE comb cannot read */
-declare function alterTableFindings(code: string, ctx: AlterContext): Finding[];
-export { alterTableFindings, type Finding };
-
-// migrate/core/classify-file.d.ts
-/**
- * The file-level rules of the destructive-change gate: a statement Postgres runs only outside a
- * transaction is refused unless its file runs outside one, an external-content FTS5 index the
- * file creates again and rebuilds is known to lose nothing when it is dropped, and an FTS5 command
- * that removes indexed rows is unsafe.
- */
-import type { Dialect } from "../types.ts";
-import type { Finding } from "./classify-alter.ts";
-import { type TargetKind } from "./classify-target.ts";
-/**
- * An FTS5 command, an insert into the table's own hidden column, that removes indexed rows
- * ('delete', 'delete-all') or whose command comb cannot read is unsafe. SQLite runs it as an
- * insert, so the proof's engine pass sees no deletion; the command is its value.
- */
-declare function ftsCommandFindings(stmt: string): Finding[];
-/** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
-declare function preview(stmt: string): string;
-/**
- * The external-content FTS5 tables a file creates and then rebuilds from their content table:
- * such a table holds only an index of rows kept elsewhere
- */
-declare function reindexedOf(statements: readonly string[]): Set<string>;
-/** A statement as the gate read it: its code, its text, and the dialect it was read as */
-/** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
-/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
-type ReadStatement = {
-    code: string;
-    /** on Postgres, the BEGIN, COMMIT, ROLLBACK or PREPARE TRANSACTION the statement is */
-    control?: string | undefined;
-    dialect: Dialect;
-    inside?: string | undefined;
-    /** on Postgres, the line, from 1, the statement starts on in its file */
-    line?: number | undefined;
-    outside?: string | undefined;
-    /** on Postgres, why Postgres refuses the statement in any file, with comb's route */
-    refused?: string | undefined;
-    stmt: string;
-    tree?: unknown;
-};
-/**
- * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
- * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
- * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
- * running engines). A read of one is any other pragma.
- */
-declare const PROCESS_PRAGMAS: ReadonlySet<string>;
-/**
- * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
- * overrides this
- */
-declare function refuseUnrunnable({ code, control, dialect, inside, outside, refused, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
-/**
- * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
- * records the file after its last statement, in that transaction, and closing the connection rolls
- * back both, so apply would say the file ran with nothing of it kept
- */
-declare function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void;
-/**
- * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
- * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
- */
-declare function refuseHeader(sql: string, dialect: Dialect): void;
-export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseOpenBlock, refuseUnrunnable, reindexedOf, };

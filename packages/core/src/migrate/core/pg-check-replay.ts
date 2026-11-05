@@ -20,6 +20,7 @@ import type { PgTarget } from "./atlas-target.ts"
 import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { type HistoryFile, onDev } from "./pg-replay.ts"
+import type { Replayed } from "./classify-file.ts"
 import { heldRoles } from "./pg-replay-roles.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
@@ -84,16 +85,20 @@ async function refuseHeldRoles(connect: Connect, target: PgTarget, pending: read
 		if (held.has(role)) throw new ReplayFailed(`role "${role}" already exists; apply would stop at ${file}`)
 }
 
+/** What check's replay read of each pending file it replayed, by the file's name (pg-replay-held.ts) */
+type Measured = ReadonlyMap<string, Replayed>
+
 /**
  * The history and the pending `files`, in order, replayed on `target`'s dev server as Atlas applies
  * them, once no `pending` file makes a role the target's server holds; throws, naming the statement
- * and dev's error, for one dev refuses
+ * and dev's error, for one dev refuses. Returns what each pending file's transaction held at each
+ * VALIDATE in it, or undefined when the replay did not run
  */
 async function replayPending(
 	{ print, target }: { print(line: string): void; target: PgTarget },
 	{ files, pending }: { files: readonly HistoryFile[]; pending: readonly string[] },
 	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
-): Promise<void> {
+): Promise<Measured | undefined> {
 	const docker = target.devUrl.startsWith("docker:")
 	let connect: Connect
 	try {
@@ -101,7 +106,7 @@ async function replayPending(
 	} catch (error) {
 		// reason: the postgres package is an optional peer; without it check rates the files alone, and says so
 		print(`${NOT_REPLAYED}: ${docker ? DOCKER(target.devUrl) : (error as Error).message}`)
-		return
+		return undefined
 	}
 	const waiting = new Set(pending)
 	await refuseHeldRoles(
@@ -111,8 +116,9 @@ async function replayPending(
 	)
 	if (docker) {
 		print(`${NOT_REPLAYED}: ${DOCKER(target.devUrl)}`)
-		return
+		return undefined
 	}
+	const measured = new Map(pending.map((name) => [name, { held: new Map<number, ReadonlyMap<string, boolean>>() }]))
 	await onDev(target, files, {
 		adopted: (file, role) =>
 			print(
@@ -121,6 +127,7 @@ async function replayPending(
 		after: async () => undefined,
 		print,
 		doing: "check replayed the history and the pending files there",
+		held: { at: (file, statement, locks) => measured.get(file)?.held.set(statement, locks), schema: target.schema },
 		leftOut: (file, sent, what) =>
 			print(
 				`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${what} reaches past the database the replay runs in, so apply alone runs it`,
@@ -136,6 +143,7 @@ async function replayPending(
 			),
 		stops: STOPS,
 	})
+	return measured
 }
 
 /** The snapshot `copy`'s files through the last of `pending`, in order, as check replays them */
@@ -146,4 +154,4 @@ function throughPending(copy: string, pending: readonly string[]): HistoryFile[]
 		.map((name) => ({ name, sql: readFileSync(join(copy, name), "utf8") }))
 }
 
-export { replayPending, throughPending }
+export { type Measured, replayPending, throughPending }

@@ -18,13 +18,18 @@ const partitionedIn =
 		return facts.partitioned.has(index ? (facts.indexes.get(key)?.table ?? "") : key)
 	}
 
-/** A reader of a file's statements in order, the file outside a transaction when `bare` */
+/**
+ * A reader of a file's statements in order, the file outside a transaction when `bare`; one check
+ * `replays` on devUrl leaves to Postgres what a partitioned table or index refuses in a transaction
+ * block, as the history's text cannot show what a DO block partitions (pg-replay-statement.ts)
+ */
 function scopeReader(
 	bare: boolean,
 	{ facts, held }: { facts: Facts; held: Held },
+	replays = false,
 ): (tree: unknown) => Pick<ReadStatement, "control" | "inside" | "outside" | "refused"> {
 	let block = false
-	const partitioned = partitionedIn(facts)
+	const partitioned = replays ? () => false : partitionedIn(facts)
 	return (tree) => {
 		if (bare && !block) clearHeld(held)
 		const parsed = nodeOf(tree)

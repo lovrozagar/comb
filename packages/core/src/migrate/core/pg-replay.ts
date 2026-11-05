@@ -60,6 +60,7 @@ import { devRoleOf, type Run } from "./pg-replay-roles.ts"
 import { type Refuse, type Replay, type Replaying, runStatement } from "./pg-replay-statement.ts"
 import { leaveOutTablespace } from "./pg-replay-tablespaces.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
+import { lockReader, validates } from "./pg-replay-held.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
 import { pgRead } from "./pg-split.ts"
@@ -75,7 +76,9 @@ const REPLAYS = "replay the history on devUrl, and read what it leaves, in a bas
  * `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it
  * up, and then each statement in a transaction of its own first (guarded), bare where Postgres runs
  * it only so; the file's own BEGIN, COMMIT and SAVEPOINT, a LOCK and a cursor not held, and all its
- * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses
+ * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses.
+ * When the replay is `held` to, what a transaction of the file holds is read before each VALIDATE
+ * in it (pg-replay-held.ts), from the relations there when the transaction began
  */
 async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replaying) {
 	const inFile = !outsideTransaction(text)
@@ -85,21 +88,34 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 		names: namesIn(text),
 		stops: replay.stops,
 	}
+	const statements = pgRead(text).statements.map(({ sent, tree }) => ({
+		sent,
+		...(tree === undefined ? { node: {}, type: "" } : (([type, node]) => ({ node, type }))(nodeOf(tree))),
+	}))
+	const locks = lockReader(
+		run.sql,
+		name,
+		statements.some(({ node, type }) => validates(type, node)) ? replay.held : undefined,
+	)
 	let block = false
-	if (inFile) await begin(run)
-	for (const { sent, tree } of pgRead(text).statements) {
-		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
+	if (inFile) {
+		await begin(run)
+		await locks.began()
+	}
+	for (const [index, { node, sent, type }] of statements.entries()) {
 		const beyond = (await runsOnMade(run, type, node)) ? undefined : beyondDatabase(type, node)
 		if (beyond !== undefined) {
 			leaveOutTablespace(run.tablespaces, type, node)
 			replay.leftOut(name, sent, beyond)
 			continue
 		}
+		await locks.next(index, type, node)
 		const send = () => runStatement(run, { name, node, sent, type }, replay)
 		if (inFile) await send()
 		else if (block || type === "TransactionStmt" || insideOnly(type, node) !== undefined) {
 			await send()
 			block = blockAfter(block, type, node)
+			if (type === "TransactionStmt") await locks.moved(node, block)
 			await window(run, { ...file, sent })
 		} else await guarded(run, { ...file, sent }, send)
 	}

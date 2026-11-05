@@ -39,6 +39,12 @@ function clearHeld(held: Held): void {
 	held.made.clear()
 }
 
+/** `held` as Postgres held it, `locks` read from pg_locks, in place of what the file's text says */
+function measured(held: Held, locks: ReadonlyMap<string, boolean>): void {
+	held.locks.clear()
+	for (const [key, reads] of locks) held.locks.set(key, reads)
+}
+
 /** `held` with `locks` taken, each but those on what the file made */
 function hold(held: Held, locks: readonly Lock[]): void {
 	for (const [key, reads] of locks) if (!held.made.has(key)) held.locks.set(key, reads || held.locks.get(key) === true)
@@ -272,4 +278,4 @@ function holdStatement(type: string, node: Node, { facts, held }: { facts: Facts
 	else if (type === "RenameStmt" && node["renameType"] === "OBJECT_SCHEMA") carrySchema(node, { facts, held })
 }
 
-export { alterLocks, clearHeld, type Held, heldStart, hold, holdStatement, type Lock }
+export { alterLocks, clearHeld, type Held, heldStart, hold, holdStatement, type Lock, measured }

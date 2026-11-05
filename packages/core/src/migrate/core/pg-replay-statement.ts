@@ -3,6 +3,8 @@
  * pg-replay-made.ts runs it, one in a tablespace the replay left out in pg_default
  * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
  */
+import { outsideRefusal } from "./classify-file.ts"
+import { outsideOnly } from "./pg-outside-transaction.ts"
 import { codeOf, type Sql } from "./pg-replay-database.ts"
 import { runRole } from "./pg-replay-made.ts"
 import type { Run } from "./pg-replay-roles.ts"
@@ -21,6 +23,8 @@ type Replay = {
 	movedTo?: ((file: string, sent: string, names: readonly string[]) => void) | undefined
 	/** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
 	adopted?: ((file: string, role: string) => void) | undefined
+	/** what `file`'s transaction held before its `statement`th statement, a VALIDATE, read from pg_locks (pg-replay-held.ts) */
+	held?: { at(file: string, statement: number, locks: ReadonlyMap<string, boolean>): void; schema: string } | undefined
 	/** what a refusal stops */
 	stops: string
 }
@@ -53,6 +57,16 @@ const noCreaterole = (role: string) =>
 const cannotCreateRole = (run: Run, type: string, error: unknown) =>
 	type === "CreateRoleStmt" && codeOf(error) === "42501" && !run.superuser && !run.createrole
 
+/**
+ * What a REINDEX or CLUSTER is, as comb's refusal names it, when Postgres refused it in the file's
+ * transaction (25001), which it does of a partitioned table or index alone: the history's text
+ * cannot show what a DO block partitions, so a check's rating leaves it to the replay (pg-scope.ts)
+ */
+const partitionedOutside = ({ node, type }: Sent, error: unknown): string | undefined =>
+	codeOf(error) === "25001" && (type === "ReindexStmt" || type === "ClusterStmt")
+		? outsideOnly(type, node, () => true)
+		: undefined
+
 /** `statement` run on the replay's connection, a statement on roles as the replay runs it (pg-replay-made.ts) */
 async function runStatement(run: Run, statement: Sent, replay: Replaying): Promise<void> {
 	const { name, sent, type } = statement
@@ -65,6 +79,9 @@ async function runStatement(run: Run, statement: Sent, replay: Replaying): Promi
 			throw new ReplayFailed(`${name} ${noCreaterole(String(statement.node["role"]))}; ${replay.stops}`, {
 				cause: error,
 			})
+		/* comb's words, which name the route, as a rating of the file refuses it; Postgres's error the cause */
+		const outside = partitionedOutside(statement, error)
+		if (outside !== undefined) throw new ReplayFailed(outsideRefusal(sent, outside), { cause: error })
 		throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
 	}
 	/* an extension devUrl's database holds that requires the one just made follows it, as on the target */

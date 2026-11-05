@@ -17,7 +17,7 @@
 import type { ExtractedSchema, MigrationClassification } from "../migration-types.ts"
 import type { Dialect } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { ftsCommandFindings, refuseHeader, reindexedOf } from "./classify-file.ts"
+import { createdOf, ftsCommandFindings, refuseHeader, reindexedOf, type Replayed } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
 import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
@@ -29,7 +29,7 @@ import { type Facts, historyFacts } from "./pg-history.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { partitionedRecipe } from "./pg-partitioned.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
-import { type Held, heldStart } from "./pg-held.ts"
+import { type Held, heldStart, measured } from "./pg-held.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
 import { outsideTransaction } from "./atlas-header.ts"
@@ -95,11 +95,6 @@ const EXPLAIN = /^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const INDEX_ON = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:UNIQUE )?INDEX (?!CONCURRENTLY)(?:IF NOT EXISTS )?(?:${QNAME} )?ON (ONLY )?(${QNAME})`,
-	"i",
-)
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const CREATE_TABLE = /* @__PURE__ */ new RegExp(
-	`^CREATE (?:(?:TEMP|TEMPORARY|UNLOGGED) )?TABLE (?:IF NOT EXISTS )?(${QNAME})`,
 	"i",
 )
 
@@ -199,11 +194,14 @@ function statementReadings(
 	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, ...read.grammar }), ...read.findings]
 }
 
-/** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */
+/**
+ * The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema`; on a
+ * check that `replayed` it on devUrl, with what Postgres held at each statement it measured
+ */
 function readFile(
 	sql: string,
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
-	read: PgRead | undefined,
+	{ read, replayed }: { read: PgRead | undefined; replayed: Replayed | undefined },
 ): Read[] {
 	refuseHeader(sql, dialect)
 	const naming = namingOf(dialect, schema)
@@ -211,12 +209,7 @@ function readFile(
 	/* on Postgres, each as Atlas sends it, its chunk's lead left off: a lead never reaches a rating (N1) */
 	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ sent }) => sent)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
-	const created = new Set(
-		codes.flatMap((code) => {
-			const table = CREATE_TABLE.exec(code)?.[1]
-			return table === undefined ? [] : [nameKey(table, naming)]
-		}),
-	)
+	const created = createdOf(codes, naming)
 	const guards = dialect === "sqlite" ? readGuards(statements, codes, before) : noGuards()
 	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes, guards.guarded) : new Map()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
@@ -242,10 +235,12 @@ function readFile(
 		renumbered: guards.renumbered,
 		unguarded: guards.unguarded,
 	}
-	const scoped = scopeReader(outsideTransaction(sql), ctx)
+	const scoped = scopeReader(outsideTransaction(sql), ctx, replayed !== undefined)
 	return statements.map((stmt, i) => {
 		const tree = read?.statements[i]?.tree
 		const scope = tree === undefined ? {} : scoped(tree)
+		const held = replayed?.held.get(i)
+		if (held !== undefined) measured(ctx.held, held)
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
@@ -263,13 +258,19 @@ function readFile(
 
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
+ * Postgres `read` is the file's one parse, its caller's when it holds one (M86), and what check's
+ * replay on devUrl measured of it, when it `replayed` the file
  */
 const readings = (
 	sql: string,
 	{ before, dialect, schema }: ClassifyOptions,
-	read: PgRead | undefined = dialect === "postgres" ? pgRead(sql) : undefined,
-): Read[] => readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" }, read)
+	{ read, replayed }: { read?: PgRead | undefined; replayed?: Replayed | undefined } = {},
+): Read[] =>
+	readFile(
+		sql,
+		{ before, dialect: dialect ?? "sqlite", schema: schema ?? "public" },
+		{ read: dialect === "postgres" ? (read ?? pgRead(sql)) : undefined, replayed },
+	)
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {

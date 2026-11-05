@@ -37,6 +37,7 @@ const SRC = join(import.meta.dirname, "../../src")
  */
 const ROWS: ReadonlySet<string> = new Set([
 	"migrate/core/pg-replay-database.ts start", // pg_stat_activity's backend_start
+	"migrate/core/pg-replay-held.ts oid", // pg_class's and pg_locks's relation oid
 	"migrate/core/pg-server-snapshot.ts row", // the snapshot query's row of each object
 	"migrate/core/pg-server-writes.ts row", // the snapshot query's row of each object
 	"migrate/core/proof-seed.ts unique", // SQLite's PRAGMA index_list

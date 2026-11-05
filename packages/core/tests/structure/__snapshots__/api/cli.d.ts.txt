@@ -447,11 +447,6 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
 export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, type Sql, STALE_MS, TAG, };
 
 // migrate/core/pg-replay-statement.d.ts
-/**
- * One statement of a history file as the dev replay runs it (pg-replay.ts): a statement on roles as
- * pg-replay-made.ts runs it, one in a tablespace the replay left out in pg_default
- * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
- */
 import { type Sql } from "./pg-replay-database.ts";
 import type { Run } from "./pg-replay-roles.ts";
 import { ReplayFailed } from "./replay-failed.ts";
@@ -467,6 +462,11 @@ type Replay = {
     movedTo?: ((file: string, sent: string, names: readonly string[]) => void) | undefined;
     /** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
     adopted?: ((file: string, role: string) => void) | undefined;
+    /** what `file`'s transaction held before its `statement`th statement, a VALIDATE, read from pg_locks (pg-replay-held.ts) */
+    held?: {
+        at(file: string, statement: number, locks: ReadonlyMap<string, boolean>): void;
+        schema: string;
+    } | undefined;
     /** what a refusal stops */
     stops: string;
 };

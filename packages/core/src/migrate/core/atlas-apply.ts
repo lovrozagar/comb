@@ -38,7 +38,7 @@ import { loadPostgresParser } from "./pg-parser.ts"
 import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { sweepDev } from "./pg-replay-drops.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
-import { classifyPending } from "./atlas-pending.ts"
+import { readPending } from "./atlas-pending.ts"
 import type { ReadHeld } from "./pg-schema-members.ts"
 
 /** What Postgres's adoption reads beside Atlas: the catalog, the replay, the dev schema and whether the schema holds anything, comb's own unless a test says otherwise */
@@ -99,19 +99,26 @@ async function adopt(options: AtlasCommand & Reads, copy: string, ran: readonly 
 const after = (copy: string, ran: readonly string[]): AtlasFile[] => filesOf(copy).slice(ran.length)
 
 /**
- * Each pending file classified (classifyPending); on a check, then replayed on dev with the history
- * before it (pg-check-replay.ts); then each approved, its lock warnings shown
+ * Each pending file read and classified (readPending); on a check, then replayed on dev with the history
+ * before it (pg-check-replay.ts) and classified again with what the replay read, or as apply
+ * classifies it when the replay did not run; then each approved, its lock warnings shown
  */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
 	/* Postgres statements are read from Postgres's parser, loaded once */
 	await loadPostgresParser()
 	const waiting = new Set(pending.map((file) => file.Name))
-	/* what the file alone refuses goes before the replay, which never runs it (PA2 of r22b) */
-	const migrations = classifyPending(options, copy, waiting)
+	const check = options.checkOnly === true
+	/* what the file alone refuses goes before the replay, which never runs it (PA2 of r22b); what the history decides waits for it */
+	const classify = readPending(options, copy, waiting)
+	let migrations = classify(check ? new Map() : undefined)
 	/* a check lets Postgres decide what no database runs, before any file is approved (P13 of r19) */
-	if (options.checkOnly === true) {
+	if (check) {
 		const names = pending.map((file) => file.Name)
-		await (options.replayPending ?? replayPending)(options, { files: throughPending(copy, names), pending: names })
+		const measured = await (options.replayPending ?? replayPending)(options, {
+			files: throughPending(copy, names),
+			pending: names,
+		})
+		migrations = classify(measured)
 	}
 	for (const migration of migrations) {
 		const Name = migration.filename
