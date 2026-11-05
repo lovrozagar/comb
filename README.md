@@ -787,7 +787,7 @@ const rows = validateFilter("tags.contains.red,due.gte.2024-02-29", {
 
 ### Sorting
 
-`parseOrder()` accepts `field.asc`, `field.desc`, and null placement (`field.desc.nullslast`), producing `SortField[]`, or `null` when an entry is empty, names no field (`asc`, `.desc`, a trailing comma) or has whitespace around it (`title.asc, created_at.desc`), or a field is named twice, as `parseFilter()` refuses a filter; the list query schema answers such an entry, or a field named twice, with an issue on `order` naming it, as the published `order` pattern refuses it. Computed sorts use the same `@` prefix and are resolved through a `ComputedSortResolver`.
+`parseOrder()` accepts `field.asc`, `field.desc`, and null placement (`field.desc.nullslast`), producing `SortField[]`, or `null` when an entry is empty, names no field (`asc`, `.desc`, a trailing comma) or has whitespace around it (`title.asc, created_at.desc`), or a field is named twice, as `parseFilter()` refuses a filter; the list query schema answers each with an issue on `order` naming it. The published `order` pattern refuses those entries too, but not a field named twice (`title.asc,title.desc`), which only the schema refuses. Computed sorts use the same `@` prefix and are resolved through a `ComputedSortResolver`.
 
 Null placement follows PostgreSQL: nulls sort last ascending and first descending, and an explicit `.nullsfirst` / `.nullslast` always wins. Every SQL builder emits the placement explicitly, so SQLite's opposite default never leaks through. `createListQuerySchema` caps one `order` at 3 keys (`limits.maxSortKeys`).
 
