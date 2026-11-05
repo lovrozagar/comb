@@ -208,9 +208,10 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 		expect(await column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_bad.sql"])
 	}, 180_000)
 
-	/* miniflare's local D1 takes one writer: of two applies that overlap, the one that loses fails on
-	   SQLITE_BUSY or on the table the other made, as wrangler reads what is pending before it writes;
-	   two that do not overlap both apply, and both can lose, workerd failing to start on the lock */
+	/* miniflare's local D1 takes one writer: of two applies that overlap, comb's own commands wait out
+	   the other's lock, and the one that loses fails in wrangler's apply, on SQLITE_BUSY or on the table
+	   the other made, as wrangler reads what is pending before it writes; two that do not overlap both
+	   apply, and both can lose, workerd failing to start on the lock */
 	it("of two applies at once, each applies or fails as a refused run, and a rerun converges with no intent left", async () => {
 		const dir = project(INIT)
 		const both = await Promise.all([0, 1].map(() => combProcess(dir, ["migrate", "apply", "core", "--local"])))

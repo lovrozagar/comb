@@ -1,5 +1,6 @@
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { deliver, stubKill } from "../../../tests/support/signals.ts"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
 import type { D1ProviderConfig, ResolvedDatabaseConfig } from "../types.ts"
 import { createD1Provider, executeAll } from "./d1.ts"
@@ -227,5 +228,105 @@ describe("createD1Provider: SQL it hands wrangler (S-13)", () => {
 			const conn = await connect(fakeRun(() => ({ code: 0, stderr: "", stdout })))
 			await expect(conn.execute("SELECT 1")).rejects.toThrow(/wrangler/)
 		}
+	})
+})
+
+/* wrangler's answer when another process holds the local D1 file's write lock, workerd's own words, stack cut */
+const BUSY: RunResult = {
+	code: 1,
+	stderr:
+		"workerd/util/sqlite.c++:1733: failed: SQLite failed; dbErrorMessage(err, db) = database is locked: SQLITE_BUSY stack: 7f0a 7f0b",
+	stdout: '{ "error": { "text": "Failed to parse body as JSON, got: Error: internal error; reference = x1" } }',
+}
+/* the same, as wrangler prints it without --json: colored, on stderr */
+const BUSY_COLORED: RunResult = {
+	code: 1,
+	stderr:
+		"\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mdatabase is locked: SQLITE_BUSY\u001b[0m\n",
+	stdout: "",
+}
+const LOCAL: D1ProviderConfig = { ...CONFIG, local: true }
+const LOCKED =
+	"wrangler failed (exit 1): the local D1 database stayed locked by another process (wrangler dev, a wrangler command or a second comb migrate) for 5 s: let it finish and rerun"
+
+/** A runner answering each call with the next of `answers`, the last one ever after */
+const answering = (...answers: RunResult[]) => {
+	let i = 0
+	return fakeRun(() => answers[Math.min(i++, answers.length - 1)] as RunResult)
+}
+
+/** A promise's value where its rejection was awaited: a failure itself */
+const unexpected = (value: unknown): Error => new Error(`resolved where a rejection was due: ${JSON.stringify(value)}`)
+
+/** The timers and clock the lock waits run on, faked for each test of the describe that calls it */
+function fakeClock(): void {
+	beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }))
+	afterEach(() => vi.useRealTimers())
+}
+
+/* a --local request takes the file's write lock even to read, and fails at once while another process holds it */
+describe("createD1Provider: a local database another process has locked", () => {
+	fakeClock()
+
+	it("runs a busy request again once the lock is let go, and answers its rows", async () => {
+		const run = answering(BUSY, BUSY, json([{ results: [{ n: 1 }] }]))
+		const rows = (await connect(run, LOCAL)).execute("SELECT 1 AS n")
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(await rows).toEqual({ columns: ["n"], rows: [[1]] })
+		expect(run.calls.map(({ args }) => args)).toEqual(Array(3).fill(run.calls[0]?.args))
+	})
+
+	it("reruns only the busy one of a batch's commands", async () => {
+		const run = answering(json([]), BUSY_COLORED, json([]))
+		const long = Array.from({ length: 3 }, (_, i) => ({
+			sql: `INSERT INTO t VALUES ('${String(i).repeat(50 * 1024)}')`,
+		}))
+		const done = (await connect(run, LOCAL)).batch(long)
+		await vi.advanceTimersByTimeAsync(1000)
+		await done
+		const values = run.calls.map(({ args }) => args.at(-1)?.slice("--command=INSERT INTO t VALUES ('".length).at(0))
+		expect(values).toEqual(["0", "1", "1", "2"])
+	})
+
+	it("refuses, naming the lock and no workerd stack, once it has stayed busy for 5 s", async () => {
+		const run = answering(BUSY)
+		const failed = (await connect(run, LOCAL)).execute("SELECT 1").then(unexpected, (error: unknown) => error as Error)
+		await vi.advanceTimersByTimeAsync(5000)
+		expect((await failed).message).toBe(LOCKED)
+		const ran = run.calls.length
+		await vi.advanceTimersByTimeAsync(5000)
+		expect([ran > 2, run.calls.length]).toEqual([true, ran])
+	})
+})
+
+describe("createD1Provider: a lock comb does not wait out", () => {
+	const kill = stubKill()
+	fakeClock()
+
+	it("runs once a failure that says locked in another sense, or a remote one", async () => {
+		const other: RunResult = {
+			code: 1,
+			stderr: "database is locked: SQLITE_BUSY_RECOVERY; table t is locked: SQLITE_LOCKED",
+			stdout: "",
+		}
+		const locked = answering(other, json([]))
+		await expect((await connect(locked, LOCAL)).execute("x")).rejects.toThrow(
+			"wrangler failed (exit 1): database is locked: SQLITE_BUSY_RECOVERY",
+		)
+		const remote = answering(BUSY, json([]))
+		await expect((await connect(remote)).execute("x")).rejects.toThrow(/^wrangler failed \(exit 1\): workerd/)
+		expect([locked.calls.length, remote.calls.length]).toEqual([1, 1])
+	})
+
+	it("starts no wrangler again once a signal stops comb while it waits", async () => {
+		const run = answering(BUSY, json([]))
+		const failed = (await connect(run, LOCAL)).execute("x").then(unexpected, (error: unknown) => error as Error)
+		await vi.advanceTimersByTimeAsync(0)
+		await deliver("SIGTERM")
+		expect((await failed).message).toBe(
+			"wrangler failed (exit 1): comb stopped (SIGTERM) while the local D1 database was locked by another process",
+		)
+		await vi.advanceTimersByTimeAsync(5000)
+		expect([run.calls.length, kill.calls()]).toEqual([1, [[process.pid, "SIGTERM"]]])
 	})
 })

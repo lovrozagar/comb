@@ -3,6 +3,7 @@
  * since D1 has no HTTP API for external access.
  */
 import * as z from "zod"
+import { hold } from "../core/cleanup.ts"
 import { projectBin } from "../core/optional-peer.ts"
 import { WRANGLER } from "../core/peer-needs.ts"
 import { type ProjectBin, type Run, run, runPeer } from "../core/process.ts"
@@ -38,12 +39,51 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 /** wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22) */
 type Wrangler = { exec: Run; wrangler: ProjectBin }
 
+/* how long a --local command waits out another process's lock on the local D1 file: BUSY_TIMEOUT's window for a SQLite file (SL4 of r22) */
+const LOCAL_LOCK_MS = 5000
+
+/* workerd's error for a local D1 file another process holds the write lock on, which wrangler prints colored
+   without --json: SQLITE_BUSY exactly, never "locked" in another sense */
+const LOCAL_BUSY = /database is locked: SQLITE_BUSY(?!\w)/
+
+const LOCKER = "another process (wrangler dev, a wrangler command or a second comb migrate)"
+
+/** Whether `ms` ran out (true), or a signal stopped comb first (its name), after which nothing new starts */
+function waitOut(ms: number): Promise<true | NodeJS.Signals> {
+	return new Promise((resolve) => {
+		const release = hold(async (signal) => {
+			clearTimeout(timer)
+			resolve(signal)
+		})
+		const timer = setTimeout(() => {
+			release()
+			resolve(true)
+		}, ms)
+	})
+}
+
+/**
+ * `args` run by wrangler, its stdout once it exits 0. A --local command another process's lock on the file
+ * made fail runs again, after a backoff, until LOCAL_LOCK_MS have passed: wrangler sends each --command as
+ * one request, and miniflare runs each request in one transaction (transactionSync), so the request a held
+ * lock failed made no change, and running it again runs it once. Even a read takes the write lock there, and
+ * a command cannot set busy_timeout (SQLITE_AUTH), so the wait is comb's. A remote command runs once.
+ */
 async function runWrangler({ exec, wrangler }: Wrangler, args: string[]): Promise<string> {
-	const { code, stderr, stdout } = await runPeer(exec, wrangler)(args)
-	if (code !== 0) {
-		throw new Error(`wrangler failed (exit ${code}): ${stderr.trim() || stdout.trim()}`)
+	const deadline = Date.now() + LOCAL_LOCK_MS
+	for (let delay = 100; ; delay *= 2) {
+		const { code, stderr, stdout } = await runPeer(exec, wrangler)(args)
+		if (code === 0) return stdout
+		const failed = `wrangler failed (exit ${code})`
+		if (!args.includes("--local") || !LOCAL_BUSY.test(`${stderr}\n${stdout}`))
+			throw new Error(`${failed}: ${stderr.trim() || stdout.trim()}`)
+		const left = deadline - Date.now()
+		if (left <= 0)
+			throw new Error(`${failed}: the local D1 database stayed locked by ${LOCKER} for 5 s: let it finish and rerun`)
+		const waited = await waitOut(Math.min(delay, left))
+		if (waited !== true)
+			throw new Error(`${failed}: comb stopped (${waited}) while the local D1 database was locked by another process`)
 	}
-	return stdout
 }
 
 /**
