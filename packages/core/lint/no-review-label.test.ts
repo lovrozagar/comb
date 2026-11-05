@@ -39,6 +39,12 @@ describe("comb/no-review-label", () => {
 		])
 	})
 
+	it("rejects a review label in a tagged template that has no cooked value, by its raw text", () => {
+		/* an invalid escape leaves a tagged template's cooked value null, and String.raw emits the raw text */
+		const fixture = { "packages/core/src/a.ts": "export const a = String.raw`\\u (KC2 of r22b)`\n" }
+		expect(reportsOf(rule, fixture)).toEqual([{ file: "packages/core/src/a.ts", message: STRING("KC2 of r22b") }])
+	})
+
 	it("leaves real names, doc sections, tests, fixtures and files outside src alone", () => {
 		const fixture = {
 			"packages/core/src/a.ts":
