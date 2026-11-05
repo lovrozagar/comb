@@ -30,8 +30,11 @@ type D1SessionLike = {
 
 /** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
 type D1DatabaseLike = {
+	/** runs `statements` in order as one transaction, which a failing statement rolls back whole; one answer per statement, in order */
 	batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>
+	/** prepares `query`, its values written as `?` placeholders, to bind and batch */
 	prepare(query: string): D1StatementLike
+	/** opens a session on a bookmark, or on `"first-primary"` or `"first-unconstrained"`; absent on a runtime without sessions */
 	withSession?: ((constraintOrBookmark?: string) => D1SessionLike) | undefined
 }
 
