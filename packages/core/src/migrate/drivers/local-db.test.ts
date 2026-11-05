@@ -4,6 +4,8 @@ import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { SCOPED_PRAGMAS } from "../__fixtures__/pragma-scope.ts"
 import { openedWhileStopping } from "../../../tests/support/signals.ts"
+/* bound as the file loads, so its cleanup.ts is the one signals.ts holds on, whatever a later vi.resetModules() makes */
+import * as local from "./local-db.ts"
 
 vi.mock("./bun-sqlite.ts", () => ({ bunLocal: vi.fn(async () => () => ({ bun: true })) }))
 
@@ -17,8 +19,9 @@ afterEach(() => {
 /* r22b: a scratch or database opened past a stop would outlive the cleanup that ends the run */
 describe("openMemory and openScratch while a signal's stop runs", () => {
 	it.each(["memory", "runtime", "libsql"] as const)("open nothing on %s until it is past", async (kind) => {
-		const { openMemory, openScratch } = await import("./local-db.ts")
-		const { early, value } = await openedWhileStopping(() => (kind === "memory" ? openMemory() : openScratch(kind)))
+		const { early, value } = await openedWhileStopping(() =>
+			kind === "memory" ? local.openMemory() : local.openScratch(kind),
+		)
 		value.close()
 		expect(early).toBe(false)
 	})
