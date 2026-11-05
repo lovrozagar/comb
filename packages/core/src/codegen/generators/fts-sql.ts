@@ -7,8 +7,11 @@
  */
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 
+/** One table's SQLite FTS5 index */
 type FtsTableConfig = {
+	/** the columns indexed, each by property name or SQL name; an unknown column throws, a repeated one warns */
 	columns: string[]
+	/** the FTS5 tokenizer; `unicode61 remove_diacritics 2 categories 'L* N* Co M*'`, which keeps combining marks inside a word, when omitted */
 	tokenizer?: string | undefined
 }
 

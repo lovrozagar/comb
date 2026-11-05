@@ -2,11 +2,14 @@
 import type { AnalysisResult } from "../analyzer-types.ts"
 import type { ImportStyle } from "../utils/paths.ts"
 
+/** What a generator is handed: the analyzed tables, where it writes, and how */
 export type GeneratorContext = {
+	/** the tables file as `analyze` read it */
 	analysis: AnalysisResult
 	/** the directory relative output paths resolve against */
 	cwd: string
-	/** how the consumer's TypeScript takes a relative import, its extension or none (F53); "bare" when unset */
+	// F53
+	/** how generated files write a relative import, as the consumer's compiler takes it; `bare`, with no extension, when unset */
 	importStyle?: ImportStyle | undefined
 	/** the database's engine: what a column type holds, and which drizzle core a file imports from */
 	dialect: "postgres" | "sqlite"

@@ -19,10 +19,11 @@ export type { ValidationResult } from "./utils/validate.ts";
  */
 import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
 /**
- * Load and analyze a tables file. Loading runs the module, which must be import-safe, in `cwd`:
- * the working directory the app runs in, the process's own by default (F58)
+ * Load and analyze a tables file. Loading runs the module in a child process, so it must be safe to
+ * import: no top-level connection, server or side effect
  */
-declare function analyze(tablesPath: string, { cwd }?: {
+declare function analyze(tablesPath: string, { cwd, }?: {
+    /** the working directory the module runs in, the one the app runs in; the current process's when omitted */
     cwd?: string | undefined;
 }): Promise<AnalysisResult>;
 export { analyze };
@@ -38,13 +39,19 @@ import type { generateOrm } from "./generators/orm.ts";
 export type { FtsTableConfig };
 /** Every generator, in the order codegen runs them */
 export declare const GENERATORS: readonly ["constraints", "rows", "relations", "diagrams", "columns", "dtos", "entities", "manifest", "field-names", "orm", "enum-checks", "translations", "fts"];
+/** A generator a database's `generators` and `output` name */
 export type GeneratorName = (typeof GENERATORS)[number];
+/** What the orm generator takes: the dialect and driver its client factories are written for */
 export type OrmConfig = Parameters<typeof generateOrm>[1];
+/** One database's codegen: its tables file and what is generated from it */
 export type DatabaseCodegen = {
+    /** the database's dialect; the tables' own when omitted, else `sqlite`. One the tables contradict throws */
     dialect?: OrmConfig["dialect"] | undefined;
+    /** the driver the orm client is written for; the orm generator writes nothing without it */
     driver?: OrmConfig["driver"] | undefined;
     /** The stem of every generated file name; `db.<name>` when omitted */
     filePrefix?: string | undefined;
+    /** SQLite full-text search: each table, by its export name, to its index; the fts generator writes nothing without it */
     fts?: Record<string, FtsTableConfig> | undefined;
     /** The generators to run; all when omitted */
     generators?: readonly GeneratorName[] | undefined;
@@ -55,13 +62,15 @@ export type DatabaseCodegen = {
     /**
      * Postgres only: each partitioned table, keyed as its constraint map keys it, to its partitions'
      * names, which live in its schema. Postgres reports a violation on the partition, and the map
-     * reads it as the parent's; a table it does not know names no column (Q7 of r18)
+     * reads it as the parent's; a violation on a partition not listed names no column
      */
     partitions?: Record<string, readonly string[]> | undefined;
     /** The tables file, relative to comb.config.ts */
     tables: string;
 };
+/** What comb.config.ts exports */
 export type CodegenConfig = {
+    /** each database, by the name `comb codegen` and `comb migrate diff` select it by and its generated files take (`db.<name>`) */
     databases: Record<string, DatabaseCodegen>;
 };
 /** `config`, typed: the identity a comb.config.ts exports through */
@@ -75,33 +84,50 @@ import type { CombColumnKind } from "../meta/column.ts";
  */
 /** Constraint annotations parsed from field type arguments */
 type FieldConstraintsMeta = {
+    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a column a default or hook fills */
     autogenerate: boolean;
+    /** the generated DTOs take only an email address */
     email: boolean;
     /** an https URL or a data:image/ URI */
     imageUri: boolean;
+    /** the generated DTOs lowercase the text before they check it */
     lowercase: boolean;
+    /** the largest value the generated DTOs take: a text column's length in characters, a timestamp's epoch milliseconds, any other column's value; null when unbounded */
     max: number | null;
+    /** the most bytes a c.json value may take once stringified; null when unbounded */
     maxBytes: number | null;
+    /** the smallest value the generated DTOs take, measured as `max` is; null when unbounded */
     min: number | null;
     /** a name: letters, marks, numbers, spaces and punctuation */
     name: boolean;
-    /** a reference that moves on update; every other reference is set once (F25) */
+    /** a foreign key the generated update DTO takes, so a row can move to another parent; every other reference is set once, at creation */
     mutable: boolean;
+    /** set at creation and never changed: the generated update DTO leaves it out */
     nomutate: boolean;
+    /** a stored password hash: kept as written and held only to its bounds and pattern */
     password: boolean;
+    /** the regex the generated DTOs hold the text to, as a `/source/flags` literal with the `u` flag; null when none */
     pattern: string | null;
+    /** never read back: the generated read DTOs and the meta stamp leave it out and the manifest flags it `private: true`; also set for a field whose name starts with `_` */
     private: boolean;
-    /** the name a key's relation takes, where its role would collide (F57); null or absent for its role */
+    /** the name the generated relation of this foreign key takes, where the column's role would collide with another; null or absent for the role's own name */
     relation?: string | null | undefined;
+    /** the column that scopes the table's rows to a tenant, set once at creation; declared, never inferred, and at most one per table */
     tenant: boolean;
+    /** the generated DTOs trim surrounding whitespace before they check the text */
     trim: boolean;
+    /** the generated DTOs uppercase the text before they check it */
     uppercase: boolean;
+    /** the generated DTOs take only a URL */
     url: boolean;
 };
 /** State machine declared on an enum column */
 type StateMachineMeta = {
+    /** the state a new row starts in; null when the declaration names none */
     initial: string | null;
+    /** the states a row never leaves; null when the declaration names none */
     terminal: string[] | null;
+    /** each state, to the states a row may move to from it; null when the declaration names none */
     transitions: Record<string, string[]> | null;
 };
 /** A name a generated file must import, with the module the tables file gets it from. */
@@ -117,16 +143,23 @@ type ImportRef = {
 };
 /** Foreign key reference from this field to another table */
 type ForeignKeyRef = {
+    /** the referencing column's property name in its table */
     column: string;
+    /** the action the database takes on this row when the referenced row is deleted, as drizzle declares it (`cascade`, `set null`); absent for the database's default */
     onDelete?: string | undefined;
+    /** the action the database takes on this row when the referenced key changes, as drizzle declares it; absent for the database's default */
     onUpdate?: string | undefined;
+    /** the referenced column's property name in its table */
     refColumn: string;
+    /** the referenced table's export name in the tables file */
     refTable: string;
-    /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
+    /** whether the referenced column is a c.id key, so the reference takes the same id format and prefix */
     toId?: boolean | undefined;
-    /** a composite key's columns, each paired by position with the referenced one (F46) */
+    /** a composite foreign key's columns; absent for a single-column key */
     key?: {
+        /** the referencing property names, in key order */
         columns: string[];
+        /** the referenced property names, each paired by position with `columns` */
         refColumns: string[];
     } | undefined;
 };
@@ -138,6 +171,7 @@ type FieldMeta = {
     columnType: string;
     /** the `c` helper that built the column; null for a plain drizzle column */
     combKind: CombColumnKind | null;
+    /** the constraints the `c` helper declared, with comb's defaults applied; every flag off for a plain drizzle column */
     constraints: FieldConstraintsMeta;
     /** drizzle's data type: `string`, `number int53`, `object json` */
     dataType: string;
@@ -157,7 +191,7 @@ type FieldMeta = {
     identity: boolean;
     /** a column of the table's composite primary key */
     inCompositeKey: boolean;
-    /** NOT NULL */
+    /** the column is NOT NULL: a write must give it a value or leave it to a default */
     isNotNull: boolean;
     /** the table's single-column primary key */
     isPrimaryKey: boolean;
@@ -165,11 +199,11 @@ type FieldMeta = {
     jsonSchemaName: string | null;
     /** the names the field's generated schema uses and must import (a c.json schema) */
     schemaImports: ImportRef[];
-    /** a Postgres array's declared dimensions; 0 or absent for a column of one value (F49) */
+    /** a Postgres array's declared dimensions; 0 or absent for a column of one value */
     dimensions?: number | undefined;
-    /** whether a Postgres array's element takes null, as its drizzle type declares; false or absent otherwise (A2-9 of r22) */
+    /** whether a Postgres array's elements may be null, as its drizzle type declares; false or absent otherwise */
     nullElements?: boolean | undefined;
-    /** the column's own length, drizzle's `length` (a varchar(n), a SQLite text({ length })); a declared max is the constraints' (F65) */
+    /** the length the column itself declares (a varchar(n), a SQLite text({ length })); null when none. A `c` helper's declared max is in `constraints` */
     length: number | null;
     /** Field name as defined in the table schema object */
     name: string;
@@ -186,10 +220,12 @@ type FieldMeta = {
 };
 /** Unique index from table options (3rd arg arrow function) */
 type UniqueIndexMeta = {
+    /** the indexed columns' property names, in index order */
     columns: string[];
+    /** the index's name, which a violation of it reports */
     name: string;
 };
-/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches (C7) */
+/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches */
 type PartialUniqueIndexMeta = UniqueIndexMeta & {
     /** the predicate, as the index's SQL holds it */
     where: string;
@@ -198,25 +234,34 @@ type PartialUniqueIndexMeta = UniqueIndexMeta & {
 type ExpressionIndexMeta = {
     /** its keys as SQL */
     expression: string;
+    /** the index's name, which a violation of it reports */
     name: string;
 };
 /** Check constraint from table options */
 type CheckConstraintMeta = {
+    /** the condition every row must meet, as SQL */
     expression: string;
+    /** the constraint's name, which a violation of it reports */
     name: string;
 };
 /** Timestamp tracking for a table */
 type TimestampsMeta = {
+    /** the creation time is comb's c.createdAt(), read back and NOT NULL, so the generated schemas use comb's shared timestamp fields for it */
     createdAt: boolean;
+    /** the soft-delete time is comb's c.deletedAt(), read back and nullable, so the generated schemas use comb's shared timestamp fields for it */
     deletedAt: boolean;
-    /** each timestamp column's property name as the table declares it; null when it has none */
+    /** the property name of each epoch-millisecond column named createdAt, updatedAt or deletedAt in either casing; null when the table has none */
     names: {
+        /** the creation time's property name, `createdAt` or `created_at`; null when none */
         createdAt: string | null;
+        /** the soft-delete time's property name, `deletedAt` or `deleted_at`; null when none */
         deletedAt: string | null;
+        /** the update time's property name, `updatedAt` or `updated_at`; null when none */
         updatedAt: string | null;
     };
     /** the casing every timestamp shares; mixed when they differ, which no shared spread fits */
     style: "camelCase" | "mixed" | "snake_case";
+    /** the update time is comb's c.updatedAt(), read back and NOT NULL, so the generated schemas use comb's shared timestamp fields for it */
     updatedAt: boolean;
 };
 /** Complete metadata for a single table */
@@ -237,7 +282,7 @@ type TableMeta = {
     sqlName: string;
     /** Detected timestamp fields and style */
     timestamps: TimestampsMeta;
-    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, published apart from uniqueness (C7) */
+    /** Partial (`.where()`) unique indexes on plain columns: the constraint map names their violations, and they are listed apart from the table's unique indexes */
     partialUniqueIndexes: PartialUniqueIndexMeta[];
     /** Unique indexes from table options */
     uniqueIndexes: UniqueIndexMeta[];
@@ -261,7 +306,9 @@ type AnalysisResult = {
     dbName: string;
     /** The engine the tables are built for, by the drizzle builder each one's file imports; null when none says */
     dialect: "postgres" | "sqlite" | null;
+    /** the names the tables file imports, which generated files import from the same modules */
     imports: ImportsMeta;
+    /** every table the tables file exports, in export order */
     tables: TableMeta[];
     /** Relative import path for the tables file */
     tablesImportPath: string;
@@ -301,12 +348,21 @@ export type ConstraintKeys = {
     readonly updatedAt: Keys;
 };
 export declare const CONSTRAINT_KEYS: ConstraintKeys;
+/**
+ * A column's declared constraints, checked and with comb's defaults applied. Throws on a key the
+ * helper does not take, a value of the wrong type, two keys that contradict, or bounds no value
+ * meets, each message prefixed with `place`
+ */
 export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, helper, measure, place, }: {
+    /** the column's property name; one starting with `_` is private */
     fieldName: string;
+    /** whether a default or hook fills the column, which turns `autogenerate` on unless it is declared false */
     filled: boolean;
     /** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
     helper: CombColumnKind | null;
+    /** what `min` and `max` bound: a text's length, or the value itself */
     measure: "length" | "value";
+    /** where the column is declared, as each error message names it */
     place: string;
 }): FieldConstraints;
 export {};
@@ -353,8 +409,11 @@ export { deriveEntityMeta, isExcludedFromUpdate, publishedPartialUniqueIndexes, 
 
 // codegen/utils/validate.d.ts
 import type { AnalysisResult } from "../analyzer-types.ts";
+/** What a check of the tables found before generating */
 export type ValidationResult = {
+    /** problems that would generate broken code; `comb codegen` stops on any of them */
     errors: string[];
+    /** suspicious patterns that still generate; `comb codegen` prints each as `warn:` and goes on */
     warnings: string[];
 };
 /**
@@ -405,8 +464,11 @@ export { combColumnMeta, enumMeta, withCombColumn, type CombColumnKind, type Com
  * - migrate diff (appends to migration files)
  */
 import type { TableMeta } from "../analyzer-types.ts";
+/** One table's SQLite FTS5 index */
 type FtsTableConfig = {
+    /** the columns indexed, each by property name or SQL name; an unknown column throws, a repeated one warns */
     columns: string[];
+    /** the FTS5 tokenizer; `unicode61 remove_diacritics 2 categories 'L* N* Co M*'`, which keeps combining marks inside a word, when omitted */
     tokenizer?: string | undefined;
 };
 declare const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'";
@@ -428,14 +490,23 @@ export type { FtsTableConfig };
 
 // codegen/generators/orm.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** The database engine an orm client is written for */
 export type OrmDialect = "sqlite" | "postgres";
+/** A SQLite driver the orm client connects through; any other throws */
 export type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
+/** The Postgres driver the orm client connects through: Neon's serverless driver; any other throws */
 export type PostgresDriver = "neon";
+/** Where and for what the orm generator writes a database's client factories, named `create<Database>…` */
 export type OrmConfig = {
+    /** the engine the client is written for */
     dialect: OrmDialect;
+    /** the driver the client connects through, one of the dialect's own */
     driver: SqliteDriver | PostgresDriver;
+    /** the stem of the relations file's name when `relationsOutput` is omitted; `db.<name>` when this is omitted too */
     filePrefix?: string | undefined;
+    /** the client file written, relative to the codegen working directory */
     output: string;
+    /** the relations file the client imports, relative to the codegen working directory; `<filePrefix>.relations.gen.ts` beside the client when omitted */
     relationsOutput?: string | undefined;
 };
 /** Generate ORM client file based on config */
@@ -478,11 +549,13 @@ export type { ReadOptions } from "./meta/read.ts";
 /** What every generator works from: the analysis, where it runs, and where its progress lines go. */
 import type { AnalysisResult } from "../analyzer-types.ts";
 import type { ImportStyle } from "../utils/paths.ts";
+/** What a generator is handed: the analyzed tables, where it writes, and how */
 export type GeneratorContext = {
+    /** the tables file as `analyze` read it */
     analysis: AnalysisResult;
     /** the directory relative output paths resolve against */
     cwd: string;
-    /** how the consumer's TypeScript takes a relative import, its extension or none (F53); "bare" when unset */
+    /** how generated files write a relative import, as the consumer's compiler takes it; `bare`, with no extension, when unset */
     importStyle?: ImportStyle | undefined;
     /** the database's engine: what a column type holds, and which drizzle core a file imports from */
     dialect: "postgres" | "sqlite";
@@ -672,10 +745,10 @@ export { isRecord, type ReadOptions, readCombEntityMeta, readCombMeta, readCombQ
  */
 export declare function extractDbName(filePath: string): string;
 /**
- * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
- * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
- * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
- * resolutions without one, as comb always wrote it
+ * How generated files write a relative import of a TypeScript file, as the consumer's compiler
+ * takes it: `js` under `node16` and `nodenext`, `.js` for `.ts`; `ts` there under
+ * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`; `bare`, with no extension,
+ * under `bundler` and the older resolutions
  */
 export type ImportStyle = "bare" | "js" | "ts";
 /** The style the consumer's compiler options take */

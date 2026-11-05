@@ -177,6 +177,11 @@ function refuseMalformed(
 	refuseEmptyBounds(constraints, { measure, place })
 }
 
+/**
+ * A column's declared constraints, checked and with comb's defaults applied. Throws on a key the
+ * helper does not take, a value of the wrong type, two keys that contradict, or bounds no value
+ * meets, each message prefixed with `place`
+ */
 export function fieldConstraintsOf(
 	constraints: Readonly<Record<string, ConstantValue>>,
 	{
@@ -186,11 +191,15 @@ export function fieldConstraintsOf(
 		measure,
 		place,
 	}: {
+		/** the column's property name; one starting with `_` is private */
 		fieldName: string
+		/** whether a default or hook fills the column, which turns `autogenerate` on unless it is declared false */
 		filled: boolean
 		/** the c helper that built the column, whose constraint type names the keys it takes; null for a drizzle column, which takes none */
 		helper: CombColumnKind | null
+		/** what `min` and `max` bound: a text's length, or the value itself */
 		measure: "length" | "value"
+		/** where the column is declared, as each error message names it */
 		place: string
 	},
 ): FieldConstraints {

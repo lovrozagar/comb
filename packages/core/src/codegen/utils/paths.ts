@@ -22,11 +22,12 @@ export function extractDbName(filePath: string): string {
 	return "db"
 }
 
+// F53
 /**
- * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
- * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
- * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
- * resolutions without one, as comb always wrote it
+ * How generated files write a relative import of a TypeScript file, as the consumer's compiler
+ * takes it: `js` under `node16` and `nodenext`, `.js` for `.ts`; `ts` there under
+ * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`; `bare`, with no extension,
+ * under `bundler` and the older resolutions
  */
 export type ImportStyle = "bare" | "js" | "ts"
 

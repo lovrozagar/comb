@@ -9,15 +9,24 @@ import { importPathFrom } from "../utils/paths.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { dbIdentifiers } from "../utils/case.ts"
 
+/** The database engine an orm client is written for */
 export type OrmDialect = "sqlite" | "postgres"
+/** A SQLite driver the orm client connects through; any other throws */
 export type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso"
+/** The Postgres driver the orm client connects through: Neon's serverless driver; any other throws */
 export type PostgresDriver = "neon"
 
+/** Where and for what the orm generator writes a database's client factories, named `create<Database>…` */
 export type OrmConfig = {
+	/** the engine the client is written for */
 	dialect: OrmDialect
+	/** the driver the client connects through, one of the dialect's own */
 	driver: SqliteDriver | PostgresDriver
+	/** the stem of the relations file's name when `relationsOutput` is omitted; `db.<name>` when this is omitted too */
 	filePrefix?: string | undefined
+	/** the client file written, relative to the codegen working directory */
 	output: string
+	/** the relations file the client imports, relative to the codegen working directory; `<filePrefix>.relations.gen.ts` beside the client when omitted */
 	relationsOutput?: string | undefined
 }
 

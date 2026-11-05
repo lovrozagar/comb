@@ -9,8 +9,11 @@ import type { AnalysisResult, FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { snakeToPascal, subpathName } from "./case.ts"
 import { qualifiedName } from "./table-name.ts"
 
+/** What a check of the tables found before generating */
 export type ValidationResult = {
+	/** problems that would generate broken code; `comb codegen` stops on any of them */
 	errors: string[]
+	/** suspicious patterns that still generate; `comb codegen` prints each as `warn:` and goes on */
 	warnings: string[]
 }
 

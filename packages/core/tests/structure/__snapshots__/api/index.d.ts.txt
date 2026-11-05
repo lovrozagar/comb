@@ -545,33 +545,50 @@ import type { CombColumnKind } from "../meta/column.ts";
  */
 /** Constraint annotations parsed from field type arguments */
 type FieldConstraintsMeta = {
+    /** comb or the database fills the column, so the generated create and update DTOs leave it out; on by default for a column a default or hook fills */
     autogenerate: boolean;
+    /** the generated DTOs take only an email address */
     email: boolean;
     /** an https URL or a data:image/ URI */
     imageUri: boolean;
+    /** the generated DTOs lowercase the text before they check it */
     lowercase: boolean;
+    /** the largest value the generated DTOs take: a text column's length in characters, a timestamp's epoch milliseconds, any other column's value; null when unbounded */
     max: number | null;
+    /** the most bytes a c.json value may take once stringified; null when unbounded */
     maxBytes: number | null;
+    /** the smallest value the generated DTOs take, measured as `max` is; null when unbounded */
     min: number | null;
     /** a name: letters, marks, numbers, spaces and punctuation */
     name: boolean;
-    /** a reference that moves on update; every other reference is set once (F25) */
+    /** a foreign key the generated update DTO takes, so a row can move to another parent; every other reference is set once, at creation */
     mutable: boolean;
+    /** set at creation and never changed: the generated update DTO leaves it out */
     nomutate: boolean;
+    /** a stored password hash: kept as written and held only to its bounds and pattern */
     password: boolean;
+    /** the regex the generated DTOs hold the text to, as a `/source/flags` literal with the `u` flag; null when none */
     pattern: string | null;
+    /** never read back: the generated read DTOs and the meta stamp leave it out and the manifest flags it `private: true`; also set for a field whose name starts with `_` */
     private: boolean;
-    /** the name a key's relation takes, where its role would collide (F57); null or absent for its role */
+    /** the name the generated relation of this foreign key takes, where the column's role would collide with another; null or absent for the role's own name */
     relation?: string | null | undefined;
+    /** the column that scopes the table's rows to a tenant, set once at creation; declared, never inferred, and at most one per table */
     tenant: boolean;
+    /** the generated DTOs trim surrounding whitespace before they check the text */
     trim: boolean;
+    /** the generated DTOs uppercase the text before they check it */
     uppercase: boolean;
+    /** the generated DTOs take only a URL */
     url: boolean;
 };
 /** State machine declared on an enum column */
 type StateMachineMeta = {
+    /** the state a new row starts in; null when the declaration names none */
     initial: string | null;
+    /** the states a row never leaves; null when the declaration names none */
     terminal: string[] | null;
+    /** each state, to the states a row may move to from it; null when the declaration names none */
     transitions: Record<string, string[]> | null;
 };
 /** A name a generated file must import, with the module the tables file gets it from. */
@@ -587,16 +604,23 @@ type ImportRef = {
 };
 /** Foreign key reference from this field to another table */
 type ForeignKeyRef = {
+    /** the referencing column's property name in its table */
     column: string;
+    /** the action the database takes on this row when the referenced row is deleted, as drizzle declares it (`cascade`, `set null`); absent for the database's default */
     onDelete?: string | undefined;
+    /** the action the database takes on this row when the referenced key changes, as drizzle declares it; absent for the database's default */
     onUpdate?: string | undefined;
+    /** the referenced column's property name in its table */
     refColumn: string;
+    /** the referenced table's export name in the tables file */
     refTable: string;
-    /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
+    /** whether the referenced column is a c.id key, so the reference takes the same id format and prefix */
     toId?: boolean | undefined;
-    /** a composite key's columns, each paired by position with the referenced one (F46) */
+    /** a composite foreign key's columns; absent for a single-column key */
     key?: {
+        /** the referencing property names, in key order */
         columns: string[];
+        /** the referenced property names, each paired by position with `columns` */
         refColumns: string[];
     } | undefined;
 };
@@ -608,6 +632,7 @@ type FieldMeta = {
     columnType: string;
     /** the `c` helper that built the column; null for a plain drizzle column */
     combKind: CombColumnKind | null;
+    /** the constraints the `c` helper declared, with comb's defaults applied; every flag off for a plain drizzle column */
     constraints: FieldConstraintsMeta;
     /** drizzle's data type: `string`, `number int53`, `object json` */
     dataType: string;
@@ -627,7 +652,7 @@ type FieldMeta = {
     identity: boolean;
     /** a column of the table's composite primary key */
     inCompositeKey: boolean;
-    /** NOT NULL */
+    /** the column is NOT NULL: a write must give it a value or leave it to a default */
     isNotNull: boolean;
     /** the table's single-column primary key */
     isPrimaryKey: boolean;
@@ -635,11 +660,11 @@ type FieldMeta = {
     jsonSchemaName: string | null;
     /** the names the field's generated schema uses and must import (a c.json schema) */
     schemaImports: ImportRef[];
-    /** a Postgres array's declared dimensions; 0 or absent for a column of one value (F49) */
+    /** a Postgres array's declared dimensions; 0 or absent for a column of one value */
     dimensions?: number | undefined;
-    /** whether a Postgres array's element takes null, as its drizzle type declares; false or absent otherwise (A2-9 of r22) */
+    /** whether a Postgres array's elements may be null, as its drizzle type declares; false or absent otherwise */
     nullElements?: boolean | undefined;
-    /** the column's own length, drizzle's `length` (a varchar(n), a SQLite text({ length })); a declared max is the constraints' (F65) */
+    /** the length the column itself declares (a varchar(n), a SQLite text({ length })); null when none. A `c` helper's declared max is in `constraints` */
     length: number | null;
     /** Field name as defined in the table schema object */
     name: string;
@@ -656,10 +681,12 @@ type FieldMeta = {
 };
 /** Unique index from table options (3rd arg arrow function) */
 type UniqueIndexMeta = {
+    /** the indexed columns' property names, in index order */
     columns: string[];
+    /** the index's name, which a violation of it reports */
     name: string;
 };
-/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches (C7) */
+/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches */
 type PartialUniqueIndexMeta = UniqueIndexMeta & {
     /** the predicate, as the index's SQL holds it */
     where: string;
@@ -668,25 +695,34 @@ type PartialUniqueIndexMeta = UniqueIndexMeta & {
 type ExpressionIndexMeta = {
     /** its keys as SQL */
     expression: string;
+    /** the index's name, which a violation of it reports */
     name: string;
 };
 /** Check constraint from table options */
 type CheckConstraintMeta = {
+    /** the condition every row must meet, as SQL */
     expression: string;
+    /** the constraint's name, which a violation of it reports */
     name: string;
 };
 /** Timestamp tracking for a table */
 type TimestampsMeta = {
+    /** the creation time is comb's c.createdAt(), read back and NOT NULL, so the generated schemas use comb's shared timestamp fields for it */
     createdAt: boolean;
+    /** the soft-delete time is comb's c.deletedAt(), read back and nullable, so the generated schemas use comb's shared timestamp fields for it */
     deletedAt: boolean;
-    /** each timestamp column's property name as the table declares it; null when it has none */
+    /** the property name of each epoch-millisecond column named createdAt, updatedAt or deletedAt in either casing; null when the table has none */
     names: {
+        /** the creation time's property name, `createdAt` or `created_at`; null when none */
         createdAt: string | null;
+        /** the soft-delete time's property name, `deletedAt` or `deleted_at`; null when none */
         deletedAt: string | null;
+        /** the update time's property name, `updatedAt` or `updated_at`; null when none */
         updatedAt: string | null;
     };
     /** the casing every timestamp shares; mixed when they differ, which no shared spread fits */
     style: "camelCase" | "mixed" | "snake_case";
+    /** the update time is comb's c.updatedAt(), read back and NOT NULL, so the generated schemas use comb's shared timestamp fields for it */
     updatedAt: boolean;
 };
 /** Complete metadata for a single table */
@@ -707,7 +743,7 @@ type TableMeta = {
     sqlName: string;
     /** Detected timestamp fields and style */
     timestamps: TimestampsMeta;
-    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, published apart from uniqueness (C7) */
+    /** Partial (`.where()`) unique indexes on plain columns: the constraint map names their violations, and they are listed apart from the table's unique indexes */
     partialUniqueIndexes: PartialUniqueIndexMeta[];
     /** Unique indexes from table options */
     uniqueIndexes: UniqueIndexMeta[];
@@ -731,7 +767,9 @@ type AnalysisResult = {
     dbName: string;
     /** The engine the tables are built for, by the drizzle builder each one's file imports; null when none says */
     dialect: "postgres" | "sqlite" | null;
+    /** the names the tables file imports, which generated files import from the same modules */
     imports: ImportsMeta;
+    /** every table the tables file exports, in export order */
     tables: TableMeta[];
     /** Relative import path for the tables file */
     tablesImportPath: string;
