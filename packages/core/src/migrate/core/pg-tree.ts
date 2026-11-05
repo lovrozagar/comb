@@ -31,7 +31,7 @@ import { type Held, holdStatement } from "./pg-held.ts"
 import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
-import { dynamicOf, executedNodes, executeFindings } from "./pg-execute.ts"
+import { dynamicOf, executedNodes, executeFindings, firedBy } from "./pg-execute.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 import { staysPut } from "./pg-storage.ts"
 import { flag } from "./pg-nodes.ts"
@@ -256,18 +256,21 @@ function pgTreeFindings(
 	}
 	const raws = tree.stmts as Array<{ stmt: Node }>
 	const nodes = executedNodes(raws, ctx.preparing)
+	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
+	/* a DDL statement's event trigger runs before an EXECUTE under it looks its name up */
+	const dynamic = ctx.dynamic ?? firedBy(tops)
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
-		if (type === "ExecuteStmt") return refusingAs(stmt, () => executeFindings(node, ctx))
+		if (type === "ExecuteStmt")
+			return refusingAs(stmt, () => executeFindings(node, { dynamic, preparing: ctx.preparing }))
 		return [
 			...(refusingAs(stmt, () => ddlFindings(type, node, ctx.facts)) ?? []),
 			...(type === "AlterTableStmt" ? [...constraintIndexWarnings(node, ctx), ...heldScans(node, ctx)] : []),
 			codeFinding(type, node, ctx),
 		].filter((finding) => finding !== undefined)
 	})
-	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
+	ctx.dynamic ??= dynamicOf(tops, nodes)
 	/* the locks the statement takes last to its transaction's COMMIT, read before the history follows it */
-	ctx.dynamic ??= dynamicOf(nodes)
 	for (const [type, node] of tops) {
 		holdStatement(type, node, ctx)
 		if (type === "PrepareStmt") ctx.preparing.set(String(node["name"]), node["query"] as Node)

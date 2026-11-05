@@ -133,3 +133,35 @@ describe("a COPY or an EXECUTE, as the pinned Atlas runs it on Postgres 17 (PA15
 		expect(comb([file])).toBe("unsafe")
 	}, 60_000)
 })
+
+describe("an EXECUTE that user code before it may prepare, as comb applies it on Postgres 17 (AE2-9 of r22)", () => {
+	/*
+	 * AE2-9 of r22, as ruled: a refusal is as sound as a rating, so comb refuses no file Postgres runs.
+	 * A trigger an INSERT fires, or an event trigger a DDL statement fires, may PREPARE the name an
+	 * EXECUTE after it runs; under a CREATE TABLE AS, ddl_command_start fires before its EXECUTE's lookup
+	 */
+	it.each([
+		[
+			"a trigger an INSERT fires",
+			`CREATE FUNCTION tp() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN EXECUTE 'PREPARE p AS DELETE FROM t'; RETURN NULL; END$$;\nCREATE TRIGGER tp BEFORE INSERT ON t FOR EACH STATEMENT EXECUTE FUNCTION tp();\n`,
+			"INSERT INTO t VALUES (1);\nEXECUTE p;\n",
+		],
+		[
+			"an event trigger a CREATE TABLE fires",
+			`CREATE FUNCTION ep() RETURNS event_trigger LANGUAGE plpgsql AS $$BEGIN EXECUTE 'PREPARE p AS DELETE FROM t'; END$$;\nCREATE EVENT TRIGGER ep ON ddl_command_start WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION ep();\n`,
+			"CREATE TABLE y (id int);\nEXECUTE p;\n",
+		],
+		[
+			"an event trigger the CREATE TABLE AS around it fires",
+			`CREATE FUNCTION ep() RETURNS event_trigger LANGUAGE plpgsql AS $$BEGIN EXECUTE 'PREPARE p AS SELECT 1 AS id'; END$$;\nCREATE EVENT TRIGGER ep ON ddl_command_start WHEN TAG IN ('CREATE TABLE AS') EXECUTE FUNCTION ep();\n`,
+			"CREATE TABLE x AS EXECUTE p;\n",
+		],
+	])(
+		"has an EXECUTE that %s may prepare apply as comb applies it, which comb rates unsafe",
+		async (_, history, file) => {
+			expect(await atlasPerFile([history, file])).toBe("applies")
+			expect(comb([history, file])).toBe("unsafe")
+		},
+		60_000,
+	)
+})

@@ -54,12 +54,11 @@ const unprepared = (name: string) =>
 	`no statement before it in its file prepares ${name}, and comb applies each file in a session of its own, so an earlier file's PREPARE never reaches it: Postgres fails the file with "prepared statement "${name}" does not exist"; PREPARE it in this file`
 
 /* AE2-9 of r22: comb's apply runs one Atlas call per file (atlas-apply-runs.ts), so an EXECUTE runs
-   only what its own file prepared, or what its DO blocks, CALLs and function calls before it did */
+   only what its own file prepared, or what user code before it did: a refusal is as sound as a rating */
 describe("an EXECUTE of a statement its file does not prepare (AE2-9 of r22)", () => {
 	it.each([
 		["EXECUTE nothere;", "EXECUTE nothere", "nothere"],
 		["EXECUTE nothere(1);", "EXECUTE nothere(1)", "nothere"],
-		["CREATE TABLE x AS EXECUTE nothere;", "CREATE TABLE x AS EXECUTE nothere", "nothere"],
 		["EXPLAIN ANALYZE EXECUTE nothere;", "EXPLAIN ANALYZE EXECUTE nothere", "nothere"],
 		['EXECUTE "P";', 'EXECUTE "P"', "P"],
 		["PREPARE q AS SELECT 1;\nEXECUTE p;", "EXECUTE p", "p"],
@@ -69,6 +68,8 @@ describe("an EXECUTE of a statement its file does not prepare (AE2-9 of r22)", (
 		["EXECUTE p;\nSELECT f();", "EXECUTE p", "p"],
 		/* a prepared query runs only when an EXECUTE runs it */
 		["PREPARE q AS SELECT f();\nEXECUTE p;", "EXECUTE p", "p"],
+		/* a DEALLOCATE, a transaction statement, a SET and a SHOW run no user code */
+		["DEALLOCATE q;\nBEGIN;\nSET search_path = public;\nSHOW search_path;\nEXECUTE p;", "EXECUTE p", "p"],
 	])("refuses %j at check, past any approval", (sql, statement, name) => {
 		expect(() => rate(sql)).toThrow(`${statement}: ${unprepared(name)}`)
 		expect(() => rate(`-- comb:allow-unsafe: prepared elsewhere\n${sql}`)).toThrow(unprepared(name))
@@ -79,8 +80,15 @@ describe("an EXECUTE of a statement its file does not prepare (AE2-9 of r22)", (
 		["CALL make_p();\nEXECUTE p;", "a CALL of make_p"],
 		["SELECT public.make_p();\nEXECUTE p;", "a call of public.make_p()"],
 		["PREPARE q AS SELECT make_p();\nEXECUTE q;\nEXECUTE p;", "a call of make_p()"],
-	])("rates %j, whose own dynamic SQL may prepare it, unsafe and names that SQL", (sql, dynamic) => {
-		expect(rate(sql).unsafeStatements).toContain(
+		["PREPARE q AS INSERT INTO t VALUES (1);\nEXECUTE q;\nEXECUTE p;", "an EXECUTE of q"],
+		["INSERT INTO t VALUES (1);\nEXECUTE p;", "user code an INSERT runs"],
+		["SELECT 1;\nEXECUTE p;", "user code a SELECT runs"],
+		["CREATE TABLE y (id int);\nEXECUTE p;", "an event trigger a CREATE TABLE fires"],
+		["GRANT SELECT ON t TO PUBLIC;\nEXECUTE p;", "an event trigger a GRANT fires"],
+		/* ddl_command_start fires before the CREATE TABLE AS runs its EXECUTE */
+		["CREATE TABLE x AS EXECUTE p;", "an event trigger a CREATE TABLE AS fires"],
+	])("rates %j, whose user code may prepare it, unsafe and names that code", (sql, dynamic) => {
+		expect(rate(sql).unsafeStatements.map((line) => line.replace(/^CREATE TABLE x AS /, ""))).toContain(
 			`EXECUTE p (runs a prepared statement comb cannot read, which ${dynamic} before it may prepare; approve it in the file)`,
 		)
 	})
