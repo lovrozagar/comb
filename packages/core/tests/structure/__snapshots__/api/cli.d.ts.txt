@@ -75,13 +75,13 @@ export declare class ShowHelp extends Error {
  * consumer without Node's types reads them too: process.stdin and process.stderr, or any stream like them
  */
 export type Terminal = {
-    /** Where the answer is read, one line in cooked mode, as a terminal sends it */
+    /** Where the answers are read, a line each, in the terminal's cooked mode: it echoes and edits the line */
     input: {
         /** True when `input` is a terminal; any other value leaves `CliIo.confirm` absent, so nothing is asked */
         isTTY?: boolean | undefined;
         /** Takes each chunk of the answer, bytes or, once an encoding is set, a string */
         on(event: "data", listener: (chunk: string | Uint8Array) => void): unknown;
-        /** Called when the input ends; what it sent before is the answer */
+        /** Called when the input ends; this question and every one after it answer no */
         on(event: "end", listener: () => void): unknown;
         /** Called when reading fails; the question rejects with `error` */
         on(event: "error", listener: (error: Error) => void): unknown;
@@ -102,6 +102,16 @@ export type Terminal = {
         write(chunk: string): unknown;
     };
 };
+/** What `lineReader` reads: the next whole line, or `undefined` once the input ended, a line it left unended dropped */
+type NextLine = () => Promise<string | undefined>;
+/**
+ * The lines `input` sends, one for each call, with the bytes past a line kept for the next: a
+ * paste of two answers answers two questions. A line ends at `\n`, `\r\n` or a lone `\r`, as
+ * readline ends one, a `\r\n` split across chunks too. Between calls the input is paused with none
+ * of the listeners on it. Once it ends, every call resolves `undefined` at once; once it fails,
+ * every call rejects with its error.
+ */
+export declare function lineReader(input: Terminal["input"]): NextLine;
 /**
  * The IO the comb binary runs with: the process's working directory, stdout for output, stderr for
  * diagnostics, and yes/no questions when `input` is a terminal. Questions are written to `output`,
@@ -110,6 +120,7 @@ export type Terminal = {
 export declare function processIo({ input, output, }?: {
     [K in keyof Terminal]?: Terminal[K] | undefined;
 }): CliIo;
+export {};
 
 // cli/run.d.ts
 import { type CliDeps, type CliIo } from "./output.ts";

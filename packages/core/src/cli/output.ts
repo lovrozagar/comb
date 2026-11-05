@@ -84,13 +84,13 @@ export class ShowHelp extends Error {
  * consumer without Node's types reads them too: process.stdin and process.stderr, or any stream like them
  */
 export type Terminal = {
-	/** Where the answer is read, one line in cooked mode, as a terminal sends it */
+	/** Where the answers are read, a line each, in the terminal's cooked mode: it echoes and edits the line */
 	input: {
 		/** True when `input` is a terminal; any other value leaves `CliIo.confirm` absent, so nothing is asked */
 		isTTY?: boolean | undefined
 		/** Takes each chunk of the answer, bytes or, once an encoding is set, a string */
 		on(event: "data", listener: (chunk: string | Uint8Array) => void): unknown
-		/** Called when the input ends; what it sent before is the answer */
+		/** Called when the input ends; this question and every one after it answer no */
 		on(event: "end", listener: () => void): unknown
 		/** Called when reading fails; the question rejects with `error` */
 		on(event: "error", listener: (error: Error) => void): unknown
@@ -112,36 +112,81 @@ export type Terminal = {
 	}
 }
 
-/** The first line `input` sends, or what it sent before it ended; it is paused and its listeners gone after */
-function readLine(input: Terminal["input"]): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const decoder = new TextDecoder()
-		let text = ""
-		const settle = (then: () => void): void => {
-			input.off("data", data)
-			input.off("end", end)
-			input.off("error", error)
-			input.pause()
-			then()
-		}
-		const data = (chunk: string | Uint8Array): void => {
-			text += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
-			const newline = text.indexOf("\n")
-			if (newline !== -1) settle(() => resolve(text.slice(0, newline)))
-		}
-		const end = (): void => settle(() => resolve(text + decoder.decode()))
-		const error = (cause: Error): void => settle(() => reject(cause))
-		input.on("data", data)
-		input.on("end", end)
-		input.on("error", error)
-		input.resume()
-	})
+/** What `lineReader` reads: the next whole line, or `undefined` once the input ended, a line it left unended dropped */
+type NextLine = () => Promise<string | undefined>
+
+/**
+ * The lines `input` sends, one for each call, with the bytes past a line kept for the next: a
+ * paste of two answers answers two questions. A line ends at `\n`, `\r\n` or a lone `\r`, as
+ * readline ends one, a `\r\n` split across chunks too. Between calls the input is paused with none
+ * of the listeners on it. Once it ends, every call resolves `undefined` at once; once it fails,
+ * every call rejects with its error.
+ */
+export function lineReader(input: Terminal["input"]): NextLine {
+	const decoder = new TextDecoder()
+	let text = ""
+	/* the last line ended at a `\r` that closed its chunk, so a `\n` opening the next one ends nothing more */
+	let afterReturn = false
+	let ended: { error?: Error | undefined } | undefined
+	const take = (): string | undefined => {
+		const at = text.search(/[\r\n]/)
+		if (at === -1) return undefined
+		const line = text.slice(0, at)
+		const width = text.startsWith("\r\n", at) ? 2 : 1
+		afterReturn = width === 1 && text[at] === "\r" && at === text.length - 1
+		text = text.slice(at + width)
+		return line
+	}
+	const append = (chunk: string | Uint8Array): void => {
+		const added = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
+		if (added.length === 0) return
+		text += afterReturn && added.startsWith("\n") ? added.slice(1) : added
+		afterReturn = false
+	}
+	return () => {
+		const ready = take()
+		if (ready !== undefined) return Promise.resolve(ready)
+		if (ended !== undefined) return ended.error === undefined ? Promise.resolve(undefined) : Promise.reject(ended.error)
+		return new Promise((resolve, reject) => {
+			const settle = (): void => {
+				input.off("data", data)
+				input.off("end", end)
+				input.off("error", error)
+				input.pause()
+			}
+			const data = (chunk: string | Uint8Array): void => {
+				append(chunk)
+				const line = take()
+				if (line === undefined) return
+				settle()
+				resolve(line)
+			}
+			const end = (): void => {
+				ended = {}
+				settle()
+				resolve(undefined)
+			}
+			const error = (cause: Error): void => {
+				ended = { error: cause }
+				settle()
+				reject(cause)
+			}
+			input.on("data", data)
+			input.on("end", end)
+			input.on("error", error)
+			input.resume()
+		})
+	}
 }
 
-/** A yes/no question on the terminal; anything but y or yes is no, and so is an input that ends unanswered */
-async function ask({ input, output }: Terminal, question: string): Promise<boolean> {
+/**
+ * A yes/no question on the terminal; anything but y or yes is no, and so is an input that ends
+ * before a line does: an answer counts once Enter ends it
+ */
+async function ask(output: Terminal["output"], next: NextLine, question: string): Promise<boolean> {
 	output.write(`${question} (y/N) `)
-	return /^y(?:es)?$/i.test((await readLine(input)).trim())
+	const answer = await next()
+	return answer !== undefined && /^y(?:es)?$/i.test(answer.trim())
 }
 
 /**
@@ -153,10 +198,10 @@ export function processIo({
 	input = process.stdin,
 	output = process.stderr,
 }: { [K in keyof Terminal]?: Terminal[K] | undefined } = {}): CliIo {
-	// Questions on stderr, so stdout stays a command's output
-	const terminal = { input, output }
+	/* one reader for every question, so the bytes past one answer are the next one's */
+	const next = lineReader(input)
 	return {
-		confirm: input.isTTY === true ? (question) => ask(terminal, question) : undefined,
+		confirm: input.isTTY === true ? (question) => ask(output, next, question) : undefined,
 		cwd: process.cwd(),
 		/* plain text on every runtime: Bun's console.error colors a line red on a terminal */
 		err: (line) => void process.stderr.write(`${line}\n`),

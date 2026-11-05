@@ -16,3 +16,7 @@ expectTypeOf(process.stdin).toExtend<Terminal["input"]>()
 expectTypeOf(process.stderr).toExtend<Terminal["output"]>()
 expectTypeOf<number>().not.toExtend<Terminal["output"]>()
 expectTypeOf<{ write(chunk: number): void }>().not.toExtend<Terminal["output"]>()
+
+/* the types 0.20.1 named, which an embedder's streams were typed by, fit it too */
+expectTypeOf<NodeJS.ReadableStream & { isTTY?: boolean }>().toExtend<Terminal["input"]>()
+expectTypeOf<NodeJS.WritableStream>().toExtend<Terminal["output"]>()

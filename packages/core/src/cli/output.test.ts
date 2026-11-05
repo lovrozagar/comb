@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream"
 import { describe, expect, it, vi } from "vitest"
-import { CliError, processIo, Reported } from "./output.ts"
+import { CliError, lineReader, processIo, Reported } from "./output.ts"
 
 describe("CliError", () => {
 	it("carries its message and exit code, 1 unless given", () => {
@@ -70,57 +70,103 @@ describe("processIo", () => {
 	})
 })
 
-/** A terminal whose input sends `chunks`, then ends, or fails with `error` */
+/** A terminal whose input sends `chunks`, then ends, fails with `error`, or stays open; `questions` are asked one after another */
 async function answering(
 	chunks: readonly (string | Uint8Array)[],
-	after: "end" | Error | "open" = "open",
-	encoding?: BufferEncoding,
+	{
+		after = "open",
+		encoding,
+		questions = 1,
+	}: { after?: "end" | Error | "open"; encoding?: BufferEncoding; questions?: number } = {},
 ) {
 	const input = Object.assign(new PassThrough(), { isTTY: true })
 	if (encoding !== undefined) input.setEncoding(encoding)
 	const written: string[] = []
 	const output = { write: (chunk: string) => written.push(chunk) }
 	const confirm = processIo({ input, output }).confirm as (question: string) => Promise<boolean>
-	const answer = confirm("Drop it?")
+	const answers = (async () => {
+		const settled: (boolean | unknown)[] = []
+		for (let n = 1; n <= questions; n++) settled.push(await confirm(`Q${n}?`).catch((error: unknown) => error))
+		return settled
+	})()
 	for (const chunk of chunks) {
 		input.write(chunk)
 		await new Promise((resolve) => setImmediate(resolve))
 	}
 	if (after === "end") input.end()
 	else if (after instanceof Error) input.destroy(after)
-	return { answer, input, written }
+	return { answers, input, written }
 }
 
-/* comb-5d's node-types finding: Terminal named NodeJS, which a consumer without @types/node reads as `any` */
+/* comb-5d's node-types finding: Terminal named NodeJS, which a consumer without @types/node reads as `any`;
+   and its runtime review of the reader that replaced readline */
 describe("a question on a terminal typed by what comb calls", () => {
 	it("reads an answer split across chunks, as bytes or as strings", async () => {
 		const bytes = new TextEncoder().encode("Yes\n")
-		expect(await (await answering([bytes.slice(0, 2), bytes.slice(2)])).answer).toBe(true)
-		expect(await (await answering(["Y", "e", "s\n"])).answer).toBe(true)
-		expect(await (await answering(["Y", "e", "s\n"], "open", "utf8")).answer).toBe(true)
+		expect(await (await answering([bytes.slice(0, 2), bytes.slice(2)])).answers).toEqual([true])
+		expect(await (await answering(["Y", "e", "s\n"])).answers).toEqual([true])
+		expect(await (await answering(["Y", "e", "s\n"], { encoding: "utf8" })).answers).toEqual([true])
 	})
 
 	it("writes the question to output alone", async () => {
-		const { answer, written } = await answering(["yes\n"])
-		expect(await answer).toBe(true)
-		expect(written).toEqual(["Drop it? (y/N) "])
+		const { answers, written } = await answering(["yes\n"])
+		expect(await answers).toEqual([true])
+		expect(written).toEqual(["Q1? (y/N) "])
 	})
 
-	it("answers no when the input ends unanswered, and what it sent when it ends mid-line", async () => {
-		expect(await (await answering([], "end")).answer).toBe(false)
-		expect(await (await answering(["y"], "end")).answer).toBe(true)
+	it.each([
+		["\\r\\n", ["y\r\n"]],
+		["a lone \\r", ["y\r"]],
+		["\\n", ["y\n"]],
+	])("ends a line at %s, as readline does", async (_, chunks) => {
+		expect(await (await answering(chunks)).answers).toEqual([true])
 	})
 
-	it("rejects with the input's error", async () => {
-		const broke = new Error("input broke")
-		await expect((await answering([], broke)).answer).rejects.toBe(broke)
+	it("reads a \\r\\n split across chunks as one line end, not a second, empty answer", async () => {
+		expect(await (await answering(["y\r", "\nn\n"], { questions: 2 })).answers).toEqual([true, false])
+		expect(await (await answering(["y\r", "yes\r"], { questions: 2 })).answers).toEqual([true, true])
 	})
 
-	it("leaves the input paused, with none of its listeners", async () => {
-		const { answer, input } = await answering(["n\nleft"])
-		expect(await answer).toBe(false)
+	it.each([["y\nn\n"], ["y\r\nn\r\n"], ["y\rn\r"]])(
+		"answers each question from its own line when one chunk carries several: %j",
+		async (chunk) => {
+			const { answers, written } = await answering([chunk], { questions: 2 })
+			expect(await answers).toEqual([true, false])
+			expect(written).toEqual(["Q1? (y/N) ", "Q2? (y/N) "])
+		},
+	)
+
+	it("leaves the input paused, with none of its listeners, between questions", async () => {
+		const { answers, input } = await answering(["n\nleft"])
+		expect(await answers).toEqual([false])
 		expect(input.isPaused()).toBe(true)
 		expect(["data", "end", "error"].map((event) => input.listenerCount(event))).toEqual([0, 0, 0])
+	})
+
+	it("decodes a character whose bytes are split across chunks", async () => {
+		const input = new PassThrough()
+		const bytes = new TextEncoder().encode("é\nü\n")
+		const next = lineReader(input)
+		const first = next()
+		for (const byte of bytes) {
+			input.write(Uint8Array.of(byte))
+			await new Promise((resolve) => setImmediate(resolve))
+		}
+		expect(await first).toBe("é")
+		expect(await next()).toBe("ü")
+	})
+})
+
+describe("a question once the terminal's input ended or failed", () => {
+	it("answers no when the input ends, a line it left unended among it, and every question after at once", async () => {
+		expect(await (await answering([], { after: "end" })).answers).toEqual([false])
+		expect(await (await answering(["y"], { after: "end" })).answers).toEqual([false])
+		expect(await (await answering(["y\n"], { after: "end", questions: 3 })).answers).toEqual([true, false, false])
+	})
+
+	it("rejects with the input's error, on this question and every one after", async () => {
+		const broke = new Error("input broke")
+		expect(await (await answering([], { after: broke, questions: 2 })).answers).toEqual([broke, broke])
 	})
 })
 
