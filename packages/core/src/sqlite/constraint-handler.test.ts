@@ -227,6 +227,21 @@ describe("constraintError: a CHECK name two tables share", () => {
 		})
 	})
 
+	/* B2-10 of area B: SQLite has no ONLY, so a table named only is the table, a comment after it included */
+	it("resolves a table named only as the table, SQLite reading no ONLY", () => {
+		const only: ConstraintMap[] = [
+			{
+				invoice: { check: { status_check: { cause: "Invoice status", errorKey: "invoice_status_invalid" } } },
+				only: { check: { status_check: { cause: "Only status", errorKey: "only_status_invalid" } } },
+			},
+		]
+		for (const query of ['update only /* audit */ set "status" = ?', "delete from only -- audit\n where id = ?"])
+			expect(constraintError(failing(query), only), query).toMatchObject({
+				errorKey: "only_status_invalid",
+				table: "only",
+			})
+	})
+
 	it("searches every table only when the statement's table is unknown", () => {
 		expect(
 			constraintError(engine("SQLITE_CONSTRAINT_CHECK", "CHECK constraint failed: status_check"), shared),
