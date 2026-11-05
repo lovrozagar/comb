@@ -687,6 +687,7 @@ declare const MAX_CURSOR_LENGTH = 8192;
  */
 type CursorPayload = {
     c?: boolean[] | undefined;
+    d?: Array<number | "invalid" | null> | undefined;
     i: CursorId;
     s: string;
     v: unknown[];
@@ -696,6 +697,9 @@ type DecodedCursor = {
     id: CursorId;
     sort: string;
     values: CursorValue[];
+};
+type OpenedCursor = DecodedCursor & {
+    read?: Array<Date | null> | undefined;
 };
 type PaginationMeta = {
     /** Rows the filter matches across all pages; null when the response cannot know */
@@ -723,11 +727,13 @@ declare const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a 
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
- * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried)
+ * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
+ * the row as the driver read it, whose Date readCursor returns for a key `record` binds otherwise
  */
 declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
     carried?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
+    read?: Record<string, unknown> | undefined;
 }): string;
 /**
  * Why `cursor` cannot be one, or null when its shape can: the list schema's check, a 400 at
@@ -735,14 +741,18 @@ declare function mintCursor(record: Record<string, unknown>, parsedSort: readonl
  */
 declare function cursorProblem(cursor: string): string | null;
 /** The cursor sealed under `options`, opened and decoded; null when it was not, or it is no cursor */
-declare function openCursor(cursor: string, options: CursorOptions): DecodedCursor | null;
+declare function openCursor(cursor: string, options: CursorOptions): OpenedCursor | null;
+/** The cursor as the keyset binds it, each key's stored value, for this sort; a 400 CombError as readCursor throws */
+declare function readKeyset(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): OpenedCursor;
 /**
- * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. A value may
- * be a CursorRef: a long sort value carried by reference, its prefix and length, which a keyset
- * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
+ * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. Each key is
+ * as the cursor's row read it: a time key is the Date the driver read, an Invalid one included,
+ * where the list pages by the value it stores. A value may be a CursorRef: a long sort value
+ * carried by reference, its prefix and length, which a keyset of its own must read from the
+ * cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, readKeyset, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
@@ -762,7 +772,14 @@ declare function createCursor(row: Record<string, unknown>, sort: readonly SortF
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;
 }): string;
-export { createCursor, type KeysetKind };
+/**
+ * createCursor for the row paginate typed, bound by its stored values: `read` is the row as the driver
+ * read it, whose Date readCursor returns for a key bound otherwise
+ */
+declare function fitCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof createCursor>[2] & {
+    read?: Record<string, unknown> | undefined;
+}): string;
+export { createCursor, fitCursor, type KeysetKind };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */

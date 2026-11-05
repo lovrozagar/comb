@@ -8,7 +8,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { type CursorId, type CursorOptions, CursorRef, readCursor } from "../cursor.ts"
+import { type CursorId, type CursorOptions, CursorRef, readKeyset } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
@@ -37,7 +37,7 @@ function cursorWhere({ cursor: given, dialect, keys, merged, options, sort, tabl
 	gone: SQL | undefined
 	where: SQL
 } {
-	const cursor = readCursor(given, sort, options)
+	const cursor = readKeyset(given, sort, options)
 	if (merged === true && cursor.values.some((value) => value instanceof CursorRef)) {
 		throw new CombError({
 			cause:

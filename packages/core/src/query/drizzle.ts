@@ -8,7 +8,7 @@ import { sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
+import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readKeyset } from "./cursor.ts"
 import { anchored } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { assertCursorFits, bindableOn, boundCarried } from "./sqlite/cursor-fit.ts"
@@ -145,7 +145,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		assertPageWithin(query)
 		return { ...base({ _combId: tiebreakOf, _total: countOver }), offset: ((query.page ?? 1) - 1) * query.limit }
 	}
-	const cursor = readCursor(query.cursor, sort, options)
+	const cursor = readKeyset(query.cursor, sort, options)
 	const positionOn = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */

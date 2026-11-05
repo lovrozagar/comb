@@ -67,6 +67,19 @@ function createCursor(
 		keyset?: KeysetKind | undefined
 	},
 ): string {
+	return fitCursor(row, sort, options)
+}
+
+// B2-6 of area B: paginate mints through here so readCursor returns the Date its row read
+/**
+ * createCursor for the row paginate typed, bound by its stored values: `read` is the row as the driver
+ * read it, whose Date readCursor returns for a key bound otherwise
+ */
+function fitCursor(
+	row: Record<string, unknown>,
+	sort: readonly SortField[],
+	options: Parameters<typeof createCursor>[2] & { read?: Record<string, unknown> | undefined },
+): string {
 	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one (QL1 of r22b) */
 	const derived = options?.keyset === "derived"
 	const asRead = (field: string) => derived || (options?.asRead?.has(field) ?? false)
@@ -106,4 +119,4 @@ function createCursor(
 	throw tooLong(fields, whole.length, "table")
 }
 
-export { createCursor, type KeysetKind }
+export { createCursor, fitCursor, type KeysetKind }

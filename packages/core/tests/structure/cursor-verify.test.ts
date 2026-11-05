@@ -68,8 +68,12 @@ describe("a cursor's values only through an opening call (Q7, R1)", () => {
 		for (const [path, source] of ALL) {
 			for (const [name, { body, returns }] of functions(path, source)) {
 				/* the payload decode itself is held to its one caller above */
-				if (!/\bDecodedCursor\b/.test(returns) || name === "decodePayload") continue
-				const verifies = name === "openCursor" || body.includes("openCursor(") || body.includes("readCursor(")
+				if (!/\b(?:DecodedCursor|OpenedCursor)\b/.test(returns) || name === "decodePayload") continue
+				const verifies =
+					name === "openCursor" ||
+					body.includes("openCursor(") ||
+					body.includes("readKeyset(") ||
+					body.includes("readCursor(")
 				expect(verifies, `${path} ${name}`).toBe(true)
 			}
 		}

@@ -9,8 +9,8 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { type DecodedCursor, readCursor } from "./cursor.ts"
-import { createCursor, type KeysetKind } from "./cursor-mint.ts"
+import { type DecodedCursor, readKeyset } from "./cursor.ts"
+import { fitCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { carriedTexts, COMB_ID, malformed, typedKeys, unencoded } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
@@ -105,7 +105,7 @@ function paginationOf<TMerged extends boolean = false>(
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
 		parsedSort: query.parsedSort,
-		read: (cursor) => readCursor(cursor, query.parsedSort, options),
+		read: (cursor) => readKeyset(cursor, query.parsedSort, options),
 		window: facts.window,
 	}
 }
@@ -197,10 +197,11 @@ function mintFrom(
 ): string {
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
 	const read = row as Record<string, unknown>
-	return createCursor(typedKeys(read, parsedSort), parsedSort, {
+	return fitCursor(typedKeys(read, parsedSort), parsedSort, {
 		...options,
 		carried: carriedTexts(read, parsedSort),
 		idField: COMB_ID,
+		read,
 	})
 }
 
