@@ -177,16 +177,27 @@ const EMPTY: ExtractedSchema = {
 	triggers: [],
 }
 
+// M72, M75
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
- * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
- * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72). Postgres
- * text is read as the statements Postgres runs, by its parser: `loadPostgresParser()` first (M75)
+ * migration leaves, after `from` when given, read as `readAs` names a dialect, SQLite by default.
+ * Postgres text is read as the statements Postgres runs, by its parser, so `await
+ * loadPostgresParser()` first: until then it throws
  */
 function extractSchema(
 	sql: string,
 	from: ExtractedSchema = EMPTY,
-	readAs: Dialect | { dialect: Dialect; schema?: string | undefined } = "sqlite",
+	readAs:
+		| Dialect
+		| {
+				/** how the text is read */
+				dialect: Dialect
+				/**
+				 * Postgres: the schema the database's URLs set as search_path, where an unqualified name
+				 * resolves; a name in it is keyed bare, one in any other schema as `schema.name`; default `public`
+				 */
+				schema?: string | undefined
+		  } = "sqlite",
 ): ExtractedSchema {
 	const { dialect, schema } = typeof readAs === "string" ? { dialect: readAs, schema: undefined } : readAs
 	return schemaOfRead(fileRead(sql, dialect), schema, from)

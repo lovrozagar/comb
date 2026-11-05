@@ -152,6 +152,7 @@ const databaseConfigInputSchema = () =>
 
 /** What comb.migrate.config.ts declares */
 type CombMigrateConfig = {
+	/** each database comb migrates, by the name `comb migrate` takes; at least one */
 	databases: Record<string, DatabaseConfig>
 }
 

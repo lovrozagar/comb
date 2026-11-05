@@ -20,7 +20,16 @@ import { lockTimeoutMs } from "./pg-lock-timeout.ts"
 import { scratchDir } from "./cleanup.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
-type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
+type PgTarget = {
+	/** the empty scratch database Atlas replays migrations and diffs on; never the real one */
+	devUrl: string
+	/** how long a statement waits for a lock before the migration fails, as `5s`, `1500ms` or `0` for no bound */
+	lockTimeout: string
+	/** the one schema comb migrates */
+	schema: string
+	/** the database migrated: a direct, non-pooled URL */
+	url: string
+}
 
 /** What an Atlas call reads from its config: the target, the dev database, the migrations dir, and whose history */
 type AtlasNeeds = {

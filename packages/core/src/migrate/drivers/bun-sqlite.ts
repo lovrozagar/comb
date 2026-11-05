@@ -62,6 +62,11 @@ function bunSqliteConnection(db: BunDatabase): Connection {
 	}
 }
 
+/**
+ * A bun:sqlite database's provider, by file path or `:memory:`; it runs on Bun alone. Each connection
+ * enforces foreign keys and waits up to 5 s for a lock another process holds. A file is created when
+ * missing, except by a reader, which opens it read-only and throws `DatabaseMissing` when it is not there
+ */
 export function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {

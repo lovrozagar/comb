@@ -35,16 +35,21 @@ const tursoAuthTokenSchema = () => z.object({ jwt: z.string().min(1) })
 
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
 export type TursoDeps = {
+	/** what the Platform API calls go through; default: the global fetch */
 	fetch?: typeof fetch | undefined
 	/** A progress line, such as the database being created; no output when omitted */
 	log?: ((line: string) => void) | undefined
 }
 
+/** The Turso database `getTursoCredentials` fetches the credentials of, and how */
 export type TursoCredentialsRequest = TursoDeps & {
+	/** a Turso Platform API token, which may list, create and mint tokens for the org's databases */
 	apiToken: string
+	/** the database's name in the org */
 	dbName: string
 	/** The placement group a database created on demand joins (default "default") */
 	group?: string | undefined
+	/** the Turso organization the database belongs to */
 	org: string
 	/** a reader's credentials: a missing database is an error, not created, and the token is read-only */
 	readonly?: boolean | undefined
@@ -52,6 +57,7 @@ export type TursoCredentialsRequest = TursoDeps & {
 
 /** A reader found no Turso database `name` (`org/db`): a reader creates none */
 export class TursoMissing extends DatabaseMissing {
+	/** an error naming the database `name`, as `org/db` */
 	constructor(name: string) {
 		super(`Turso database "${name}" does not exist; check and status create none`)
 		this.name = "TursoMissing"
@@ -97,9 +103,12 @@ const reaching = (call: typeof fetch, name: string): typeof fetch =>
  * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
  * token's expiration and authorization from the query (a body is ignored, and the default never expires).
  */
-export async function getTursoCredentials(
-	request: TursoCredentialsRequest,
-): Promise<{ url: string; authToken: string }> {
+export async function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
+	/** the database's `libsql://` URL */
+	url: string
+	/** a token for it that expires in an hour, read-only for a reader */
+	authToken: string
+}> {
 	const { apiToken, dbName, org } = request
 	const call = reaching(request.fetch ?? fetch, `${org}/${dbName}`)
 	const baseUrl = `https://api.turso.tech/v1/organizations/${org}/databases/${dbName}`
@@ -158,10 +167,13 @@ function createLibsqlConnection(client: Client): Connection {
    TURSO PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// S1 of r21
 /**
  * A Turso database's provider. Each connect opens a new client, so each migration file has a
- * connection of its own (S1 of r21); the credentials are fetched once per provider for a reader and
- * once for a writer, so a command mints one token of each kind it needs, however many files it applies.
+ * connection of its own; the credentials are fetched once per provider for a reader and once for a
+ * writer, so a command mints one token of each kind it needs, however many files it applies. A
+ * writer's connect creates the database when it is missing; a reader's throws `TursoMissing`. Needs
+ * `@libsql/client` installed
  */
 export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps = {}): ConnectionProvider {
 	const minted = new Map<boolean, Promise<{ authToken: string; url: string }>>()
@@ -205,6 +217,11 @@ export function libsqlFile(url: string): string | undefined {
 	}
 }
 
+/**
+ * A libsql database's provider, by URL: a `file:` path, `:memory:`, or a libsql server. A file is
+ * created when missing, except by a reader, which throws `DatabaseMissing`, and waits up to 5 s for
+ * a lock another process holds. Needs `@libsql/client` installed
+ */
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {

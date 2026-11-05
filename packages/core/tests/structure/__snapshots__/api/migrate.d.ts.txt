@@ -24,27 +24,37 @@ import { type CombMigrateConfig, DEFAULT_PG_DEV_URL } from "./config-schema.ts";
 import type { Run } from "./core/process.ts";
 import type { ConnectionProvider, ConnectionProviderConfig, DatabaseConfig, MigrationConfig, ResolvedDatabaseConfig } from "./types.ts";
 export { type CombMigrateConfig, DEFAULT_PG_DEV_URL };
-/** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
+/** What a provider that shells out runs processes with: D1 drives wrangler */
 export type ProviderDeps = {
+    /** runs one command and resolves with its exit code and output; default: spawns the real process */
     run?: Run | undefined;
 };
 /** The connection for a provider comb applies through itself; Postgres goes through Atlas instead */
 export declare function createProvider(config: ConnectionProviderConfig, deps?: ProviderDeps): ConnectionProvider;
+/**
+ * `dbConfig` resolved for one target: the environment `envName` names, its own name and provider
+ * over the database's, and a Postgres provider's defaults filled in. Throws when a database of
+ * environments gets no `envName`, one it does not declare or one with no provider at either level,
+ * or when a database of one target gets an `envName`
+ */
 export declare function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig;
 /**
  * `input`, typed: comb.migrate.config.ts's default export, or what a function export returns, as in
  * `export default async () => defineConfig({…})`, so TypeScript holds an object written inline to its
- * known keys in either form (K4 of r21); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
+ * known keys in either form. It checks nothing at runtime: `loadConfig` validates the config
  */
 export declare function defineConfig(input: CombMigrateConfig): CombMigrateConfig;
 /**
  * What a config module exports, held to the config schema: an object, or a function that returns one
- * or a promise of one (K8 of r19). A typo, a database of neither shape, or a function a function
- * returned rejects with a ZodError naming where
+ * or a promise of one. A typo, a database of neither shape, or a function a function returned rejects
+ * with a ZodError naming where
  */
 export declare function parseConfig(input: unknown): Promise<MigrationConfig>;
+/** A migrate config `loadConfig` read and validated, with where it was found */
 export type LoadedConfig = {
+    /** the validated config */
     config: MigrationConfig;
+    /** the folder holding the config file, which its relative paths (`migrationsDir`, `drizzleConfigPath`, `wranglerConfig`) resolve against */
     configDir: string;
 };
 /**
@@ -86,11 +96,17 @@ import { type PgTarget } from "./atlas-target.ts";
 import { type ProjectBin, type Run } from "./process.ts";
 export { applySqliteMigrationTransforms } from "./atlas-env.ts";
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts";
+/** Whether `atlas version` runs and exits 0: the Atlas CLI is on PATH */
 export declare function checkAtlasInstalled(exec?: Run): Promise<boolean>;
+/** The version `atlas version` prints, as `v1.3.0`; null when Atlas does not run or prints none */
 export declare function getAtlasVersion(exec?: Run): Promise<string | null>;
+/** What `generateSchemaDiff` diffs, and where */
 export type SchemaDiffOptions = {
+    /** the dialect both schemas are written in */
     dialect: Dialect;
+    /** the SQL DDL of the schema the diff starts from */
     fromSchema: string;
+    /** the SQL DDL of the schema the diff ends at */
     toSchema: string;
     /** The process runner; tests pass a fake. */
     run?: Run | undefined;
@@ -99,22 +115,29 @@ export type SchemaDiffOptions = {
     /** Postgres: makes the target's dev schema exist before Atlas diffs in it; tests pass a fake */
     readyDev?: ((target: PgTarget) => Promise<void>) | undefined;
 };
+/** What Atlas's diff of two schemas found */
 export type SchemaDiffResult = {
+    /** the statements that take `fromSchema` to `toSchema`; null when the two are in sync */
     diff: string | null;
     /** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
     notices: string[];
+    /** the two schemas are the same, so there is nothing to apply */
     synced: boolean;
 };
 /**
- * Atlas's diff of two schemas, on the dialect's dev database. On Postgres the target's dev schema is
- * made ready first and a failure explained as migrate diff explains one (P8 of r18). devUrl must be
- * a scratch database: with no `target.url`, comb cannot tell it from your real one (P2 of r19).
+ * Atlas's diff of two schemas, on the dialect's dev database: an in-memory one for SQLite, and on
+ * Postgres `target.devUrl`, whose schema is made to exist first. Throws when a Postgres diff has no
+ * `target`, or when Atlas fails, with what it said. `devUrl` must be a scratch database: with no
+ * `target.url`, comb cannot tell it from your real one
  */
 export declare function generateSchemaDiff(options: SchemaDiffOptions): Promise<SchemaDiffResult>;
+/** What `exportDrizzleSchema` exports, and from where */
 export type DrizzleExportOptions = {
     /** The drizzle config to export, when it is not drizzle-kit's default in cwd */
     configPath?: string | undefined;
+    /** the folder drizzle-kit runs in, which a relative `configPath` resolves against */
     cwd: string;
+    /** the drizzle config's dialect, which the export is normalized for: SQLite's without PRAGMA lines and with 0/1 boolean defaults, Postgres's scoped to `schema` */
     dialect: Dialect;
     /** The process runner; tests pass a fake. */
     run?: Run | undefined;
@@ -210,18 +233,39 @@ export { loadPostgresParser, parsePostgres, postgresParser };
  */
 import type { CircuitBreakerState, MigrationResult } from "../types.ts";
 export declare function sleep(ms: number): Promise<void>;
+/**
+ * How `withRetry` retries. The wait before retry n (from 0) is `baseDelay * 2^n` plus up to 1000 ms
+ * of jitter, capped at `maxDelay`
+ */
 export type RetryOptions = {
+    /** retries after the first attempt, at most; default 3 */
     maxRetries?: number | undefined;
+    /** the first retry's wait before jitter, in milliseconds; default 1000 */
     baseDelay?: number | undefined;
+    /** the longest wait, in milliseconds; default 30000 */
     maxDelay?: number | undefined;
+    /** called before each wait with the retry's number from 1, the failure, and the wait in milliseconds */
     onRetry?: ((attempt: number, error: Error, delay: number) => void) | undefined;
 };
-/** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
+/**
+ * Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most. A failure
+ * is transient when it, or an error it was caused by, carries an HTTP status of 429 or 5xx or a
+ * network code such as `ECONNRESET`; a SQLite error never is, and no message is read. Any other
+ * failure, or the last one, is thrown, a non-Error wrapped in one
+ */
 export declare function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T>;
+/** A circuit breaker that has counted nothing and is not tripped */
 export declare function createCircuitBreaker(): CircuitBreakerState;
+/** `state` with one more database counted, and one more failure unless `success`; it never trips the breaker, `checkCircuitBreaker` does */
 export declare function updateCircuitBreaker(state: CircuitBreakerState, success: boolean): CircuitBreakerState;
+/**
+ * `state`, tripped with its reason once at least `minSampleSize` databases are counted and the share
+ * that failed reaches `failureThreshold`; a tripped state stays tripped
+ */
 export declare function checkCircuitBreaker(state: CircuitBreakerState, options?: {
+    /** the failed share, 0 to 1, that trips the breaker; default 0.1 */
     failureThreshold?: number | undefined;
+    /** the databases counted before the breaker may trip; default 50 */
     minSampleSize?: number | undefined;
 }): CircuitBreakerState;
 export declare function aggregateErrors(errors: Array<{
@@ -239,8 +283,12 @@ export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, get
 export { getSqliteColumns, getSqliteIndexes, getSqliteTables, introspectSqliteSchema } from "./sqlite-introspect.ts";
 
 // migrate/drivers/missing.d.ts
-/** A reader found no database to open: a read-only connect creates none (S3 of the r18 review) */
+/**
+ * What a read-only connect, as `comb migrate check` and `status` make, throws for a database that is
+ * not there, since it creates none; its name is `DatabaseMissing`
+ */
 export declare class DatabaseMissing extends Error {
+    /** an error whose message says which database is missing */
     constructor(message: string);
 }
 
@@ -250,21 +298,27 @@ import { DatabaseMissing } from "./missing.ts";
 export { createBunSqliteProvider } from "./bun-sqlite.ts";
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
 export type TursoDeps = {
+    /** what the Platform API calls go through; default: the global fetch */
     fetch?: typeof fetch | undefined;
     /** A progress line, such as the database being created; no output when omitted */
     log?: ((line: string) => void) | undefined;
 };
+/** The Turso database `getTursoCredentials` fetches the credentials of, and how */
 export type TursoCredentialsRequest = TursoDeps & {
+    /** a Turso Platform API token, which may list, create and mint tokens for the org's databases */
     apiToken: string;
+    /** the database's name in the org */
     dbName: string;
     /** The placement group a database created on demand joins (default "default") */
     group?: string | undefined;
+    /** the Turso organization the database belongs to */
     org: string;
     /** a reader's credentials: a missing database is an error, not created, and the token is read-only */
     readonly?: boolean | undefined;
 };
 /** A reader found no Turso database `name` (`org/db`): a reader creates none */
 export declare class TursoMissing extends DatabaseMissing {
+    /** an error naming the database `name`, as `org/db` */
     constructor(name: string);
 }
 /**
@@ -273,13 +327,17 @@ export declare class TursoMissing extends DatabaseMissing {
  * token's expiration and authorization from the query (a body is ignored, and the default never expires).
  */
 export declare function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
+    /** the database's `libsql://` URL */
     url: string;
+    /** a token for it that expires in an hour, read-only for a reader */
     authToken: string;
 }>;
 /**
  * A Turso database's provider. Each connect opens a new client, so each migration file has a
- * connection of its own (S1 of r21); the credentials are fetched once per provider for a reader and
- * once for a writer, so a command mints one token of each kind it needs, however many files it applies.
+ * connection of its own; the credentials are fetched once per provider for a reader and once for a
+ * writer, so a command mints one token of each kind it needs, however many files it applies. A
+ * writer's connect creates the database when it is missing; a reader's throws `TursoMissing`. Needs
+ * `@libsql/client` installed
  */
 export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
 /**
@@ -288,6 +346,11 @@ export declare function createTursoProvider(config: TursoProviderConfig, deps?: 
  * another scheme, or a path libsql itself refuses to decode.
  */
 export declare function libsqlFile(url: string): string | undefined;
+/**
+ * A libsql database's provider, by URL: a `file:` path, `:memory:`, or a libsql server. A file is
+ * created when missing, except by a reader, which throws `DatabaseMissing`, and waits up to 5 s for
+ * a lock another process holds. Needs `@libsql/client` installed
+ */
 export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
 
 // migrate/migration-types.d.ts
@@ -297,14 +360,20 @@ export declare function createLibsqlProvider(config: LibsqlProviderConfig): Conn
  */
 /** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
 export type ForeignKey = {
+    /** the table that holds the key */
     table: string;
+    /** its columns, in order */
     columns: string[];
+    /** the table it references */
     parent: string;
+    /** the parent's columns it references, in order */
     parentColumns: string[];
+    /** what a delete of a parent row does; `NO ACTION` when the migration says nothing */
     onDelete: "CASCADE" | "NO ACTION" | "RESTRICT" | "SET DEFAULT" | "SET NULL";
 };
 /** What a table rebuild must know of a table to save and restore its rows */
 export type TableInfo = {
+    /** its primary key's columns, in order; empty when it declares none */
     primaryKey: string[];
     /** a WITHOUT ROWID table, whose rows are saved by primary key */
     withoutRowid: boolean;
@@ -323,32 +392,48 @@ export type TableInfo = {
 };
 /** A write that fires a trigger */
 export type TriggerEvent = "delete" | "insert" | "update";
+/**
+ * The schema a migration history leaves, followed statement by statement. A name is bare when its
+ * object is in the schema comb migrates, else `schema.name`
+ */
 export type ExtractedSchema = {
+    /** each table left, by name, with its column names */
     tables: Map<string, string[]>;
+    /** each index created, by name */
     indexes: string[];
+    /** each table a DROP TABLE dropped, in order */
     droppedTables: string[];
+    /** each foreign key of the tables left */
     foreignKeys: ForeignKey[];
     /**
      * each trigger left, by its table, with the writes that fire it; `ftsSync` when its body only
      * writes into an external-content FTS5 table (the sync triggers comb writes)
      */
     triggers: Array<{
+        /** the writes to `table` that fire it */
         events: TriggerEvent[];
+        /** its body only writes into an external-content FTS5 table */
         ftsSync: boolean;
+        /** the trigger's name */
         name: string;
+        /** the table it is on */
         table: string;
     }>;
     /** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
     externalFts: string[];
     /**
      * the statements of the history, in order: on Postgres, what its parse tree shows a write runs
-     * (parentage, defaults, rules, operators, casts) is read from them (pg-history.ts)
+     * (parentage, defaults, rules, operators, casts) is read from them
      */
     statements: string[];
+    /** what a table rebuild must know of each table left, by name */
     tableInfo: Map<string, TableInfo>;
 };
+/** How much a migration risks: `unsafe` loses data or breaks deployed code, `cautious` drops or changes something no row holds or is not one transaction, `safe` neither */
 export type MigrationSafety = "safe" | "cautious" | "unsafe";
+/** What a migration's statements risk, and which do */
 export type MigrationClassification = {
+    /** `unsafe` when any statement is, else `cautious` when any statement is, else `safe` */
     safety: MigrationSafety;
     /** statements that lose data or break deployed code by name */
     unsafeStatements: string[];
@@ -362,13 +447,21 @@ export type MigrationClassification = {
      */
     pendingStatements: string[];
 };
+/** A migration file, read and classified */
 export type ParsedMigration = {
+    /** the file's SQL, as written */
     sql: string;
+    /** the sha256 of the file's normalized SQL, which the history records for it */
     hash: string;
+    /** the file's name in the migrations folder */
     filename: string;
+    /** the file's statements, in order */
     statements: string[];
+    /** what the file drops, as `DROP TABLE users` or `DROP COLUMN post.body` */
     drops: string[];
+    /** the schema the file alone builds, on an empty database */
     expected: ExtractedSchema;
+    /** what the file's statements risk */
     classification: MigrationClassification;
 };
 
@@ -377,12 +470,21 @@ export type ParsedMigration = {
  * Core types for db-migration package. Declarations only: config.ts validates the config.
  */
 export type Dialect = "sqlite" | "postgres";
+/** The rows one statement answered */
 export type QueryResult = {
+    /** the column names, in order; on bun:sqlite and D1 they come from the first row, so a result with no rows has none */
     columns: string[];
+    /** each row's values, in `columns`' order */
     rows: unknown[][];
 };
+/** An open connection to one database, which a migrate command runs its statements through */
 export type Connection = {
+    /** the SQL dialect the database speaks */
     dialect: Dialect;
+    /**
+     * The rows `sql` answers, with each `?` in it bound to the next of `params`. On D1 the params are
+     * written into the SQL as literals, since wrangler binds none
+     */
     execute(sql: string, params?: unknown[]): Promise<QueryResult>;
     /**
      * `statements` in order, as one transaction on SQLite, libsql and bun:sqlite. On D1 they go in order
@@ -390,39 +492,59 @@ export type Connection = {
      * needs, so a caller sends only statements that are safe to run again.
      */
     batch(statements: Array<{
+        /** one statement, its `?` placeholders bound to `params` */
         sql: string;
+        /** the values of `sql`'s placeholders, in order */
         params?: unknown[] | undefined;
     }>): Promise<void>;
+    /** Closes the connection; on D1, which keeps none open, it does nothing */
     close(): Promise<void>;
     /** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */
     ownedPrefix?: string | undefined;
 };
+/** How a migrate command opens connections to one database */
 export type ConnectionProvider = {
+    /** the SQL dialect of the database it connects to */
     dialect: Dialect;
+    /** A new connection to the database; with `config.readonly`, a missing database is an error, never created */
     connect(config: ResolvedDatabaseConfig): Promise<Connection>;
 };
-/** A Turso database: it names its own database, which the environment's name never does (K2 of r18) */
+/** A Turso database: it names its own database, which the environment's name never does */
 export type TursoProviderConfig = {
+    /** a Turso Platform API token, which comb mints the database's short-lived tokens with */
     apiToken: string;
+    /** the database's name in the org; a command that writes creates it when it is missing */
     databaseName: string;
     /** The placement group a database created on demand joins (default "default") */
     group?: string | undefined;
+    /** the Turso organization the database belongs to */
     org: string;
+    /** a Turso database */
     type: "turso";
 };
+/** A libsql database by URL: a local file or a libsql server */
 export type LibsqlProviderConfig = {
+    /** the token a libsql server takes; a file needs none */
     authToken?: string | undefined;
+    /** a libsql database */
     type: "libsql";
+    /** a `file:` URL, `:memory:`, or a libsql server's URL */
     url: string;
 };
+/** A SQLite file opened with bun:sqlite, when comb runs on Bun */
 export type BunSqliteProviderConfig = {
+    /** the database file, or `:memory:` */
     path: string;
+    /** a bun:sqlite database */
     type: "bun-sqlite";
 };
+/** A Cloudflare D1 database, which comb reaches through the project's wrangler */
 export type D1ProviderConfig = {
+    /** the D1 database's binding or `database_name` in the wrangler config */
     databaseName: string;
     /** Target the local dev database (`wrangler --local`) instead of the remote one. */
     local?: boolean | undefined;
+    /** a D1 database */
     type: "d1";
     /** The wrangler config that binds the database, relative to comb.migrate.config.ts; default: the one in its folder */
     wranglerConfig?: string | undefined;
@@ -442,53 +564,78 @@ export type PostgresProviderConfig = {
     lockTimeout?: string | undefined;
     /** the one schema comb migrates; default `public` */
     schema?: string | undefined;
+    /** a Postgres database */
     type: "postgres";
+    /** the database's connection URL */
     url: string;
 };
 /** A Postgres provider with comb's defaults filled in */
 export type ResolvedPostgresProviderConfig = {
+    /** the dev database Atlas replays migrations on: the one given, else `docker://postgres/17/dev` */
     devUrl: string;
+    /** the lock wait bound: the one given, else `5s` */
     lockTimeout: string;
+    /** the schema comb migrates: the one given, else `public` */
     schema: string;
+    /** a Postgres database */
     type: "postgres";
+    /** the database's connection URL */
     url: string;
 };
+/** Any database comb migrates, by its `type` */
 export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig;
-/** An environment of a database: its name, its key's unless it gives one (K13), and its provider, the database's unless it gives one */
+/** An environment of a database, which `-e` names by its key */
 export type EnvironmentConfig = {
+    /** the name comb shows for the environment's database in its output and prompts; default: its key */
     name?: string | undefined;
+    /** where the environment's database is; default: the database's own `provider` */
     provider?: ProviderConfig | undefined;
 };
 /** What every database declares, whichever shape it has */
 export type DatabaseShared = {
-    /** the comb.config.ts database this one's tables and FTS are, when its name there is another (C7) */
+    /** the comb.config.ts database this one's tables and FTS are, when its name there is another */
     codegen?: string | undefined;
+    /** the drizzle config comb exports the database's schema from, relative to comb.migrate.config.ts; default: drizzle-kit's own in the working folder */
     drizzleConfigPath?: string | undefined;
+    /** the folder of the database's migration files, relative to comb.migrate.config.ts */
     migrationsDir: string;
 };
 /** A database of one target: its name and its provider */
 export type SingleDatabaseConfig = DatabaseShared & {
+    /** none: a database of one target takes no `-e` */
     environments?: undefined;
+    /** the name comb shows for the database in its output and prompts */
     name: string;
+    /** where the database is */
     provider: ProviderConfig;
 };
 /** A database of environments, at least one, each resolving to a provider; a provider here is each one's default */
 export type EnvironmentsDatabaseConfig = DatabaseShared & {
+    /** each environment, by the key `-e` names it with */
     environments: Record<string, EnvironmentConfig>;
+    /** none: each environment has its own */
     name?: undefined;
+    /** the provider of each environment that gives none */
     provider?: ProviderConfig | undefined;
 };
-/** A database comb.migrate.config.ts declares: of one target, or of environments, never both (K13 of the 0.15.0 review) */
+/** A database comb.migrate.config.ts declares: of one target, or of environments, never both */
 export type DatabaseConfig = EnvironmentsDatabaseConfig | SingleDatabaseConfig;
+/** One database, in the environment a command names, as `resolveDatabaseConfig` resolves it */
 export type ResolvedDatabaseConfig = {
+    /** the name comb shows for it in its output and prompts: the environment's, else the environment's key, else the database's */
     name: string;
+    /** the folder of its migration files, as the config gives it */
     migrationsDir: string;
+    /** its drizzle config, as the config gives it */
     drizzleConfigPath?: string | undefined;
     /** open it read-only, as check and status do: a missing database file is an error, not a new database */
     readonly?: boolean | undefined;
+    /** where it is, a Postgres provider with its defaults filled in */
     provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig;
 };
+/** What comb.migrate.config.ts declares */
 export type MigrationConfig = {
+    /** each database comb migrates, by the name `comb migrate` takes */
     databases: Record<string, DatabaseConfig>;
 };
 export type MigrationStatus = "success" | "already_applied" | "repaired" | "failed" | "skipped";
@@ -498,10 +645,15 @@ export type MigrationResult = {
     tablesVerified?: number | undefined;
     error?: string | undefined;
 };
+/** A circuit breaker over a run across many databases, which `updateCircuitBreaker` advances */
 export type CircuitBreakerState = {
+    /** the databases counted so far */
     totalProcessed: number;
+    /** how many of them failed */
     failures: number;
+    /** the failure rate crossed the threshold, so the run should stop */
     tripped: boolean;
+    /** the failure rate and threshold it crossed, once tripped */
     tripReason?: string | undefined;
 };
 
@@ -527,14 +679,15 @@ import type { Dialect } from "../types.ts";
 import type { TargetKind } from "./classify-target.ts";
 import { type Read } from "./classify-verdict.ts";
 import { type PgRead } from "./pg-split.ts";
+/** How `parseMigration`, `classifyMigration` and `extractDropStatements` read a migration file */
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
-    /** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
+    /** where a SQLite file applies, whose own rule of what it runs the file is held to; default `local` */
     kind?: TargetKind | undefined;
-    /** how the file is read; unnamed, as SQLite, the CLI's default */
+    /** how the file is read; default SQLite, as the CLI's */
     dialect?: Dialect | undefined;
-    /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
+    /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; default `public` */
     schema?: string | undefined;
 };
 /**
@@ -560,9 +713,10 @@ export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements
  */
 import type { Pragma } from "./sql-code.ts";
 /**
- * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
+ * Where a SQLite-family file applies, which the CLI reads from its provider: `local` a SQLite file
  * comb opens itself (bun:sqlite, a libsql `file:` or `:memory:`), `sqld` a libsql server (a libsql URL of any other
- * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of what it runs.
+ * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of
+ * what it runs, so a statement one refuses is refused before anything applies
  */
 type TargetKind = "d1" | "local" | "sqld";
 /** Why a target of `kind` refuses the statement `code` (the pragma it runs, if one), or undefined when it runs it */
@@ -572,8 +726,11 @@ export { type TargetKind, targetRefusal };
 // migrate/core/fts-migration.d.ts
 /** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
 export type FtsObject = {
+    /** the FTS5 table it belongs to: its own name for the table, the table it writes into for a trigger */
     group: string;
+    /** an FTS5 virtual table, or a trigger that keeps one in sync */
     kind: "table" | "trigger";
+    /** its CREATE statement with comments gone and whitespace one space */
     sql: string;
 };
 /** The FTS objects a sequence of migrations leaves, by name */
@@ -607,9 +764,13 @@ export { asSql, ftsDelta, separate, type FtsState };
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = {
+    /** the empty scratch database Atlas replays migrations and diffs on; never the real one */
     devUrl: string;
+    /** how long a statement waits for a lock before the migration fails, as `5s`, `1500ms` or `0` for no bound */
     lockTimeout: string;
+    /** the one schema comb migrates */
     schema: string;
+    /** the database migrated: a direct, non-pooled URL */
     url: string;
 };
 /** What an Atlas call reads from its config: the target, the dev database, the migrations dir, and whose history */
@@ -748,6 +909,7 @@ import type { DatabaseConfig } from "./types.ts";
 declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
 /** What comb.migrate.config.ts declares */
 type CombMigrateConfig = {
+    /** each database comb migrates, by the name `comb migrate` takes; at least one */
     databases: Record<string, DatabaseConfig>;
 };
 declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
@@ -861,12 +1023,17 @@ import type { ExtractedSchema } from "../migration-types.ts";
 import type { Dialect } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
- * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
- * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72). Postgres
- * text is read as the statements Postgres runs, by its parser: `loadPostgresParser()` first (M75)
+ * migration leaves, after `from` when given, read as `readAs` names a dialect, SQLite by default.
+ * Postgres text is read as the statements Postgres runs, by its parser, so `await
+ * loadPostgresParser()` first: until then it throws
  */
 declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dialect | {
+    /** how the text is read */
     dialect: Dialect;
+    /**
+     * Postgres: the schema the database's URLs set as search_path, where an unqualified name
+     * resolves; a name in it is keyed bare, one in any other schema as `schema.name`; default `public`
+     */
     schema?: string | undefined;
 }): ExtractedSchema;
 /**
@@ -884,9 +1051,9 @@ export { extractSchema, schemaOfRead };
 import type { Dialect } from "../types.ts";
 /**
  * The statements of `sql`, without their terminating `;`. On SQLite they end where SQLite ends
- * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On Postgres
- * they are the statements Postgres runs, the one Postgres split (pg-split.ts, M75), read after
- * loadPostgresParser(). A stretch that holds only comments is not a statement.
+ * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On
+ * Postgres they are the statements Postgres's own parser splits it into, so `await
+ * loadPostgresParser()` first: until then it throws. A stretch that holds only comments is not a statement.
  */
 declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
 /**
@@ -932,14 +1099,27 @@ export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): 
 
 // migrate/drivers/sqlite-introspect.d.ts
 import type { Connection } from "../types.ts";
+/**
+ * The CREATE statements of the tables, then the indexes, then the triggers of the database `conn`
+ * opens, each ended by `;`: the schema comb manages, without SQLite's, Litestream's or the engine's
+ * own tables, the migration history tables, or FTS5 and spellfix1 indexes
+ */
 export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
+/** The names of the tables comb manages in the database `conn` opens, left out as by `introspectSqliteSchema` */
 export declare function getSqliteTables(conn: Connection): Promise<string[]>;
+/** The column names of `table`, in their order; empty when there is no such table */
 export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
+/** The names of the indexes comb manages in the database `conn` opens, SQLite's own autoindexes left out */
 export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
 
 // migrate/drivers/bun-sqlite.d.ts
 import type { LocalDb } from "./local-db.ts";
 import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
+/**
+ * A bun:sqlite database's provider, by file path or `:memory:`; it runs on Bun alone. Each connection
+ * enforces foreign keys and waits up to 5 s for a lock another process holds. A file is created when
+ * missing, except by a reader, which opens it read-only and throws `DatabaseMissing` when it is not there
+ */
 export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
 /** How bun:sqlite opens a private database file, or `:memory:` (local-db.ts) */
 declare function bunLocal(): Promise<(file: string) => LocalDb>;

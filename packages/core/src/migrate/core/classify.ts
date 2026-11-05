@@ -40,14 +40,17 @@ import { type PgRead, pgRead } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 import { takenOptions } from "./classify-options.ts"
 
+/** How `parseMigration`, `classifyMigration` and `extractDropStatements` read a migration file */
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
-	/** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
+	// S1 of r19, S1 of r22
+	/** where a SQLite file applies, whose own rule of what it runs the file is held to; default `local` */
 	kind?: TargetKind | undefined
-	/** how the file is read; unnamed, as SQLite, the CLI's default */
+	/** how the file is read; default SQLite, as the CLI's */
 	dialect?: Dialect | undefined
-	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
+	// M72
+	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; default `public` */
 	schema?: string | undefined
 }
 

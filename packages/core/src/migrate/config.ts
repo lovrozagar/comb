@@ -48,8 +48,11 @@ function resolveProviderConfig(input: ProviderConfig): ResolvedDatabaseConfig["p
    CREATE PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
-export type ProviderDeps = { run?: Run | undefined }
+/** What a provider that shells out runs processes with: D1 drives wrangler */
+export type ProviderDeps = {
+	/** runs one command and resolves with its exit code and output; default: spawns the real process */
+	run?: Run | undefined
+}
 
 /** The connection for a provider comb applies through itself; Postgres goes through Atlas instead */
 export function createProvider(config: ConnectionProviderConfig, deps: ProviderDeps = {}): ConnectionProvider {
@@ -71,6 +74,12 @@ export function createProvider(config: ConnectionProviderConfig, deps: ProviderD
    RESOLVE DATABASE CONFIG FOR ENVIRONMENT
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * `dbConfig` resolved for one target: the environment `envName` names, its own name and provider
+ * over the database's, and a Postgres provider's defaults filled in. Throws when a database of
+ * environments gets no `envName`, one it does not declare or one with no provider at either level,
+ * or when a database of one target gets an `envName`
+ */
 export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig {
 	/* New format: environments defined */
 	if (dbConfig.environments) {
@@ -114,19 +123,21 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    DEFINE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// K4 of r21; P11, K12 of the 0.15.0 review
 /**
  * `input`, typed: comb.migrate.config.ts's default export, or what a function export returns, as in
  * `export default async () => defineConfig({…})`, so TypeScript holds an object written inline to its
- * known keys in either form (K4 of r21); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
+ * known keys in either form. It checks nothing at runtime: `loadConfig` validates the config
  */
 export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
 	return input
 }
 
+// K8 of r19
 /**
  * What a config module exports, held to the config schema: an object, or a function that returns one
- * or a promise of one (K8 of r19). A typo, a database of neither shape, or a function a function
- * returned rejects with a ZodError naming where
+ * or a promise of one. A typo, a database of neither shape, or a function a function returned rejects
+ * with a ZodError naming where
  */
 export async function parseConfig(input: unknown): Promise<MigrationConfig> {
 	const exported: unknown = typeof input === "function" ? await (input as () => unknown)() : input
@@ -158,8 +169,11 @@ const RETIRED_FILE_NAMES = [
 	"migration.config.js",
 ]
 
+/** A migrate config `loadConfig` read and validated, with where it was found */
 export type LoadedConfig = {
+	/** the validated config */
 	config: MigrationConfig
+	/** the folder holding the config file, which its relative paths (`migrationsDir`, `drizzleConfigPath`, `wranglerConfig`) resolve against */
 	configDir: string
 }
 

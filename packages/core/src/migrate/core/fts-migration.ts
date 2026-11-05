@@ -21,7 +21,14 @@ const DROP_TABLE = /^DROP TABLE (?:IF EXISTS )?[`"[]?(\w+)[`"\]]?/i
 const RENAME_TO = /^ALTER TABLE [`"[]?\w+[`"\]]? RENAME TO [`"[]?(\w+)[`"\]]?$/i
 
 /** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
-export type FtsObject = { group: string; kind: "table" | "trigger"; sql: string }
+export type FtsObject = {
+	/** the FTS5 table it belongs to: its own name for the table, the table it writes into for a trigger */
+	group: string
+	/** an FTS5 virtual table, or a trigger that keeps one in sync */
+	kind: "table" | "trigger"
+	/** its CREATE statement with comments gone and whitespace one space */
+	sql: string
+}
 
 /** The FTS objects a sequence of migrations leaves, by name */
 type FtsState = Map<string, FtsObject>

@@ -51,6 +51,11 @@ async function managedObjects(conn: Connection): Promise<MasterRow[]> {
 	return rows.filter((row) => !searchIndex(row))
 }
 
+/**
+ * The CREATE statements of the tables, then the indexes, then the triggers of the database `conn`
+ * opens, each ended by `;`: the schema comb manages, without SQLite's, Litestream's or the engine's
+ * own tables, the migration history tables, or FTS5 and spellfix1 indexes
+ */
 export async function introspectSqliteSchema(conn: Connection): Promise<string> {
 	const typeOrder: Record<string, number> = { index: 2, table: 1, trigger: 3 }
 	const sorted = (await managedObjects(conn))
@@ -59,15 +64,18 @@ export async function introspectSqliteSchema(conn: Connection): Promise<string> 
 	return `${sorted.map((row) => row.sql).join(";\n\n")};`
 }
 
+/** The names of the tables comb manages in the database `conn` opens, left out as by `introspectSqliteSchema` */
 export async function getSqliteTables(conn: Connection): Promise<string[]> {
 	return (await managedObjects(conn)).filter((row) => row.type === "table").map((row) => row.name)
 }
 
+/** The column names of `table`, in their order; empty when there is no such table */
 export async function getSqliteColumns(conn: Connection, table: string): Promise<string[]> {
 	const result = await conn.execute(`PRAGMA table_info("${table.replaceAll('"', '""')}")`)
 	return result.rows.map((row) => row[1] as string)
 }
 
+/** The names of the indexes comb manages in the database `conn` opens, SQLite's own autoindexes left out */
 export async function getSqliteIndexes(conn: Connection): Promise<string[]> {
 	return (await managedObjects(conn)).filter((row) => row.type === "index").map((row) => row.name)
 }

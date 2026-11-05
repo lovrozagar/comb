@@ -17,14 +17,27 @@ export function sleep(ms: number): Promise<void> {
    RETRY WITH BACKOFF
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * How `withRetry` retries. The wait before retry n (from 0) is `baseDelay * 2^n` plus up to 1000 ms
+ * of jitter, capped at `maxDelay`
+ */
 export type RetryOptions = {
+	/** retries after the first attempt, at most; default 3 */
 	maxRetries?: number | undefined
+	/** the first retry's wait before jitter, in milliseconds; default 1000 */
 	baseDelay?: number | undefined
+	/** the longest wait, in milliseconds; default 30000 */
 	maxDelay?: number | undefined
+	/** called before each wait with the retry's number from 1, the failure, and the wait in milliseconds */
 	onRetry?: ((attempt: number, error: Error, delay: number) => void) | undefined
 }
 
-/** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
+/**
+ * Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most. A failure
+ * is transient when it, or an error it was caused by, carries an HTTP status of 429 or 5xx or a
+ * network code such as `ECONNRESET`; a SQLite error never is, and no message is read. Any other
+ * failure, or the last one, is thrown, a non-Error wrapped in one
+ */
 export function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = EMPTY_OBJ): Promise<T> {
 	return attempt(fn, options, 0)
 }
@@ -56,10 +69,12 @@ async function retryAfter<T>(err: unknown, { done, fn, options }: Retry<T>): Pro
    CIRCUIT BREAKER
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** A circuit breaker that has counted nothing and is not tripped */
 export function createCircuitBreaker(): CircuitBreakerState {
 	return { failures: 0, totalProcessed: 0, tripped: false }
 }
 
+/** `state` with one more database counted, and one more failure unless `success`; it never trips the breaker, `checkCircuitBreaker` does */
 export function updateCircuitBreaker(state: CircuitBreakerState, success: boolean): CircuitBreakerState {
 	return {
 		...state,
@@ -68,9 +83,18 @@ export function updateCircuitBreaker(state: CircuitBreakerState, success: boolea
 	}
 }
 
+/**
+ * `state`, tripped with its reason once at least `minSampleSize` databases are counted and the share
+ * that failed reaches `failureThreshold`; a tripped state stays tripped
+ */
 export function checkCircuitBreaker(
 	state: CircuitBreakerState,
-	options: { failureThreshold?: number | undefined; minSampleSize?: number | undefined } = EMPTY_OBJ,
+	options: {
+		/** the failed share, 0 to 1, that trips the breaker; default 0.1 */
+		failureThreshold?: number | undefined
+		/** the databases counted before the breaker may trip; default 50 */
+		minSampleSize?: number | undefined
+	} = EMPTY_OBJ,
 ): CircuitBreakerState {
 	const failureThreshold = options.failureThreshold ?? 0.1
 	const minSampleSize = options.minSampleSize ?? 50

@@ -23,10 +23,12 @@ export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiff
    ATLAS AVAILABILITY CHECK
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** Whether `atlas version` runs and exits 0: the Atlas CLI is on PATH */
 export async function checkAtlasInstalled(exec: Run = run): Promise<boolean> {
 	return (await exec("atlas", ["version"])).code === 0
 }
 
+/** The version `atlas version` prints, as `v1.3.0`; null when Atlas does not run or prints none */
 export async function getAtlasVersion(exec: Run = run): Promise<string | null> {
 	const result = await exec("atlas", ["version"])
 	if (result.code !== 0) return null
@@ -37,9 +39,13 @@ export async function getAtlasVersion(exec: Run = run): Promise<string | null> {
    SCHEMA DIFF
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** What `generateSchemaDiff` diffs, and where */
 export type SchemaDiffOptions = {
+	/** the dialect both schemas are written in */
 	dialect: Dialect
+	/** the SQL DDL of the schema the diff starts from */
 	fromSchema: string
+	/** the SQL DDL of the schema the diff ends at */
 	toSchema: string
 	/** The process runner; tests pass a fake. */
 	run?: Run | undefined
@@ -49,17 +55,22 @@ export type SchemaDiffOptions = {
 	readyDev?: ((target: PgTarget) => Promise<void>) | undefined
 }
 
+/** What Atlas's diff of two schemas found */
 export type SchemaDiffResult = {
+	/** the statements that take `fromSchema` to `toSchema`; null when the two are in sync */
 	diff: string | null
 	/** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
 	notices: string[]
+	/** the two schemas are the same, so there is nothing to apply */
 	synced: boolean
 }
 
+// P8 of r18, P2 of r19
 /**
- * Atlas's diff of two schemas, on the dialect's dev database. On Postgres the target's dev schema is
- * made ready first and a failure explained as migrate diff explains one (P8 of r18). devUrl must be
- * a scratch database: with no `target.url`, comb cannot tell it from your real one (P2 of r19).
+ * Atlas's diff of two schemas, on the dialect's dev database: an in-memory one for SQLite, and on
+ * Postgres `target.devUrl`, whose schema is made to exist first. Throws when a Postgres diff has no
+ * `target`, or when Atlas fails, with what it said. `devUrl` must be a scratch database: with no
+ * `target.url`, comb cannot tell it from your real one
  */
 export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<SchemaDiffResult> {
 	const { dialect, fromSchema, toSchema, run: exec = run, target } = options
@@ -101,10 +112,13 @@ export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<Sc
    DRIZZLE SCHEMA EXPORT
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** What `exportDrizzleSchema` exports, and from where */
 export type DrizzleExportOptions = {
 	/** The drizzle config to export, when it is not drizzle-kit's default in cwd */
 	configPath?: string | undefined
+	/** the folder drizzle-kit runs in, which a relative `configPath` resolves against */
 	cwd: string
+	/** the drizzle config's dialect, which the export is normalized for: SQLite's without PRAGMA lines and with 0/1 boolean defaults, Postgres's scoped to `schema` */
 	dialect: Dialect
 	/** The process runner; tests pass a fake. */
 	run?: Run | undefined

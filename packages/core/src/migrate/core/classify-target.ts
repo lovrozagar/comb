@@ -7,10 +7,12 @@
  */
 import type { Pragma } from "./sql-code.ts"
 
+// S1 of r22
 /**
- * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
+ * Where a SQLite-family file applies, which the CLI reads from its provider: `local` a SQLite file
  * comb opens itself (bun:sqlite, a libsql `file:` or `:memory:`), `sqld` a libsql server (a libsql URL of any other
- * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of what it runs.
+ * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of
+ * what it runs, so a statement one refuses is refused before anything applies
  */
 type TargetKind = "d1" | "local" | "sqld"
 

@@ -76,11 +76,12 @@ function finish(reading: Reading): string {
 	return statement
 }
 
+// pg-split.ts, M75
 /**
  * The statements of `sql`, without their terminating `;`. On SQLite they end where SQLite ends
- * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On Postgres
- * they are the statements Postgres runs, the one Postgres split (pg-split.ts, M75), read after
- * loadPostgresParser(). A stretch that holds only comments is not a statement.
+ * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On
+ * Postgres they are the statements Postgres's own parser splits it into, so `await
+ * loadPostgresParser()` first: until then it throws. A stretch that holds only comments is not a statement.
  */
 function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] {
 	if (dialect === "postgres") return pgStatements(sql)
