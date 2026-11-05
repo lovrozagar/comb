@@ -117,9 +117,21 @@ describe("openLibsqlFile on a failure (SL1 of r22)", () => {
 		}
 		expect(await rows(file, "SELECT count(*) FROM sqlite_master")).toEqual([[0]])
 	})
+})
 
-	it("passes on a database it cannot open as libsql reports it", async () => {
-		await expect(openLibsqlFile(path.join(dbFile(), "missing", "core.db"))).rejects.toThrow(/Unable to open/)
+/* D6-7 of the area D round-six review */
+describe("openLibsqlFile on a database whose folder is missing, or that cannot open", () => {
+	it("passes on a database it cannot open as libsql reports it, naming the path it tried", async () => {
+		const file = dbFile()
+		fs.mkdirSync(file)
+		await expect(openLibsqlFile(file)).rejects.toThrow(`cannot open the SQLite database ${file}: `)
+	})
+
+	it("creates a missing folder, as it creates the file", async () => {
+		const file = path.join(path.dirname(dbFile()), "missing", "sub", "core.db")
+		const conn = await openLibsqlFile(file)
+		await conn.close()
+		expect(fs.existsSync(file)).toBe(true)
 	})
 })
 

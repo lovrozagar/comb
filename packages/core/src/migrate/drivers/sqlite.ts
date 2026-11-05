@@ -2,7 +2,6 @@
  * SQLite driver implementations (Turso, libsql), and SQLite schema introspection. The bun:sqlite
  * driver lives in bun-sqlite.ts, the one file Bun's APIs may appear in.
  */
-import { existsSync } from "node:fs"
 import * as z from "zod"
 import { chainText } from "../../error-chain.ts"
 import type {
@@ -17,6 +16,7 @@ import { BUSY_TIMEOUT } from "../core/apply.ts"
 import { pastStop } from "../core/cleanup.ts"
 import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
 import { type Client, type InValue, libsql } from "./libsql-client.ts"
+import { openFileDatabase } from "./file-open.ts"
 import { DatabaseMissing } from "./missing.ts"
 
 export { createBunSqliteProvider } from "./bun-sqlite.ts"
@@ -210,18 +210,18 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
 			await pastStop()
-			/* libsql has no read-only mode for a file, and creates a missing one on connect */
 			const file = libsqlFile(config.url)
-			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
-				throw new DatabaseMissing(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await libsql()
 			/* `Config` from @libsql/client admits no explicit undefined, so the key is left out */
-			const client = createClient({
-				...(config.authToken === undefined ? {} : { authToken: config.authToken }),
-				url: config.url,
+			const open = () =>
+				createClient({ ...(config.authToken === undefined ? {} : { authToken: config.authToken }), url: config.url })
+			if (file === undefined || file === ":memory:") return createLibsqlConnection(open())
+			/* libsql has no read-only mode for a file, and creates a missing one; a file waits for a lock another process holds (SL4 of r22) */
+			const client = await openFileDatabase(file, dbConfig?.readonly === true, async () => {
+				const opened = open()
+				await opened.execute({ args: [], sql: BUSY_TIMEOUT })
+				return opened
 			})
-			/* a file waits for a lock another process holds (SL4 of r22); a server refuses every pragma (S1 of r22) */
-			if (file !== undefined) await client.execute({ args: [], sql: BUSY_TIMEOUT })
 			return createLibsqlConnection(client)
 		},
 		dialect: "sqlite",

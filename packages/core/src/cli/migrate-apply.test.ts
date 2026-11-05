@@ -10,10 +10,10 @@ const temp = projects()
 const project = temp.make
 afterEach(temp.clean)
 
-/** A project with comb.migrate.config.ts over a libsql file, and these migrations in ./m */
-function configured(migrations: Record<string, string>): { dir: string; url: string } {
+/** A project with comb.migrate.config.ts over a libsql file at `db` in it, and these migrations in ./m */
+function configured(migrations: Record<string, string>, db = "core.db"): { dir: string; url: string } {
 	const dir = project()
-	const url = `file:${join(dir, "core.db")}`
+	const url = `file:${join(dir, db)}`
 	mkdirSync(join(dir, "m"))
 	for (const [name, sql] of Object.entries(migrations)) writeFileSync(join(dir, "m", name), sql)
 	writeSum(join(dir, "m"))
@@ -134,6 +134,24 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(hashes.errors).toEqual([
 			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
 		])
+	})
+})
+
+describe("migrate apply on a libsql file whose folder is missing (D6-7)", () => {
+	it("creates the folder, as it creates the file, and applies", async () => {
+		const { dir, url } = configured({ "0001_t.sql": "CREATE TABLE t (id INTEGER);\n" }, "missing/sub/core.db")
+		const run = io(dir)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], run)).toBe(0)
+		expect(existsSync(join(dir, "missing/sub/core.db"))).toBe(true)
+		expect(await tables(url)).toEqual(["__drizzle_migrations", "t"])
+	})
+
+	it("names the path it tried when the database cannot open", async () => {
+		const { dir } = configured({ "0001_t.sql": "CREATE TABLE t (id INTEGER);\n" }, "taken/core.db")
+		mkdirSync(join(dir, "taken/core.db"), { recursive: true })
+		const run = io(dir)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain(`cannot open the SQLite database ${join(dir, "taken/core.db")}: `)
 	})
 })
 

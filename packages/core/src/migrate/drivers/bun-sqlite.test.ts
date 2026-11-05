@@ -5,7 +5,7 @@
  * runs the same driver on bun:sqlite itself.
  */
 import { describe, expect, it, vi } from "vitest"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { bunLocal, createBunSqliteProvider } from "./bun-sqlite.ts"
@@ -48,6 +48,38 @@ describe("createBunSqliteProvider", () => {
 		).rejects.toThrow()
 		expect((await conn.execute("SELECT count(*) AS n FROM t")).rows).toEqual([[0]])
 		await conn.close()
+	})
+})
+
+describe("createBunSqliteProvider on a file whose folder is missing, or that cannot open (D6-7)", () => {
+	it("creates the folder on a writable connect, as it creates the file, and none on a read-only one", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-bun-vitest-"))
+		try {
+			const path = join(dir, "missing/sub/core.db")
+			const provider = createBunSqliteProvider({ path, type: "bun-sqlite" })
+			await expect(provider.connect({ ...DB, readonly: true })).rejects.toThrow("does not exist")
+			expect(existsSync(join(dir, "missing"))).toBe(false)
+			const conn = await provider.connect(DB)
+			await conn.close()
+			expect(existsSync(path)).toBe(true)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("names the path it tried when the file cannot open, writable or read-only", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-bun-vitest-"))
+		try {
+			const path = join(dir, "core.db")
+			mkdirSync(path)
+			const provider = createBunSqliteProvider({ path, type: "bun-sqlite" })
+			await expect(provider.connect(DB)).rejects.toThrow(`cannot open the SQLite database ${path}: `)
+			await expect(provider.connect({ ...DB, readonly: true })).rejects.toThrow(
+				`cannot open the SQLite database ${path}: `,
+			)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })
 

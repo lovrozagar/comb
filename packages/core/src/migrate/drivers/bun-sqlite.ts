@@ -2,11 +2,10 @@
  * The bun:sqlite migration driver. Bun's APIs live in this file alone (comb/boundaries), and
  * bun:sqlite is imported on connect, so the module loads under Node too.
  */
-import { existsSync } from "node:fs"
 import { BUSY_TIMEOUT } from "../core/apply.ts"
 import { pastStop } from "../core/cleanup.ts"
+import { openFileDatabase } from "./file-open.ts"
 import type { LocalDb } from "./local-db.ts"
-import { DatabaseMissing } from "./missing.ts"
 import type {
 	BunSqliteProviderConfig,
 	Connection,
@@ -69,19 +68,19 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 			await pastStop()
 			/* an in-memory database holds nothing to protect, and bun opens none read-only */
 			const readonly = dbConfig?.readonly === true && config.path !== ":memory:"
-			if (readonly && !existsSync(config.path))
-				throw new DatabaseMissing(
-					`${config.path} does not exist; check and status open a database read-only, and create none`,
-				)
 			/* a specifier TypeScript does not resolve: a Node consumer compiles this without bun-types */
 			const { Database } = (await import(BUN_SQLITE)) as {
 				Database: new (path: string, options?: { readonly?: boolean | undefined }) => BunDatabase
 			}
-			const db = readonly ? new Database(config.path, { readonly }) : new Database(config.path)
-			/* SQLite opens with foreign keys off; the proof run, libsql and D1 apply with them on */
-			db.run("PRAGMA foreign_keys = ON")
-			db.run(BUSY_TIMEOUT)
-			return bunSqliteConnection(db)
+			const open = () => {
+				const db = readonly ? new Database(config.path, { readonly }) : new Database(config.path)
+				/* SQLite opens with foreign keys off; the proof run, libsql and D1 apply with them on */
+				db.run("PRAGMA foreign_keys = ON")
+				db.run(BUSY_TIMEOUT)
+				return db
+			}
+			const memory = config.path === ":memory:"
+			return bunSqliteConnection(memory ? open() : await openFileDatabase(config.path, readonly, open))
 		},
 		dialect: "sqlite",
 	}

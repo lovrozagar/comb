@@ -10,6 +10,7 @@ import { BUSY_TIMEOUT, type FileConnection } from "../core/apply.ts"
 import { pastStop } from "../core/cleanup.ts"
 import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
+import { openFileDatabase } from "./file-open.ts"
 import { segments } from "../core/sql-scan.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
 
@@ -78,13 +79,15 @@ function asClient(error: unknown): unknown {
 async function openLibsqlFile(file: string): Promise<FileConnection> {
 	await pastStop()
 	const Database = await libsqlDatabase()
-	let db: Database
-	try {
-		db = new Database(file)
-		db.exec(BUSY_TIMEOUT)
-	} catch (error) {
-		throw asClient(error)
-	}
+	const db = await openFileDatabase(file, false, () => {
+		try {
+			const opened = new Database(file)
+			opened.exec(BUSY_TIMEOUT)
+			return opened
+		} catch (error) {
+			throw asClient(error)
+		}
+	})
 	return {
 		batch: async (statements) => {
 			try {
