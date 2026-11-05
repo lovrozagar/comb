@@ -66,17 +66,20 @@ const ONE_PART = /* @__PURE__ */ new RegExp(PART, "g")
 // per-process-constant: a name, its schema parts before it, as a pattern
 const NAME = `(?:(?:${PART})\\s*\\.\\s*)*(?:${PART})`
 
-/* Postgres's ONLY before an UPDATE's or a DELETE's table, which names no table (AB7 of area B): read as
- * ONLY only where a name follows it, as SQLite, which has no ONLY, may name a bare table `only` */
-const ONLY = "(?:\\s+only(?=\\s+(?!(?:where|returning|set|as|indexed|not)\\b)[^\\s;]))?"
-
 /* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
- * statement's own verb on: a name its schema qualifies or not, each part quoted or bare */
+ * statement's own verb on: a name its schema qualifies or not, each part quoted or bare. `only` is
+ * Postgres's ONLY, a reserved word there that names no table (AB7 of area B), and SQLite's name of a
+ * table, as SQLite has no ONLY (B2-10 of area B) */
+const statementTables = (only: string) =>
+	new RegExp(
+		`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into|update(?:\\s+or\\s+\\w+)?${only}|delete\\s+from${only})\\s+(${NAME})`,
+		"i",
+	)
 // per-process-constant: see above
-const STATEMENT_TABLE = /* @__PURE__ */ new RegExp(
-	`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into|update(?:\\s+or\\s+\\w+)?${ONLY}|delete\\s+from${ONLY})\\s+(${NAME})`,
-	"i",
-)
+const STATEMENT_TABLE = {
+	postgres: /* @__PURE__ */ statementTables("(?:\\s+only\\b)?"),
+	sqlite: /* @__PURE__ */ statementTables(""),
+}
 
 /** One name part as written, unquoted */
 function unquoted(part: string): string {
@@ -86,12 +89,15 @@ function unquoted(part: string): string {
 }
 
 /**
- * The table `query` writes to, or undefined when no wrapper recorded the SQL or it writes none: the
- * table and the schema written before it, if any, each unquoted (U8). SQLite keys its maps by the
- * table alone; Postgres resolves both to a map key as every other violation does (QE8 of r22b)
+ * The table `query` writes to in `dialect`, or undefined when no wrapper recorded the SQL or it writes
+ * none: the table and the schema written before it, if any, each unquoted (U8). SQLite keys its maps
+ * by the table alone; Postgres resolves both to a map key as every other violation does (QE8 of r22b)
  */
-export function statementTable(query: string | undefined): { schema: string | undefined; table: string } | undefined {
-	const name = STATEMENT_TABLE.exec(statementHead(query ?? ""))?.[1]
+export function statementTable(
+	query: string | undefined,
+	dialect: "postgres" | "sqlite",
+): { schema: string | undefined; table: string } | undefined {
+	const name = STATEMENT_TABLE[dialect].exec(statementHead(query ?? ""))?.[1]
 	if (name === undefined) return undefined
 	const parts = (name.match(ONE_PART) as string[]).map(unquoted)
 	return { schema: parts.at(-2), table: parts.at(-1) as string }
@@ -99,7 +105,7 @@ export function statementTable(query: string | undefined): { schema: string | un
 
 // per-process-constant: an UPDATE up to its SET list, past an alias and an INDEXED BY or NOT INDEXED
 const UPDATE_SET = /* @__PURE__ */ new RegExp(
-	`^update(?:\\s+or\\s+\\w+)?${ONLY}\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?(?:\\s+indexed\\s+by\\s+(?:${PART})|\\s+not\\s+indexed)?\\s+set\\s+`,
+	`^update(?:\\s+or\\s+\\w+)?\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?(?:\\s+indexed\\s+by\\s+(?:${PART})|\\s+not\\s+indexed)?\\s+set\\s+`,
 	"i",
 )
 // per-process-constant: the head of one assignment: a column, or a parenthesized list of them, before its `=`
@@ -119,9 +125,9 @@ function topLevelPieces(list: string): string[] {
 }
 
 /**
- * The columns an UPDATE's SET list assigns, unquoted, its list read up to a top-level WHERE, FROM
- * or RETURNING: each assignment's head, one column or a row value's list of them; undefined when
- * `query` is no UPDATE
+ * The columns a SQLite UPDATE's SET list assigns, unquoted, its list read up to a top-level WHERE,
+ * FROM or RETURNING: each assignment's head, one column or a row value's list of them; undefined
+ * when `query` is no UPDATE
  */
 export function updatedColumns(query: string | undefined): string[] | undefined {
 	const head = statementHead(query ?? "")

@@ -92,7 +92,11 @@ function foreignKey(v: Violation): CombError {
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 			status: "conflict",
 		} as const
-		return toError(v, { entry: undefined, fallback, table: mapTable(v.maps, statementTable(v.read.query) ?? NO_TABLE) })
+		return toError(v, {
+			entry: undefined,
+			fallback,
+			table: mapTable(v.maps, statementTable(v.read.query, "postgres") ?? NO_TABLE),
+		})
 	}
 	/* a composite key is found in the map by its first column, as codegen writes it, and names no
 	   column: one would blame half the key, and may sit beside a private one (Q18 of r17) */
