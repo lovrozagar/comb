@@ -64,19 +64,21 @@ function waitOut(ms: number): Promise<true | NodeJS.Signals> {
 
 /**
  * `args` run by wrangler, its stdout once it exits 0. A --local command another process's lock on the file
- * made fail runs again, after a backoff, until LOCAL_LOCK_MS have passed: wrangler sends each --command as
+ * made fail runs again, after a backoff, until LOCAL_LOCK_MS have passed since the first failure it met (a cold
+ * start can outlast the whole window, so the window starts at the lock, not the start): wrangler sends each --command as
  * one request, and miniflare runs each request in one transaction (transactionSync), so the request a held
  * lock failed made no change, and running it again runs it once. Even a read takes the write lock there, and
  * a command cannot set busy_timeout (SQLITE_AUTH), so the wait is comb's. A remote command runs once.
  */
 async function runWrangler({ exec, wrangler }: Wrangler, args: string[]): Promise<string> {
-	const deadline = Date.now() + LOCAL_LOCK_MS
+	let deadline: number | undefined
 	for (let delay = 100; ; delay *= 2) {
 		const { code, stderr, stdout } = await runPeer(exec, wrangler)(args)
 		if (code === 0) return stdout
 		const failed = `wrangler failed (exit ${code})`
 		if (!args.includes("--local") || !LOCAL_BUSY.test(`${stderr}\n${stdout}`))
 			throw new Error(`${failed}: ${stderr.trim() || stdout.trim()}`)
+		deadline ??= Date.now() + LOCAL_LOCK_MS
 		const left = deadline - Date.now()
 		if (left <= 0)
 			throw new Error(`${failed}: the local D1 database stayed locked by ${LOCKER} for 5 s: let it finish and rerun`)

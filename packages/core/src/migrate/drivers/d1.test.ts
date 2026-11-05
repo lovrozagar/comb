@@ -265,6 +265,14 @@ function fakeClock(): void {
 }
 
 /* a --local request takes the file's write lock even to read, and fails at once while another process holds it */
+/* a cold miniflare start on a loaded machine can take longer than the whole window */
+const slowly =
+	(run: Run): Run =>
+	async (...args) => {
+		await new Promise((resolve) => setTimeout(resolve, 6000))
+		return run(...args)
+	}
+
 describe("createD1Provider: a local database another process has locked", () => {
 	fakeClock()
 
@@ -296,6 +304,20 @@ describe("createD1Provider: a local database another process has locked", () => 
 		const ran = run.calls.length
 		await vi.advanceTimersByTimeAsync(5000)
 		expect([ran > 2, run.calls.length]).toEqual([true, ran])
+	})
+
+	it("waits out a lock its first run met, however long that run took to start", async () => {
+		const run = answering(BUSY, json([{ results: [{ n: 1 }] }]))
+		const rows = (await connect(slowly(run), LOCAL)).execute("SELECT 1 AS n")
+		await vi.advanceTimersByTimeAsync(20_000)
+		expect([await rows, run.calls.length]).toEqual([{ columns: ["n"], rows: [[1]] }, 2])
+	})
+
+	it("counts the 5 s from the first busy answer, not from the first start", async () => {
+		const run = answering(BUSY)
+		const failed = (await connect(slowly(run), LOCAL)).execute("x").then(unexpected, (error: unknown) => error as Error)
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect([run.calls.length > 1, (await failed).message]).toEqual([true, LOCKED])
 	})
 })
 
