@@ -227,8 +227,8 @@ describe("migrate apply on D1: comb's history before 0.8", () => {
 		expect(recorded(d1)).toEqual(["20260101000000_init.sql", "20260102000000_more.sql"])
 	})
 
-	/* M44: D1 keeps no time a hash was recorded, so baseline records the current hash, the one check compares */
-	it("records the current hash for a file comb 0.7 recorded under its pre-0.5.0 hash, so check passes", async () => {
+	/* M44: D1 keeps no time a hash was recorded; the pre-0.8 record still holding the pre-0.5.0 hash vouches for it */
+	it("copies the pre-0.5.0 hash comb 0.7 recorded for a file, so check passes while that record holds it", async () => {
 		const sql = "INSERT INTO post VALUES ('a -- b\nc');"
 		const dir = worker({ ...INIT, "20260101000001_row.sql": sql })
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })

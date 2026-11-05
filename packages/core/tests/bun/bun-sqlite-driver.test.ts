@@ -79,7 +79,7 @@ describe("createBunSqliteProvider read-only, as check and status open it (M10)",
 })
 
 describe("ensureMigrationsTable on bun:sqlite, which names no columns for an empty result (M10)", () => {
-	it("adds the name column to a history from before 0.11 once, however often it runs", async () => {
+	it("adds the name and hash_v columns to a history from before 0.11 once, however often it runs", async () => {
 		const conn = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
 		await conn.execute(
 			"CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)",
@@ -87,7 +87,7 @@ describe("ensureMigrationsTable on bun:sqlite, which names no columns for an emp
 		await ensureMigrationsTable(conn)
 		await ensureMigrationsTable(conn)
 		const { rows } = await conn.execute("SELECT name FROM pragma_table_info('__drizzle_migrations') ORDER BY cid")
-		expect(rows).toEqual([["id"], ["hash"], ["created_at"], ["name"]])
+		expect(rows).toEqual([["id"], ["hash"], ["created_at"], ["name"], ["hash_v"]])
 		await conn.close()
 	})
 })

@@ -10,20 +10,23 @@
  * A file's
  * pre-0.5.0 hash matches only a row recorded before comb stopped recording it (migrationHashes): a
  * later row was recorded under the current hash, so a match by it is an edit its normalizing hides
- * inside a literal. Its folded hash (0.5.0 to 0.20) matches a row of any date, as no date tells
- * which comb recorded it.
+ * inside a literal. Its folded hash (0.5.0 to 0.20) matches a row of any date that `hash_v` does not
+ * mark: a row comb from 0.21 wrote holds the exact hash, and only that matches it.
  */
 import type { AcceptedHash } from "./parse.ts"
 
 /** A file of the directory, and the hashes its text has (migrationHashes: current first, then the earlier ones) */
 type FileHashes = { hashes: readonly AcceptedHash[]; name: string }
 
-/** One row of the history, with when it was recorded (`created_at`, ms) */
-type HistoryRow = { createdAt: number; hash: string; name: string | null }
+/**
+ * One row of the history, with when it was recorded (`created_at`, ms), and whether `hash_v` marks it
+ * as written by comb from 0.21 (parse.ts HASH_VERSION)
+ */
+type HistoryRow = { createdAt: number; hash: string; marked: boolean; name: string | null }
 
 /** Whether `row` records `file`'s text: a hash its text has, on a row recorded while comb recorded that hash */
 const holds = (file: FileHashes, row: HistoryRow): boolean =>
-	file.hashes.some(({ hash, until }) => row.hash === hash && row.createdAt < until)
+	file.hashes.some(({ hash, marked, until }) => row.hash === hash && row.createdAt < until && (marked || !row.marked))
 
 /** What the history makes of the files */
 type Matched = {

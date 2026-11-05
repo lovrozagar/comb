@@ -1,10 +1,12 @@
 /**
  * comb's own migration record on SQLite: the `__drizzle_migrations` table, the hashes in it and,
  * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
- * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
+ * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart; from 0.21
+ * each row comb writes carries `hash_v`, which says it holds the exact hash (parse.ts HASH_VERSION)
  */
 import { chainText } from "../../error-chain.ts"
 import type { Connection } from "../types.ts"
+import { HASH_VERSION } from "./parse.ts"
 import { Refused } from "./refused.ts"
 import { isTransient } from "./transient.ts"
 import { type RetryOptions, withRetry } from "./utils.ts"
@@ -18,7 +20,8 @@ const TABLE = `(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      name TEXT UNIQUE
+      name TEXT UNIQUE,
+      hash_v INTEGER
     )`
 
 /** Whether a unique index of comb's history holds its hash alone, as comb's table did before 0.13 */
@@ -47,8 +50,10 @@ export async function ensureMigrationsTable(
 	/* a history from before 0.11 gains the column; drizzle's own migrator ignores it */
 	/* PRAGMA table_info answers in rows, since a driver may name no columns for an empty result */
 	const { columns, rows } = await conn.execute("PRAGMA table_info(__drizzle_migrations)")
-	const named = rows.some((row) => row[columns.indexOf("name")] === "name")
-	if (!named) await conn.execute("ALTER TABLE __drizzle_migrations ADD COLUMN name TEXT")
+	const has = (column: string) => rows.some((row) => row[columns.indexOf("name")] === column)
+	if (!has("name")) await conn.execute("ALTER TABLE __drizzle_migrations ADD COLUMN name TEXT")
+	/* a history 0.20 or earlier wrote gains it too, every row it holds left without it */
+	if (!has("hash_v")) await conn.execute("ALTER TABLE __drizzle_migrations ADD COLUMN hash_v INTEGER")
 	/* a history from before 0.13 holds each hash once: rebuilt, in one batch, with every row and id kept */
 	if (!(await hashUnique(conn))) return
 	/* a history made without AUTOINCREMENT has no counter; its largest id is where the new one starts */
@@ -68,7 +73,7 @@ export async function ensureMigrationsTable(
 		...dependents.map(({ name, type }) => ({ sql: `DROP ${type.toUpperCase()} "${name.replaceAll('"', '""')}"` })),
 		{ sql: `CREATE TABLE __drizzle_migrations_next ${TABLE}` },
 		{
-			sql: "INSERT INTO __drizzle_migrations_next (id, hash, created_at, name) SELECT id, hash, created_at, name FROM __drizzle_migrations",
+			sql: "INSERT INTO __drizzle_migrations_next (id, hash, created_at, name, hash_v) SELECT id, hash, created_at, name, hash_v FROM __drizzle_migrations",
 		},
 		...renamed.map(({ id, name }) => ({
 			params: [name, id],
@@ -107,7 +112,7 @@ export async function checkMigrationHash(conn: Connection, hashes: string | read
 	return result.rows.length > 0
 }
 
-const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)"
+const RECORD = `INSERT INTO __drizzle_migrations (hash, created_at, name, hash_v) VALUES (?, ?, ?, ${HASH_VERSION})`
 
 /**
  * Set on every connection comb opens to a local file: a write lock the app serving the

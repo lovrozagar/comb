@@ -4,7 +4,10 @@ import { foldedMigrationHash, generateMigrationHash, migrationHashes, V0_5_0 } f
 
 /** A file with its current hash and, after it, its pre-0.5.0 one */
 const file = (name: string, current: string, legacy?: string) => ({
-	hashes: [{ hash: current, until: Infinity }, ...(legacy === undefined ? [] : [{ hash: legacy, until: V0_5_0 }])],
+	hashes: [
+		{ hash: current, marked: true, until: Infinity },
+		...(legacy === undefined ? [] : [{ hash: legacy, marked: false, until: V0_5_0 }]),
+	],
 	name,
 })
 
@@ -18,18 +21,22 @@ describe("matchHistory: the legacy hash", () => {
 
 	it("matches a named row by the file's legacy hash only when the row predates 0.5.0", () => {
 		const files = [file("1.sql", "current", "legacy")]
-		expect([...matchHistory(files, [{ createdAt: before, hash: "legacy", name: "1.sql" }], true).applied]).toEqual([
-			"1.sql",
-		])
-		expect(matchHistory(files, [{ createdAt: after, hash: "legacy", name: "1.sql" }], true).edited).toEqual(["1.sql"])
+		expect([
+			...matchHistory(files, [{ createdAt: before, hash: "legacy", marked: false, name: "1.sql" }], true).applied,
+		]).toEqual(["1.sql"])
+		expect(
+			matchHistory(files, [{ createdAt: after, hash: "legacy", marked: false, name: "1.sql" }], true).edited,
+		).toEqual(["1.sql"])
 	})
 
 	it("matches an unnamed row by the legacy hash only when the row predates 0.5.0", () => {
 		const files = [file("1.sql", "current", "legacy")]
-		expect(matchHistory(files, [{ createdAt: before, hash: "legacy", name: null }], true).named).toEqual([
-			{ hash: "legacy", name: "1.sql" },
-		])
-		expect(matchHistory(files, [{ createdAt: after, hash: "legacy", name: null }], true).orphans).toHaveLength(1)
+		expect(matchHistory(files, [{ createdAt: before, hash: "legacy", marked: false, name: null }], true).named).toEqual(
+			[{ hash: "legacy", name: "1.sql" }],
+		)
+		expect(
+			matchHistory(files, [{ createdAt: after, hash: "legacy", marked: false, name: null }], true).orphans,
+		).toHaveLength(1)
 	})
 })
 
@@ -43,20 +50,33 @@ describe("matchHistory: the hash that folded every space", () => {
 
 	it("matches a row of any date by the folded hash of the unchanged file", () => {
 		const folded = foldedMigrationHash(unicode)
-		const matched = matchHistory(files, [{ createdAt: later, hash: folded, name: "1.sql" }], true)
+		const matched = matchHistory(files, [{ createdAt: later, hash: folded, marked: false, name: "1.sql" }], true)
 		expect([...matched.applied]).toEqual(["1.sql"])
 		expect(matched.edited).toEqual([])
-		expect(matchHistory(files, [{ createdAt: later, hash: folded, name: null }], true).named).toEqual([
+		expect(matchHistory(files, [{ createdAt: later, hash: folded, marked: false, name: null }], true).named).toEqual([
 			{ hash: folded, name: "1.sql" },
 		])
 	})
 
+	/* a row hash_v marks holds the exact hash, so only that matches it */
+	it("names a file edited to such a space on a row hash_v marks, and the legacy hash never matches one", () => {
+		const row = { createdAt: later, hash: generateMigrationHash(ascii), marked: true, name: "1.sql" }
+		expect(matchHistory(files, [row], true).edited).toEqual(["1.sql"])
+		const legacy = [file("1.sql", "current", "legacy")]
+		const early = { createdAt: Date.parse("2026-10-17T12:00:00Z"), hash: "legacy", marked: true, name: "1.sql" }
+		expect(matchHistory(legacy, [early], true).edited).toEqual(["1.sql"])
+	})
+
 	it("names a file applied with such a space, then edited to a plain one, and takes the edit the other way", () => {
 		const plain = [{ hashes: migrationHashes(ascii), name: "1.sql" }]
-		const kept = [{ createdAt: later, hash: generateMigrationHash(unicode), name: "1.sql" }]
+		const kept = [{ createdAt: later, hash: generateMigrationHash(unicode), marked: false, name: "1.sql" }]
 		expect(matchHistory(plain, kept, true).edited).toEqual(["1.sql"])
 		expect(
-			matchHistory(files, [{ createdAt: later, hash: generateMigrationHash(ascii), name: "1.sql" }], true).edited,
+			matchHistory(
+				files,
+				[{ createdAt: later, hash: generateMigrationHash(ascii), marked: false, name: "1.sql" }],
+				true,
+			).edited,
 		).toEqual([])
 	})
 })
@@ -65,12 +85,14 @@ describe("matchHistory: the hash that folded every space", () => {
 describe("matchHistory: a file whose text a --file row holds", () => {
 	it("names each unapplied file a ../ row holds the text of, and never one a row records itself", () => {
 		const rows = [
-			{ createdAt: NOW, hash: "h", name: "../hotfix.sql" },
-			{ createdAt: NOW, hash: "a", name: "1.sql" },
+			{ createdAt: NOW, hash: "h", marked: false, name: "../hotfix.sql" },
+			{ createdAt: NOW, hash: "a", marked: false, name: "1.sql" },
 		]
 		const matched = matchHistory([file("1.sql", "a"), file("2_hotfix.sql", "h")], rows, true)
 		expect(matched.copies).toEqual([{ file: "2_hotfix.sql", row: "../hotfix.sql" }])
-		expect(matchHistory([file("1.sql", "h")], [{ createdAt: NOW, hash: "h", name: "1.sql" }], true).copies).toEqual([])
+		expect(
+			matchHistory([file("1.sql", "h")], [{ createdAt: NOW, hash: "h", marked: false, name: "1.sql" }], true).copies,
+		).toEqual([])
 	})
 })
 
@@ -80,8 +102,8 @@ describe("matchHistory", () => {
 		const matched = matchHistory(
 			[file("1.sql", "a"), file("2.sql", "b2")],
 			[
-				{ createdAt: NOW, hash: "a", name: "1.sql" },
-				{ createdAt: NOW, hash: "b", name: "2.sql" },
+				{ createdAt: NOW, hash: "a", marked: false, name: "1.sql" },
+				{ createdAt: NOW, hash: "b", marked: false, name: "2.sql" },
 			],
 			true,
 		)
@@ -93,8 +115,8 @@ describe("matchHistory", () => {
 		const matched = matchHistory(
 			[file("2.sql", "x"), file("4.sql", "x"), file("5.sql", "y")],
 			[
-				{ createdAt: NOW, hash: "x", name: "2.sql" },
-				{ createdAt: NOW, hash: "y", name: null },
+				{ createdAt: NOW, hash: "x", marked: false, name: "2.sql" },
+				{ createdAt: NOW, hash: "y", marked: false, name: null },
 			],
 			true,
 		)
@@ -104,15 +126,15 @@ describe("matchHistory", () => {
 
 	it("calls a row that matches no file an orphan over the whole directory, and nothing over one file", () => {
 		const rows = [
-			{ createdAt: NOW, hash: "a", name: "gone.sql" },
-			{ createdAt: NOW, hash: "zzzzzzzzzzzzzzzz", name: null },
+			{ createdAt: NOW, hash: "a", marked: false, name: "gone.sql" },
+			{ createdAt: NOW, hash: "zzzzzzzzzzzzzzzz", marked: false, name: null },
 		]
 		expect(matchHistory([file("1.sql", "b")], rows, true).orphans).toEqual(rows)
 		expect(matchHistory([file("1.sql", "b")], rows, false).orphans).toEqual([])
 	})
 
 	it("leaves a row --file recorded from outside the directory out of the orphans", () => {
-		const rows = [{ createdAt: NOW, hash: "a", name: "../lone.sql" }]
+		const rows = [{ createdAt: NOW, hash: "a", marked: false, name: "../lone.sql" }]
 		expect(matchHistory([file("1.sql", "b")], rows, true).orphans).toEqual([])
 	})
 

@@ -8,7 +8,7 @@ import { executeAll } from "../drivers/d1.ts"
 import { type D1Target, localMissing, type ReadConfig } from "./d1-binding.ts"
 import type { d1Files } from "./d1-files.ts"
 import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
-import { foldedMigrationHash, generateMigrationHash, legacyMigrationHash } from "./parse.ts"
+import { foldedMigrationHash, generateMigrationHash, HASH_VERSION, legacyMigrationHash } from "./parse.ts"
 
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
@@ -23,15 +23,20 @@ const namesOf = (table: string): string => `SELECT name FROM ${quoteName(table)}
 /** One statement's rows, as executeAll answers them */
 type Rows = Array<Record<string, unknown>>
 
+/** A hash comb recorded for a file, and whether `hash_v` marks it as this comb's, the exact hash (parse.ts HASH_VERSION) */
+type Recorded = { hash: string; marked: boolean }
+
 /**
  * What the history tables hold: wrangler's names, comb's hashes and intents, and comb's pre-0.8
- * record; the intents and that record undefined where their table is absent
+ * record; the intents and that record undefined where their table is absent; `marks` unless comb's
+ * hash table is one 0.20 or earlier made, without `hash_v`, which the first write adds
  */
 type HistoryRead = {
 	applied: Set<string>
 	drizzle: Set<string> | undefined
 	intents: Map<string, string> | undefined
-	recorded: Map<string, string>
+	marks: boolean
+	recorded: Map<string, Recorded>
 }
 
 /** What a database comb never reached holds: no history at all */
@@ -39,6 +44,7 @@ const noHistory = (): HistoryRead => ({
 	applied: new Set(),
 	drizzle: undefined,
 	intents: undefined,
+	marks: true,
 	recorded: new Map(),
 })
 
@@ -47,24 +53,25 @@ const byName = (rows: Rows) => new Map(rows.map((row) => [String(row["name"]), S
 
 /**
  * The history in as few wrangler calls as it takes, each a process of its own: a listing says
- * which tables exist, and one more call reads those. Nothing is made: apply and baseline write their
+ * which tables exist, and whether comb's hash table has `hash_v`, and one more call reads those. Nothing is made: apply and baseline write their
  * tables only once every check has passed, and a local database wrangler
  * keeps nowhere yet holds no history, read without a call that would create it.
  */
 async function readHistory(read: ReadConfig, target: D1Target, table: string): Promise<HistoryRead> {
 	if (localMissing(read, target)) return noHistory()
+	const tables = [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE, DRIZZLE_HISTORY_TABLE]
+	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${tables.map(literal).join(", ")})`
+	const versioned = `SELECT name FROM pragma_table_info(${literal(D1_HASH_TABLE)}) WHERE name = 'hash_v'`
+	/* executeAll answers one result per statement, or throws */
+	const [listed, columns] = await executeAll(target.exec, target, [listing, versioned])
+	const present = new Set((listed as Rows).map((row) => String(row["name"])))
+	const marks = !present.has(D1_HASH_TABLE) || (columns as Rows).length > 0
 	const [names, hashes, intents, drizzle] = [
 		namesOf(table),
-		`SELECT name, hash FROM ${D1_HASH_TABLE}`,
+		`SELECT name, hash, ${marks ? "hash_v" : "NULL AS hash_v"} FROM ${D1_HASH_TABLE}`,
 		`SELECT name, hash FROM ${D1_HASH_INTENT_TABLE}`,
 		`SELECT hash FROM ${DRIZZLE_HISTORY_TABLE}`,
 	]
-	const tables = [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE, DRIZZLE_HISTORY_TABLE]
-	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${tables.map(literal).join(", ")})`
-	/* executeAll answers one result per statement, or throws */
-	const present = new Set(
-		((await executeAll(target.exec, target, [listing]))[0] as Rows).map((row) => String(row["name"])),
-	)
 	const later = [names, hashes, intents, drizzle].filter((_, i) => present.has(tables[i] as string))
 	const rows = new Map<string, Rows>()
 	if (later.length > 0)
@@ -74,22 +81,39 @@ async function readHistory(read: ReadConfig, target: D1Target, table: string): P
 		applied: new Set(at(names).map((row) => String(row["name"]))),
 		drizzle: present.has(DRIZZLE_HISTORY_TABLE) ? new Set(at(drizzle).map((row) => String(row["hash"]))) : undefined,
 		intents: present.has(D1_HASH_INTENT_TABLE) ? byName(at(intents)) : undefined,
-		recorded: byName(at(hashes)),
+		marks,
+		recorded: new Map(
+			at(hashes).map((row) => [
+				String(row["name"]),
+				{ hash: String(row["hash"]), marked: Number(row["hash_v"]) === HASH_VERSION },
+			]),
+		),
 	}
 }
 
-type Hashed = ReadonlyArray<{ hash: string; name: string }>
+/**
+ * Hashes to record, each `marked` when it is the exact hash of the text this comb checked, and
+ * unmarked when copied from a record comb 0.20 or earlier made
+ */
+type Hashed = ReadonlyArray<{ hash: string; marked: boolean; name: string }>
+
+/** comb's hash table, made with `hash_v`, which a table 0.20 or earlier made gains unless it `marks` already */
+const hashTable = (marks: boolean): Array<{ sql: string }> => [
+	{ sql: `CREATE TABLE IF NOT EXISTS ${D1_HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL, hash_v INTEGER)` },
+	...(marks ? [] : [{ sql: `ALTER TABLE ${D1_HASH_TABLE} ADD COLUMN hash_v INTEGER` }]),
+]
 
 /**
- * The statements that record the hash each of `files` was applied under, comb's table made first.
+ * The statements that record the hash each of `files` was applied under, comb's table made first, or
+ * given `hash_v` where it lacks it (`marks`).
  * The invariant every writer keeps: a name is in wrangler's table only once its hash
  * or its intent is in comb's. A hash row is proof of what ran, so only a file wrangler's table names
  * gets one; a pending file gets an intent (intentStatements)
  */
-const hashStatements = (files: Hashed): Array<{ sql: string }> => [
-	{ sql: `CREATE TABLE IF NOT EXISTS ${D1_HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)` },
-	...files.map(({ hash, name }) => ({
-		sql: `INSERT OR REPLACE INTO ${D1_HASH_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
+const hashStatements = (files: Hashed, marks: boolean): Array<{ sql: string }> => [
+	...hashTable(marks),
+	...files.map(({ hash, marked, name }) => ({
+		sql: `INSERT OR REPLACE INTO ${D1_HASH_TABLE} (name, hash, hash_v) VALUES (${literal(name)}, ${literal(hash)}, ${marked ? HASH_VERSION : "NULL"})`,
 	})),
 ]
 
@@ -99,7 +123,7 @@ const hashStatements = (files: Hashed): Array<{ sql: string }> => [
  * intent whose name wrangler's table lacks is inert, and a read takes one whose name it has only
  * while it is the file's current hash (d1-history.ts)
  */
-const intentStatements = (files: Hashed): Array<{ sql: string }> => [
+const intentStatements = (files: ReadonlyArray<{ hash: string; name: string }>): Array<{ sql: string }> => [
 	{ sql: `CREATE TABLE IF NOT EXISTS ${D1_HASH_INTENT_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)` },
 	...files.map(({ hash, name }) => ({
 		sql: `INSERT OR REPLACE INTO ${D1_HASH_INTENT_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
@@ -110,8 +134,8 @@ const intentStatements = (files: Hashed): Array<{ sql: string }> => [
  * The statements that record `hashed`'s hashes, then clear every intent, when `intents` says the
  * intent table is there: in that order, so a batch cut short leaves each name its intent or its hash
  */
-const settleStatements = (hashed: Hashed, intents: boolean): Array<{ sql: string }> => [
-	...(hashed.length > 0 ? hashStatements(hashed) : []),
+const settleStatements = (hashed: Hashed, intents: boolean, marks: boolean): Array<{ sql: string }> => [
+	...(hashed.length > 0 ? hashStatements(hashed, marks) : []),
 	...(intents ? [{ sql: `DELETE FROM ${D1_HASH_INTENT_TABLE}` }] : []),
 ]
 
@@ -128,7 +152,7 @@ function settled(
 ): { hasIntents: boolean; settle: Hashed } {
 	const settle = files
 		.filter(({ name }) => applied.has(name) && !recorded.has(name))
-		.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name }))
+		.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), marked: true, name }))
 		.filter(({ hash, name }) => intents?.get(name) === hash)
 	return { hasIntents: (intents?.size ?? 0) > 0, settle }
 }
@@ -137,9 +161,9 @@ function settled(
  * Record the hashes of `moved`, the files wrangler's table now names, and clear every intent, in one
  * batch; the message of a batch that failed, which leaves each name its intent or its hash
  */
-async function moveIntents(conn: D1Target["conn"], moved: Hashed): Promise<string | undefined> {
+async function moveIntents(conn: D1Target["conn"], moved: Hashed, marks: boolean): Promise<string | undefined> {
 	try {
-		await conn.batch(settleStatements(moved, true))
+		await conn.batch(settleStatements(moved, true, marks))
 		return undefined
 	} catch (error) {
 		return (error as Error).message
@@ -147,15 +171,14 @@ async function moveIntents(conn: D1Target["conn"], moved: Hashed): Promise<strin
 }
 
 /**
- * Whether `hash`, recorded for a file of text `sql`, is that text: its current hash; its folded one
- * (0.5.0 to 0.20), which no date tells apart from the current one's record; or its
- * pre-0.5.0 one where comb's pre-0.8 history (`drizzle`) still holds it, proof the record is from
- * before 0.5.0, as a 0.13 baseline copied it
+ * Whether `recorded`, the hash comb holds for a file of text `sql`, is that text: its current hash;
+ * on a record `hash_v` does not mark, which comb 0.20 or earlier wrote, its folded one (0.5.0 to
+ * 0.20) or its pre-0.5.0 one where comb's pre-0.8 history (`drizzle`) still holds it, proof the
+ * record is from before 0.5.0, as a 0.13 baseline copied it
  */
-const vouched = (sql: string, hash: string, drizzle: ReadonlySet<string> | undefined): boolean =>
+const vouched = (sql: string, { hash, marked }: Recorded, drizzle: ReadonlySet<string> | undefined): boolean =>
 	hash === generateMigrationHash(sql) ||
-	hash === foldedMigrationHash(sql) ||
-	(hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true)
+	(!marked && (hash === foldedMigrationHash(sql) || (hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true)))
 
 export {
 	vouched,
@@ -168,6 +191,7 @@ export {
 	namesOf,
 	quoteName,
 	readHistory,
+	type Recorded,
 	type Rows,
 	settled,
 	settleStatements,

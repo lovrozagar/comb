@@ -27,6 +27,7 @@ import {
 	namesOf,
 	quoteName,
 	readHistory,
+	type Recorded,
 	type Rows,
 	settled,
 	settleStatements,
@@ -63,6 +64,7 @@ async function history(
 ): Promise<{
 	applied: Set<string>
 	hasIntents: boolean
+	marks: boolean
 	orphans: string
 	settle: Hashed
 	table: string
@@ -71,7 +73,7 @@ async function history(
 	const table = resolveBinding(read, target)
 	if (!writes) assertLocalExists(read, target)
 	const rows = await readHistory(read, target, table)
-	const { applied, drizzle: hashes, recorded } = rows
+	const { applied, drizzle: hashes, marks, recorded } = rows
 	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
@@ -80,7 +82,7 @@ async function history(
 		)
 	}
 	const edited = files.find(
-		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as string, hashes),
+		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as Recorded, hashes),
 	)
 	if (edited !== undefined) {
 		throw new Error(
@@ -100,7 +102,7 @@ async function history(
 					target.migrationsDir,
 				)
 	if (orphans !== "" && !status) throw new Error(orphans)
-	return { applied, hasIntents, orphans, settle, table, unhashed }
+	return { applied, hasIntents, marks, orphans, settle, table, unhashed }
 }
 
 /**
@@ -158,7 +160,7 @@ type D1Apply = {
 
 /** Check the pending migrations and, unless only checking, apply them through wrangler; returns them */
 async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
-	const { applied, hasIntents, settle, table } = await history(options.read, target, {
+	const { applied, hasIntents, marks, settle, table } = await history(options.read, target, {
 		writes: options.checkOnly !== true,
 	})
 	const listed = d1Files(target.migrationsDir)
@@ -185,12 +187,12 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	if (options.checkOnly === true) return names
 	/* what a lost move left is recorded now, and with nothing to apply, that is all */
 	if (names.length === 0) {
-		if (hasIntents) await target.conn.batch(settleStatements(settle, true))
+		if (hasIntents) await target.conn.batch(settleStatements(settle, true, marks))
 		return names
 	}
 	/* the intents go first: a lost record then fails before wrangler applies anything */
-	const hashed = pending.map(({ migration, name }) => ({ hash: migration.hash, name }))
-	await target.conn.batch([...settleStatements(settle, hasIntents), ...intentStatements(hashed)])
+	const hashed = pending.map(({ migration, name }) => ({ hash: migration.hash, marked: true, name }))
+	await target.conn.batch([...settleStatements(settle, hasIntents, marks), ...intentStatements(hashed)])
 	for (const name of names) options.print(`Apply: ${name}`)
 	const apply = ["d1", "migrations", "apply", target.name, ...target.flags]
 	const ran = await runPeer(target.exec, target.wrangler)(apply, { input: "" })
@@ -200,6 +202,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const moved = await moveIntents(
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
+		marks || settle.length > 0 /* that batch gave comb's table hash_v */,
 	)
 	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), locked, names, table })
 	if (moved !== undefined) {
@@ -224,24 +227,27 @@ async function baselineD1(
 	print: (line: string) => void,
 ): Promise<{ hashed: string[]; marked: string[] }> {
 	const table = resolveBinding(read, target)
-	const { applied, drizzle: hashes, recorded } = await readHistory(read, target, table)
+	const { applied, drizzle: hashes, marks, recorded } = await readHistory(read, target, table)
 	if (hashes === undefined) {
 		throw new Error(
 			`${target.name} has no ${DRIZZLE_HISTORY_TABLE} to copy from; baseline records only what a history shows was applied`,
 		)
 	}
 	const files = d1Files(target.migrationsDir)
-	/* the files __drizzle_migrations vouches for */
-	const drizzled = files.filter(({ sql }) => migrationHashes(sql).some(({ hash }) => hashes.has(hash)))
+	/* the files __drizzle_migrations vouches for, each with the hash it holds */
+	const drizzled = files.flatMap(({ name, sql }) => {
+		const held = migrationHashes(sql).find(({ hash }) => hashes.has(hash))
+		return held === undefined ? [] : [{ hash: held.hash, marked: held.marked, name }]
+	})
 	const marked = drizzled.filter(({ name }) => !applied.has(name)).map(({ name }) => name)
 	const hashed = drizzled.filter(({ name }) => applied.has(name) && !recorded.has(name)).map(({ name }) => name)
 	const copied = drizzled.filter(({ name }) => !applied.has(name) || !recorded.has(name))
 	if (copied.length > 0) {
 		/* the hashes first, then wrangler's rows: whichever --command a split batch loses, a name is
-		   never in wrangler's table without its hash, and the rerun copies what is missing. Each copied
-		   file is vouched for now, so it is recorded under its current hash, the one D1 compares */
+		   never in wrangler's table without its hash, and the rerun copies what is missing. Each is the
+		   hash the record holds, marked only when it is the file's exact one, as the record vouches */
 		await target.conn.batch([
-			...hashStatements(copied.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name }))),
+			...hashStatements(copied, marks),
 			{ sql: historyTable(table) },
 			...marked.map((name) => ({ sql: `INSERT OR IGNORE INTO ${quoteName(table)} (name) VALUES (${literal(name)})` })),
 		])
@@ -262,10 +268,11 @@ async function baselineD1(
  * left is recorded with them.
  */
 async function adoptHashesD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
-	const { hasIntents, settle, unhashed } = await history(read, target, { writes: true })
+	const { hasIntents, marks, settle, unhashed } = await history(read, target, { writes: true })
 	const files = d1Files(target.migrationsDir).filter(({ name }) => unhashed.includes(name))
-	const hashed = [...settle, ...files.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name }))]
-	if (hashed.length > 0 || hasIntents) await target.conn.batch(settleStatements(hashed, hasIntents))
+	const exact = files.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), marked: true, name }))
+	const hashed = [...settle, ...exact]
+	if (hashed.length > 0 || hasIntents) await target.conn.batch(settleStatements(hashed, hasIntents, marks))
 	for (const { name } of files) print(`Hash recorded: ${name}`)
 	return unhashed
 }

@@ -23,6 +23,9 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
+/** Records `?` for 1_init.sql as comb 0.20 or a baseline from its pre-0.8 history did, unmarked by hash_v */
+const UNMARKED = "UPDATE _comb_migration_hashes SET hash = ?, hash_v = NULL WHERE name = '1_init.sql'"
+
 describe("findWranglerConfig", () => {
 	it("takes wrangler.json over wrangler.jsonc over wrangler.toml, as wrangler does, and none when there is none", () => {
 		expect(findWranglerConfig(dir)).toBeUndefined()
@@ -116,7 +119,7 @@ describe("statusD1 on a hash a 0.13 baseline copied from comb's pre-0.8 history"
 		writeSum(d1.migrationsDir)
 		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
 		const legacy = legacyMigrationHash(sql)
-		await d1.conn.execute("UPDATE _comb_migration_hashes SET hash = ? WHERE name = '1_init.sql'", [legacy])
+		await d1.conn.execute(UNMARKED, [legacy])
 		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
 		await d1.conn.execute("CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT, created_at INTEGER)")
 		await d1.conn.execute("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('other', 1)")
@@ -143,14 +146,16 @@ describe("statusD1 on a file holding a space SQLite reads as part of a name", ()
 		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
 	})
 
-	/* the folded hash of the edited file is the plain file's own hash, so no hash can tell this edit */
-	it("takes a file applied with a plain space, then edited to such a space", async () => {
+	/* the folded hash of the edited file is the plain file's own hash, so only hash_v tells this edit */
+	it("refuses a file applied with a plain space, then edited to such a space, and takes it on a record 0.20 made", async () => {
 		const { d1, read } = await target({})
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), ascii)
 		writeSum(d1.migrationsDir)
 		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), unicode)
 		writeSum(d1.migrationsDir)
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+		await d1.conn.execute("UPDATE _comb_migration_hashes SET hash_v = NULL WHERE name = '1_init.sql'")
 		const lines: string[] = []
 		await statusD1(d1, read, (line) => lines.push(line))
 		expect(lines).toEqual(["Applied: 1_init.sql", "Pending: none"])
@@ -161,9 +166,7 @@ describe("statusD1 on a file holding a space SQLite reads as part of a name", ()
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), unicode)
 		writeSum(d1.migrationsDir)
 		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
-		await d1.conn.execute("UPDATE _comb_migration_hashes SET hash = ? WHERE name = '1_init.sql'", [
-			foldedMigrationHash(unicode),
-		])
+		await d1.conn.execute(UNMARKED, [foldedMigrationHash(unicode)])
 		await d1.conn.execute("UPDATE d1_migrations SET applied_at = '2027-01-01 12:00:00' WHERE name = '1_init.sql'")
 		const lines: string[] = []
 		await statusD1(d1, read, (line) => lines.push(line))

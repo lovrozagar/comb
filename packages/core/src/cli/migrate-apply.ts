@@ -24,7 +24,7 @@ import {
 	orphanMessage,
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
-import { type AcceptedHash, migrationHashes } from "../migrate/core/parse.ts"
+import { type AcceptedHash, HASH_VERSION, migrationHashes } from "../migrate/core/parse.ts"
 import { binOf, type Peers, requirePeers } from "../migrate/core/optional-peer.ts"
 import type { Command, Provider } from "../migrate/core/peer-needs.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
@@ -45,7 +45,10 @@ type Request = { args: ParsedArgs; db: string; io: CliContext; mode: Mode }
 
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
 
-/** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
+/**
+ * The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write
+ * would create; a table without `hash_v`, which only a write adds, marks no row
+ */
 async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
 	const table = await conn.execute(
 		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
@@ -53,11 +56,12 @@ async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
 	if (table.rows.length === 0) return []
 	const { columns, rows } = await conn.execute("SELECT * FROM __drizzle_migrations ORDER BY id")
 	const [hash, name, id] = [columns.indexOf("hash"), columns.indexOf("name"), columns.indexOf("id")]
-	const createdAt = columns.indexOf("created_at")
+	const [createdAt, version] = [columns.indexOf("created_at"), columns.indexOf("hash_v")]
 	return rows.map((row) => ({
 		createdAt: Number(row[createdAt]),
 		hash: String(row[hash]),
 		id: Number(row[id]),
+		marked: version >= 0 && Number(row[version]) === HASH_VERSION,
 		name: name >= 0 && row[name] !== null ? String(row[name]) : null,
 	}))
 }

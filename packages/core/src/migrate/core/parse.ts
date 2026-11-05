@@ -52,22 +52,32 @@ export function foldedMigrationHash(sql: string): string {
 /** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
 export const V0_5_0: number = 1792284989000
 
-/** A hash a file's text may be recorded under, on a row recorded before `until` */
-export type AcceptedHash = { hash: string; until: number }
+/**
+ * The value comb from 0.21 writes in a history row's `hash_v`, beside the hash it records there: the
+ * row holds the exact hash. A row without it was written by comb 0.20 or earlier, or by drizzle
+ */
+export const HASH_VERSION = 2
 
 /**
- * Every hash `sql` may be recorded under, current first, each with the time before which a row may
- * hold it: the current and the folded one (0.5.0 to 0.20) on any row, as no date tells which comb
- * recorded it, the pre-0.5.0 one before V0_5_0
+ * A hash a file's text may be recorded under: on a row recorded before `until`, and on a row
+ * `hash_v` marks only when `marked`
+ */
+export type AcceptedHash = { hash: string; marked: boolean; until: number }
+
+/**
+ * Every hash `sql` may be recorded under, current first: the current one on any row; the folded one
+ * (0.5.0 to 0.20) only on a row `hash_v` does not mark, which no comb from 0.21 wrote, so a space
+ * edited to U+00A0 in a file this comb recorded is an edit; the pre-0.5.0 one on an unmarked row
+ * before V0_5_0
  */
 export function migrationHashes(sql: string): AcceptedHash[] {
 	const accepted: AcceptedHash[] = []
-	for (const [hash, until] of [
-		[generateMigrationHash(sql), Infinity],
-		[foldedMigrationHash(sql), Infinity],
-		[legacyMigrationHash(sql), V0_5_0],
+	for (const [hash, marked, until] of [
+		[generateMigrationHash(sql), true, Infinity],
+		[foldedMigrationHash(sql), false, Infinity],
+		[legacyMigrationHash(sql), false, V0_5_0],
 	] as const)
-		if (!accepted.some((each) => each.hash === hash)) accepted.push({ hash, until })
+		if (!accepted.some((each) => each.hash === hash)) accepted.push({ hash, marked, until })
 	return accepted
 }
 

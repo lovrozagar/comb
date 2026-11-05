@@ -237,7 +237,7 @@ describe("applyEach on a file another run applied while this one waited for the 
 		const files = [file("1_a.sql", "CREATE TABLE a (x)"), file("2_b.sql", "SELECT 2")]
 		await applyEach(kept(conn), files, { history, print: (line) => lines.push(line) })
 		expect(vi.mocked(conn.batch).mock.calls[0]?.[0].map(({ sql }) => sql)).toEqual([
-			"INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)",
+			"INSERT INTO __drizzle_migrations (hash, created_at, name, hash_v) VALUES (?, ?, ?, 2)",
 			"CREATE TABLE a (x)",
 		])
 		expect(lines).toEqual([
