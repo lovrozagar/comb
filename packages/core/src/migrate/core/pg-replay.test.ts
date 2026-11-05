@@ -79,6 +79,8 @@ const DROPPED = "DROP DATABASE IF EXISTS <db> WITH (FORCE)"
 const UNTEMPLATED = "ALTER DATABASE <db> IS_TEMPLATE false"
 /* the replay's connection closed, and any backend still in its database ended, before the drop */
 const ENDED = expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/)
+/* then the read of the subscriptions and slots in it, which Postgres drops no database holding */
+const HELD = expect.stringMatching(/^SELECT coalesce\(\(SELECT array_agg\(s\.subname/)
 
 /** Postgres's refusal of a statement starting `start` in a block, once: the guarded try rolls back and it runs bare */
 function refusedInBlockOnce(start: string): (query: string) => Error | undefined {
@@ -121,6 +123,7 @@ describe("replayCatalog", () => {
 			SNAPSHOT,
 			CATALOG,
 			ENDED,
+			HELD,
 			UNTEMPLATED,
 			DROPPED,
 		])

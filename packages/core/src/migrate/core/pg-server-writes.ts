@@ -98,8 +98,9 @@ const CATALOGS: Readonly<Record<string, Catalog>> = {
 		noun: "security label on",
 		query: `SELECT ${SUBJECT} || ' by ' || provider AS key, to_jsonb(label) AS row FROM pg_shseclabel`,
 	},
+	/* a subscription lives in a database, and is about it: one in the replay's is the file's, which its drop takes */
 	pg_subscription: {
-		names: "ARRAY[subname]",
+		names: "ARRAY[subname, (SELECT datname FROM pg_database WHERE oid = subdbid)::text]",
 		noun: "subscription",
 		query:
 			"SELECT subname AS key, jsonb_build_object('owner', subowner::regrole, 'enabled', subenabled, 'database', subdbid) AS row FROM pg_subscription",

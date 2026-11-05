@@ -43,10 +43,10 @@ const NAMES: Readonly<Record<string, string>> = {
 		"ARRAY[(SELECT datname FROM pg_database WHERE oid = setdatabase), CASE WHEN setrole = 0 THEN 'all' ELSE (SELECT rolname FROM pg_roles WHERE oid = setrole) END]",
 }
 
-// lookup-table: what the server holds beside its catalogs, read as the catalogs are: a slot's fields that do not move as it is used
+// lookup-table: what the server holds beside its catalogs, read as the catalogs are: a slot's fields that do not move as it is used, about its database too where it is a logical one
 const BESIDE: Readonly<Record<string, Catalog>> = {
 	pg_replication_slots: {
-		names: "ARRAY[s.slot_name::text]",
+		names: "ARRAY[s.slot_name::text, s.database::text]",
 		noun: "replication slot",
 		query:
 			"SELECT slot_name AS key, jsonb_build_object('type', slot_type, 'plugin', plugin, 'database', database, 'temporary', temporary) AS row FROM pg_replication_slots s",
@@ -163,4 +163,12 @@ function added(before: Snapshot, after: Snapshot, names: ReadonlySet<string>): S
 	return out
 }
 
-export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays }
+/** The subscriptions `after` holds in `database` and `before` does not, by subject: its drop takes them */
+const subscriptionsIn = (before: Snapshot, after: Snapshot, database: string): string[] =>
+	[...after]
+		.filter(
+			([subject, { names }]) => subject.startsWith("subscription ") && !before.has(subject) && names[1] === database,
+		)
+		.map(([subject]) => subject)
+
+export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays, subscriptionsIn }

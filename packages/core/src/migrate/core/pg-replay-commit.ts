@@ -7,7 +7,7 @@
  * Postgres runs it outside a block alone.
  */
 import { adopt, bareAgain, type Run } from "./pg-replay-roles.ts"
-import { added, type Snapshot, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
+import { added, type Snapshot, snapshot, snapshotChanges, subscriptionsIn } from "./pg-server-snapshot.ts"
 import {
 	type Change,
 	catalogsOf,
@@ -66,6 +66,7 @@ function strayed(run: Run, { name, names, sent, stops }: At, now: Snapshot): voi
 	if (SESSION_ROLE.some((word) => names.has(word))) its.add(run.role)
 	const changes = snapshotChanges(run.seen, now, its)
 	const { databases, roles, slots } = added(run.seen, now, its)
+	const within = subscriptionsIn(run.seen, now, run.database)
 	run.seen = now
 	if (changes.length === 0) return
 	run.strays.databases.push(...databases)
@@ -77,13 +78,17 @@ function strayed(run: Run, { name, names, sent, stops }: At, now: Snapshot): voi
 		...databases.map((database) => `database ${database} unless a session is in it`),
 		...slots.map((slot) => `replication slot ${slot} unless a session holds it`),
 	]
-	const replays = changes.some((change) => change.startsWith(own)) ? "; comb drops the database it replays in" : ""
+	const replays =
+		changes.some((change) => change.startsWith(own)) || within.length > 0
+			? `; comb drops the database it replays in${within.length === 0 ? "" : `, and ${within.join(", ")} in it`}`
+			: ""
 	const dropped = `${strays.length === 0 ? "" : `; comb drops ${strays.join(", ")}, which the file added`}${replays}`
 	/* the read is committed, so a change it shows to an object the file did not add stays */
 	const dropping = new Set([
 		...roles.map((role) => `role ${role} added`),
 		...databases.map((d) => `database ${d} added`),
 		...slots.map((slot) => `replication slot ${slot} added`),
+		...within.map((subject) => `${subject} added`),
 	])
 	const kept = changes.filter((change) => !dropping.has(change) && !change.startsWith(own))
 	const left = kept.length === 0 ? "" : `; devUrl's server keeps ${kept.join(", ")}, which comb cannot undo`

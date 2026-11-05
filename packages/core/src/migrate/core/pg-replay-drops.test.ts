@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
 import { coded, fake } from "../__fixtures__/pg-admin.ts"
-import { cleanUp, dropMade, dropRole, leaving, sweep, sweepDev } from "./pg-replay-drops.ts"
+import { cleanUp, type Drops, dropMade, dropRole, leaving, sweep, sweepDev } from "./pg-replay-drops.ts"
 import { STALE_MS } from "./pg-replay-database.ts"
+
+/* the reads of a database's subscriptions and slots, which its drop then follows */
+const EMPTIES = /^SELECT coalesce\(\(SELECT array_agg\(s\.subname/
 
 describe("dropRole", () => {
 	it("drops the role", async () => {
@@ -82,9 +85,10 @@ async function swept(fail: (query: string) => boolean = () => false) {
 		return []
 	})
 	const said: string[] = []
-	await sweep(admin.sql, now, ({ swept: again, what }, error) =>
-		said.push(`${what}: ${(error as Error).message}, ${again}`),
-	)
+	await sweep(admin.sql, now, {
+		into: () => fake().sql,
+		leave: ({ swept: again, what }, error) => said.push(`${what}: ${(error as Error).message}, ${again}`),
+	})
 	return {
 		dropped: admin.sent.filter((query) => query.startsWith("DROP") || query.includes("pg_terminate_backend")),
 		said,
@@ -98,7 +102,11 @@ const unsaid = (what: string, then: string): string =>
 describe("cleanUp", () => {
 	it("says each drop it could not make, and drops the next: what the replay made the next sweep takes, what its window added none does", async () => {
 		const admin = fake((query) =>
-			/^(?:DROP|SELECT pg_drop)/.test(query) ? coded("55006", "in use") : [{ "?column?": 1 }],
+			/^(?:DROP|SELECT pg_drop)/.test(query)
+				? coded("55006", "in use")
+				: EMPTIES.test(query)
+					? []
+					: [{ "?column?": 1 }],
 		)
 		const said: string[] = []
 		const failed = { field: "devUrl", url: "postgres://dev/dev", urls: ["postgres://dev/dev"] } as const
@@ -109,10 +117,10 @@ describe("cleanUp", () => {
 			sql: fake().sql,
 			strays: { databases: ["stray_db"], roles: ["stray_role"], slots: ["stray_slot"] },
 		}
-		await cleanUp(
-			run as unknown as Parameters<typeof cleanUp>[0],
-			leaving((line) => said.push(line), failed),
-		)
+		await cleanUp(run as unknown as Parameters<typeof cleanUp>[0], {
+			into: () => fake().sql,
+			leave: leaving((line) => said.push(line), failed),
+		})
 		const next = "the next check or apply that reaches that server drops it"
 		expect(said).toEqual([
 			unsaid("replication slot stray_slot", "drop it there"),
@@ -159,10 +167,10 @@ describe("sweep of a replay killed mid-statement", () => {
 					? [{ datname: "comb_replay_9_666_ffffffff" }]
 					: [],
 		)
-		await sweep(admin.sql, 10 * STALE_MS, () => undefined)
+		await sweep(admin.sql, 10 * STALE_MS, { into: () => fake().sql, leave: () => undefined })
 		expect(admin.sent[1]).toMatch(/AND pg_has_role\(datdba, 'USAGE'\)$/)
 		expect(admin.sent[1]).not.toContain("current_user")
-		expect(admin.sent.slice(3, 5)).toEqual([
+		expect(admin.sent.filter((query) => !EMPTIES.test(query)).slice(3, 5)).toEqual([
 			"SELECT pg_terminate_backend($1)",
 			'DROP DATABASE IF EXISTS "comb_replay_9_666_ffffffff"',
 		])
@@ -175,8 +183,8 @@ describe("sweep of a replay whose database is a template", () => {
 		const admin = fake((query) =>
 			query.startsWith("SELECT datname") ? [{ datistemplate: true, datname: "comb_replay_9_666_ffffffff" }] : [],
 		)
-		await sweep(admin.sql, 10 * STALE_MS, () => undefined)
-		expect(admin.sent.slice(3, 5)).toEqual([
+		await sweep(admin.sql, 10 * STALE_MS, { into: () => fake().sql, leave: () => undefined })
+		expect(admin.sent.filter((query) => !EMPTIES.test(query)).slice(3, 5)).toEqual([
 			'ALTER DATABASE "comb_replay_9_666_ffffffff" IS_TEMPLATE false',
 			'DROP DATABASE IF EXISTS "comb_replay_9_666_ffffffff"',
 		])
@@ -250,6 +258,29 @@ describe("sweepDev, before an apply", () => {
 	})
 })
 
+describe("sweepDev of a database that holds a subscription", () => {
+	it("drops a dead replay database's subscription from a session in it, waiting 5 s for it, and closes it", async () => {
+		const dev = fake((query) =>
+			query.startsWith("SELECT datname")
+				? [{ datname: "comb_replay_9_111_aaaaaaaa" }]
+				: EMPTIES.test(query)
+					? [{ slots: [], subscriptions: ["s"] }]
+					: [],
+		)
+		const at = servers(true, dev)
+		await sweepDev(TARGET, print, at.load)
+		const into = at.given[2] ?? {}
+		expect([into["database"], into["max"], into["connect_timeout"], at.ended()]).toEqual([
+			"comb_replay_9_111_aaaaaaaa",
+			1,
+			5,
+			3,
+		])
+		expect(dev.sent).toContain('DROP SUBSCRIPTION "s"')
+		expect((into["onnotice"] as (notice: unknown) => unknown)({ message: "skipping" })).toBeUndefined()
+	})
+})
+
 describe("sweepDev that cannot sweep", () => {
 	it("sweeps nothing on Atlas's docker:// container, and stops no apply when it cannot, saying so when devUrl fails", async () => {
 		let loaded = 0
@@ -289,5 +320,82 @@ describe("dropMade", () => {
 		const untagged = fake(() => [])
 		await dropMade(untagged.sql, "r")
 		expect(untagged.sent.filter((query) => query.startsWith("DROP"))).toEqual([])
+	})
+})
+
+/** A server whose `database` holds subscription s and logical slot l, each drop of them failing when `fail` says, with the session `into` it opened */
+function holding(database: string, fail: (query: string) => boolean = () => false) {
+	const answer = (query: string) =>
+		fail(query)
+			? coded("55006", "in use")
+			: EMPTIES.test(query)
+				? [{ slots: ["l"], subscriptions: ["s"] }]
+				: query.startsWith("SELECT datname")
+					? [{ datname: database }]
+					: []
+	const admin = fake(answer)
+	const inside = fake(answer)
+	const opened: string[] = []
+	const said: string[] = []
+	const drops: Drops = {
+		into: (into) => (opened.push(into), inside.sql),
+		leave: ({ swept: again, what }, error) => said.push(`${what}: ${(error as Error).message}, ${again}`),
+	}
+	return { admin, drops, inside, opened, said }
+}
+
+const SUBSCRIPTION_DROP = [
+	'ALTER SUBSCRIPTION "s" DISABLE',
+	'ALTER SUBSCRIPTION "s" SET (slot_name = NONE)',
+	'DROP SUBSCRIPTION "s"',
+]
+
+describe("the drops of a database that holds a subscription or a logical slot, which Postgres drops no database holding", () => {
+	it("cleanUp drops the replay database's own, the subscription from a session in it, before the database", async () => {
+		const at = holding("comb_replay_db")
+		const run = {
+			admin: at.admin.sql,
+			created: [],
+			database: "comb_replay_db",
+			sql: fake().sql,
+			strays: { databases: [], roles: [], slots: [] },
+		}
+		await cleanUp(run as unknown as Parameters<typeof cleanUp>[0], at.drops)
+		expect({ inside: at.inside.sent, opened: at.opened, said: at.said }).toEqual({
+			inside: SUBSCRIPTION_DROP,
+			opened: ["comb_replay_db"],
+			said: [],
+		})
+		const sent = at.admin.sent
+		expect(sent).toContain("SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1")
+		expect(sent.findIndex((query) => query.startsWith("SELECT pg_drop"))).toBeLessThan(
+			sent.findIndex((query) => query.startsWith("DROP DATABASE")),
+		)
+		expect(sent.filter((query) => EMPTIES.test(query))).toHaveLength(1)
+	})
+
+	it("the sweep drops a dead replay database's, and asks of no other database", async () => {
+		const at = holding("comb_replay_9_111_aaaaaaaa")
+		await sweep(at.admin.sql, now, at.drops)
+		expect({ inside: at.inside.sent, opened: at.opened }).toEqual({
+			inside: SUBSCRIPTION_DROP,
+			opened: ["comb_replay_9_111_aaaaaaaa"],
+		})
+		expect(at.admin.sent.at(-1)).toBe('DROP DATABASE IF EXISTS "comb_replay_9_111_aaaaaaaa"')
+	})
+
+	it("says each drop that fails, which the next sweep takes, and opens no session where no subscription is", async () => {
+		const at = holding(
+			"comb_replay_9_111_aaaaaaaa",
+			(query) => query.startsWith("DROP SUBSCRIPTION") || query.startsWith("SELECT pg_drop"),
+		)
+		await sweep(at.admin.sql, now, at.drops)
+		expect(at.said).toEqual(["subscription s: in use, true", "replication slot l: in use, true"])
+		const none = fake((query) =>
+			query.startsWith("SELECT datname") ? [{ datname: "comb_replay_9_111_aaaaaaaa" }] : [],
+		)
+		const opened: string[] = []
+		await sweep(none.sql, now, { into: (into) => (opened.push(into), fake().sql), leave: () => undefined })
+		expect(opened).toEqual([])
 	})
 })

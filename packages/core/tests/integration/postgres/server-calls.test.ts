@@ -8,7 +8,7 @@ import pg from "pg"
 import { afterEach, describe, expect, it } from "vitest"
 import { SERVER_CALLS } from "../../../src/migrate/core/pg-server-calls.ts"
 import { pgCheck, T } from "../support/pg-check.ts"
-import { pgUrl } from "../support/pg.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply } = pgCheck()
@@ -191,4 +191,72 @@ describe("the server calls' list (PR2; sibling: the scope table's structure test
 		expect(READS.filter((name) => SERVER_CALLS.has(name))).toEqual([])
 		expect(READS.filter((name) => !revoked.includes(name))).toEqual([])
 	})
+})
+
+/** The subscriptions whose name starts with `prefix`, each with the database it is in */
+const subscriptionsOf = (prefix: string) =>
+	query(
+		pgUrl(),
+		`SELECT s.subname, d.datname FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE s.subname LIKE '${prefix}%'`,
+	)
+
+/** Drops what a failed run left: each subscription named from `prefix`, from inside its database, then that database */
+async function dropSubscriptions(prefix: string): Promise<void> {
+	for (const { datname, subname } of await subscriptionsOf(prefix)) {
+		const into = new URL(pgUrl() as string)
+		into.pathname = `/${String(datname)}`
+		for (const step of ["DISABLE", "SET (slot_name = NONE)"])
+			await query(into.href, `ALTER SUBSCRIPTION ${String(subname)} ${step}`)
+		await query(into.href, `DROP SUBSCRIPTION ${String(subname)}`)
+		await query(pgUrl(), `DROP DATABASE IF EXISTS ${String(datname)} WITH (FORCE)`)
+	}
+}
+
+/* a subscription lives in the database it is made in, which Postgres will not drop while it holds one */
+describe("a subscription the file makes in the replay's database dies with it (sibling: a slot a DO block makes)", () => {
+	const prefix = unique("comb_t_sub")
+	afterEach(() => dropSubscriptions(prefix))
+
+	it.each([
+		["spelled", `'${prefix}'`],
+		["built at run time", `'${prefix}_' || pg_backend_pid()`],
+	])(
+		"refuses one whose name is %s, and leaves neither it nor the replay's database behind",
+		async (_, name) => {
+			const made = `EXECUTE format('CREATE SUBSCRIPTION %I CONNECTION ''dbname=postgres'' PUBLICATION p WITH (connect = false, enabled = false, create_slot = false)', ${name})`
+			const { out, refused } = await checked(T, `${NONE}DO $$ BEGIN COMMIT; ${made}; END $$;\n`)
+			expect({
+				left: out.filter((line) => line.startsWith("comb could not drop")),
+				refused,
+				subscriptions: await subscriptionsOf(prefix),
+			}).toEqual({
+				left: [],
+				refused: expect.stringMatching(
+					new RegExp(`comb drops the database it replays in, and subscription ${prefix}\\S* in it; check applies`),
+				),
+				subscriptions: [],
+			})
+			expect(refused).not.toContain("which comb cannot undo")
+		},
+		60_000,
+	)
+
+	it("leaves a subscription in a database no replay made, whichever drops it is in", async () => {
+		await withScratchDb(async (url) => {
+			const kept = `${prefix}_kept`
+			await query(
+				url,
+				`CREATE SUBSCRIPTION ${kept} CONNECTION 'dbname=postgres' PUBLICATION p WITH (connect = false, enabled = false, create_slot = false)`,
+			)
+			try {
+				const { refused } = await checked(T, `${NONE}SELECT 1;\n`)
+				expect({ refused, subscriptions: (await subscriptionsOf(prefix)).map(({ subname }) => subname) }).toEqual({
+					refused: undefined,
+					subscriptions: [kept],
+				})
+			} finally {
+				await dropSubscriptions(prefix)
+			}
+		})
+	}, 60_000)
 })

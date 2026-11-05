@@ -37,10 +37,11 @@ const SNAPSHOT = "EXECUTE comb_snapshot"
 /** What a replayed transaction of `statements` sends: its counts read at BEGIN and again, with the server's catalogs, before COMMIT */
 const inTransaction = (...statements: unknown[]) => ["BEGIN", COUNTED, ...statements, COUNTED, SNAPSHOT, "COMMIT"]
 
-/* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
+/* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped once its subscriptions and slots are */
 const AROUND = {
 	after: [
 		expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/),
+		expect.stringMatching(/^SELECT coalesce\(\(SELECT array_agg\(s\.subname/),
 		"ALTER DATABASE <db> IS_TEMPLATE false",
 		"DROP DATABASE IF EXISTS <db> WITH (FORCE)",
 	],

@@ -734,4 +734,6 @@ type Strays = {
 };
 /** The roles, databases and replication slots named in `names` that `after` holds and `before` does not */
 declare function added(before: Snapshot, after: Snapshot, names: ReadonlySet<string>): Strays;
-export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays };
+/** The subscriptions `after` holds in `database` and `before` does not, by subject: its drop takes them */
+declare const subscriptionsIn: (before: Snapshot, after: Snapshot, database: string) => string[];
+export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays, subscriptionsIn };

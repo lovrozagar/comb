@@ -236,9 +236,13 @@ async function onDev<T>(
 		const cleanup = onceCleanup()
 		return await onSignals(cleanup.run, async () => {
 			admin = connect(replayOptions(target.devUrl))
-			await sweep(admin, Date.now(), leave)
+			const drops = {
+				into: (database: string) => connect(replayOptions(target.devUrl, { database, settings: {} })),
+				leave,
+			}
+			await sweep(admin, Date.now(), drops)
 			const { open, run } = await opening(admin, target, { connect, refused, stops: replay.stops })
-			cleanup.set(() => cleanUp(run, leave))
+			cleanup.set(() => cleanUp(run, drops))
 			try {
 				const waits = await prepare(run, target.schema, { files, refused, stops: replay.stops })
 				await prepareSnapshot(admin, run)
