@@ -18,13 +18,16 @@ import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
 type CursorOptions = {
+	/** the list's name, its route and tenant, such as `members:${orgId}`; a cursor sealed under one opens under no other. Empty is a 500 */
 	cursorScope: string
+	/** the app's secret, at least `MIN_CURSOR_SECRET_BYTES` bytes of UTF-8, the same on every worker; a shorter one is a 500 */
 	cursorSecret: string
+	// U24
 	/**
 	 * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
 	 * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
 	 * right after it. Unset, as on D1, which reads ±Infinity as null, such a list resumes from the
-	 * earliest value the null may stand for, repeating rows and skipping none (U24).
+	 * earliest value the null may stand for, repeating rows and skipping none.
 	 */
 	nonFinite?: "exact" | undefined
 }

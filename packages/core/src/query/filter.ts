@@ -16,6 +16,7 @@ import {
 } from "./filter-validate.ts"
 import type { SortDirection, SortField } from "./types.ts"
 
+// QL7 of r22b
 /**
  * Parse PostgREST-style `order` string into SortField array.
  *
@@ -36,7 +37,7 @@ import type { SortDirection, SortField } from "./types.ts"
  *
  * An entry that is empty, names no field (`asc`, `.desc`, a trailing comma) or has whitespace around
  * it, and a field named twice, refuse the whole order as null, as parseFilter refuses a filter, rather
- * than drop it and widen the request to the default order (QL7 of r22b).
+ * than drop it and widen the request to the default order.
  */
 function parseOrder(input: string | null | undefined): SortField[] | null {
 	const entries = orderEntries(input)

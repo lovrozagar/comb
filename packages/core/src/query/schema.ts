@@ -4,12 +4,18 @@
  */
 import * as z from "zod"
 
+/** The zod schema of a list response's `pagination` */
 export type PaginationResponseSchema = z.ZodObject<
 	{
+		/** rows the filter matches across all pages; null on a cursor page, or a page past the end of one database */
 		count: z.ZodNullable<z.ZodNumber>
+		/** true when a next page exists */
 		hasMore: z.ZodBoolean
+		/** the page size the request read with */
 		limit: z.ZodNumber
+		/** the cursor of the next page; null on the last page, or a list no cursor can resume */
 		nextCursor: z.ZodNullable<z.ZodString>
+		/** the page number; null on a cursor page */
 		page: z.ZodNullable<z.ZodNumber>
 	},
 	z.core.$strip

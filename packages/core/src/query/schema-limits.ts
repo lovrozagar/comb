@@ -2,7 +2,10 @@
 import { FILTER_LIMITS } from "./filter.ts"
 import type { ListQueryLimits } from "./schema-types.ts"
 
-/* past maxPage, offset pagination makes the database skip more rows than a list should; cursors page on */
+/**
+ * The page sizes a list takes when its `pagination` leaves one out: 20 rows, at most 100, and pages
+ * up to 10 000. Past maxPage the database would skip too many rows to read a page by number; a cursor pages on
+ */
 const PAGINATION_DEFAULTS = {
 	defaultLimit: 20,
 	maxLimit: 100,
@@ -14,6 +17,7 @@ const PAGINATION_DEFAULTS = {
  * maxValues (60), one per search word (8), the three-key keyset predicate (10) and limit and
  * offset (2): 80, which leaves 20 for the handler's own baseWhere.
  */
+/** The request bounds a list takes when its `limits` leave one out: `FILTER_LIMITS`, a 2048-character filter, 8 search words and 3 sort keys */
 const LIST_QUERY_LIMITS: ListQueryLimits = {
 	...FILTER_LIMITS,
 	maxFilterLength: 2048,

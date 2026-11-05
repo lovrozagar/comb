@@ -22,29 +22,48 @@ import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 export type RelationalTable = object
 
+/**
+ * What drizzle's relational `findMany` reads one list page with: spread `limit`, `offset`, `orderBy`
+ * and `extras` into it, AND `where` with your own, and hand the rows to `paginate` with these options
+ */
 type DrizzleListOptions = {
+	/** one over the page's limit, so `paginate` can tell there is a next page */
 	limit: number
+	/** the rows before the page; 0 on a cursor request, which resumes by `where` */
 	offset: number
 	/** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
 	orderBy: (table: RelationalTable) => SQL[]
+	// Q3 of r17, Q2, U26
 	/**
-	 * For `findMany({ extras })`, which paginate reads and refuses a page without (Q3 of r17): the
-	 * tiebreak the next cursor resumes from (Q2), an offset page's count, and, on a cursor that
-	 * carries a reference, whether its anchor is gone where no bound is safe (U26)
+	 * For `findMany({ extras })`: the columns `paginate` reads from each row, and refuses a page
+	 * without. `project` strips them from the rows it returns
 	 */
-	extras: { _combId: (table: RelationalTable) => SQL } & Partial<{
+	extras: {
+		/** the row's `id`, which the next cursor resumes from */
+		_combId: (table: RelationalTable) => SQL
+	} & Partial<{
+		/** on a cursor whose row may be gone: 1 when it is, which `paginate` answers with a 400 asking to start again */
 		_combAnchorGone: (table: RelationalTable) => SQL<number>
-		/* each sort key's stored text where its read rounds it (QL3 of r22b); on every list with a sort */
+		// QL3 of r22b
+		/** each sort key's stored text where reading it back rounds it; on every list with a sort */
 		_combKeyTexts: (table: RelationalTable) => SQL<string>
-		/* each SQLite timestamp key's TEXT, which the next cursor binds as itself (B2-3 of area B); on every list with a sort */
+		// B2-3 of area B
+		/** each SQLite timestamp sort key's stored TEXT, which the next cursor binds as stored; on every list with a sort */
 		_combTextKeys: (table: RelationalTable) => SQL<string>
+		/** on a page read by number: every row the filter matches, which `paginate` reports as the count */
 		_total: (table: RelationalTable) => SQL<number>
 	}>
-	/** How `paginate` pages the rows these options read (pagination.ts) */
-	pagination: ListPagination & { merged: false }
+	/** How `paginate` pages the rows these options read */
+	pagination: ListPagination & {
+		/** always false: these options read one database, which `paginate` pages */
+		merged: false
+	}
 } & Partial<{
 	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
-	where: { RAW: (table: RelationalTable) => SQL }
+	where: {
+		/** the predicate on the queried table, for drizzle to inline as raw SQL */
+		RAW: (table: RelationalTable) => SQL
+	}
 }>
 
 /**
@@ -171,16 +190,22 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	return { ...base({ _combAnchorGone: gone, _combId: tiebreakOf }), offset: 0, where: { RAW: where } }
 }
 
+/** `row` with only the fields `select` asked for, and none of the list's own extras; every field when `parsedFields` is null */
 function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T {
 	return applySelect(row, parsedFields)
 }
 
 /** List-query helpers for drizzle queries: options, pagination, projection */
 const queryHelpers: {
+	/** the value the filter holds every row's field to, as `extractFilterValue` reads it */
 	filterValue: typeof extractFilterValue
+	/** the values the filter holds every row's fields to, as `extractFilterValues` reads them */
 	filterValues: typeof extractFilterValues
+	/** the `findMany` options of a list page, as `drizzleListOptions` builds them */
 	listOptions: typeof drizzleListOptions
+	/** the page and its pagination from the rows `listOptions` read */
 	paginate: typeof paginate
+	/** a row cut to its `select`, as `drizzleProject` cuts it */
 	project: typeof drizzleProject
 } = {
 	filterValue: extractFilterValue,

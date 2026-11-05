@@ -8,6 +8,7 @@ import { type CheckedField, typedValue } from "./filter-typed.ts"
 import { patternOf } from "./like.ts"
 import type { FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator } from "./types.ts"
 
+/** The operators each field type takes when its spec lists none; `is` takes null and notnull on every type */
 const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]> = {
 	boolean: ["eq", "ne", "neq", "is"],
 	date: ["eq", "ne", "neq", "gt", "gte", "lt", "lte", "is"],
@@ -35,21 +36,39 @@ const TYPABLE_BY_TYPE: Record<FieldType, readonly FilterOperator[]> = {
  * column that stores it holds, in place of epoch milliseconds
  */
 type FilterFieldSpec = {
+	/** "iso", on a date field only: values are ISO 8601 text, not epoch milliseconds */
 	format?: "iso" | undefined
+	/** the operators the field takes in place of its type's; `contains` on any type, and gt to lte on a string, beyond them */
 	operators?: readonly FilterOperator[] | undefined
+	/** the type each value is checked and typed as */
 	type: FieldType
 }
 
 /** A field of `validateFilter`'s map: a bare type, or a spec */
 type FilterField = FieldType | FilterFieldSpec
 
-type FilterValidationResult = { ast: FilterAST; valid: true } | { errors: string[]; valid: false }
+/** A checked filter, or every reason it was refused */
+type FilterValidationResult =
+	| {
+			/** the filter, each value typed as its field declares */
+			ast: FilterAST
+			/** true: the filter passed every check */
+			valid: true
+	  }
+	| {
+			/** one message per problem, each naming its field, for a 400's detail */
+			errors: string[]
+			/** false: the filter was refused */
+			valid: false
+	  }
 
 /** Bounds on one filter expression. Each condition is a predicate SQLite evaluates per row. */
 type FilterLimits = {
+	/** Conditions in the whole filter, every group counted */
 	maxConditions: number
 	/** Nested or()/and() groups below the top level */
 	maxDepth: number
+	/** Members of one in/nin list */
 	maxInValues: number
 	/** Bytes of a like or ilike pattern, a value with an inner `*`, once escaped: D1 caps a pattern at 50 */
 	maxPatternBytes: number
@@ -57,6 +76,7 @@ type FilterLimits = {
 	maxValues: number
 }
 
+/** The default filter bounds: 20 conditions, 3 nested groups, 50 in/nin members, 50 pattern bytes and 60 values */
 const FILTER_LIMITS: FilterLimits = {
 	maxConditions: 20,
 	maxDepth: 3,
@@ -65,7 +85,8 @@ const FILTER_LIMITS: FilterLimits = {
 	maxValues: 60,
 }
 
-/** A limits bag as a caller gives it: any key left out or set to undefined keeps its default (KT1 of r22b) */
+// KT1 of r22b
+/** Bounds as a caller gives them: a key left out or set to undefined keeps its default, and any other is a whole number from 0 */
 type LimitsGiven<T> = { [K in keyof T]?: number | undefined }
 
 /**

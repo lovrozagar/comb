@@ -57,11 +57,15 @@ type CursorPayload = {
 	v: unknown[]
 }
 
+/** An opened cursor, as `readCursor` returns it */
 type DecodedCursor = {
-	/* per key, whether its value is carried stored text, bound as itself; else as read, bound through the column's mapper */
+	/** per sort value, true where it is the stored text of its key rather than the value as read */
 	carried: boolean[]
+	/** the tiebreak id of the row the next page starts after */
 	id: CursorId
+	/** the signature of the sort it was minted under, as `sortSignature` writes it */
 	sort: string
+	/** one value per sort key, in order */
 	values: CursorValue[]
 }
 

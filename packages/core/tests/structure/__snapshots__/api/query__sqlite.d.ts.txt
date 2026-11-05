@@ -348,59 +348,98 @@ export type { RelationConfig };
  * Shared by parsers, validators, and DB-specific SQL generators.
  */
 import type { SQL } from "drizzle-orm";
+/** The fields one level of a `select` names, as `parseSelect` reads it */
 type FieldSelection = {
+    /** each relation embedded as `name(...)`, by name, with what it selects; null selects every field of it */
     relations: Record<string, FieldSelection | null>;
+    /** the field names at this level, each once, in the order written; `*` stands for every field, a leading `@` for a computed one */
     scalars: string[];
 };
+/** A parsed `select`; `filterBySelect` projects a row by it */
 type ParsedFields = {
+    /** what the top level selects */
     root: FieldSelection;
 };
+/**
+ * A filter condition's operator, as written between the field and the value: `ne` and `neq` both
+ * mean not equal, `in` and `nin` take a parenthesized list, `like` is case-sensitive and `ilike`
+ * ignores ASCII case (both with `*` as the wildcard), and `is` takes `null`, `notnull`, `true` or `false`
+ */
 type FilterOperator = "eq" | "ne" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "nin" | "like" | "ilike" | "is"
 /** Parsed for callers that validate and run it themselves (JSON-array membership); comb's own validator and SQL take none */
  | "contains";
+/** A filterable field's type, which decides the operators it takes and how its value is read: a `date` as epoch milliseconds unless its spec says `iso` */
 type FieldType = "string" | "number" | "boolean" | "date" | "enum";
+/** One `field.operator.value` term of a filter */
 type FilterCondition = {
+    /** the field as written: a column, `relation.column`, or a `@`-prefixed computed field */
     field: string;
+    /** the operator as written; `ne` and `neq` are one */
     operator: FilterOperator;
+    /** the value as parsed: a string, null for `is.null`, or an array of strings for a list; `validateFilter` types it as its field */
     value: unknown;
 };
+/** Conditions and nested groups joined by one logic */
 type FilterGroup = {
+    /** the group's own terms, in the order written */
     conditions: FilterCondition[];
+    /** how the group's conditions and subgroups combine; the top level is `and` */
     logic: "and" | "or";
+    /** each nested `and(...)` or `or(...)`, in the order written */
     subgroups: FilterGroup[];
 };
+/** A parsed filter, as `parseFilter` and `validateFilter` return it */
 type FilterAST = {
+    /** the top-level group, which joins its terms with `and` */
     root: FilterGroup;
 };
+/** A sort key's direction */
 type SortDirection = "asc" | "desc";
+/** Where a sort key puts nulls; left out, they sort last ascending and first descending, as on Postgres */
 type SortNulls = "first" | "last";
+/** One key of an `order`, as `parseOrder` returns it */
 type SortField<T extends string = string> = {
+    /** the direction as written; `asc` when the key names none */
     direction: SortDirection;
+    /** the field sorted on: a column, or a `@`-prefixed computed field */
     field: T;
+    /** null placement as written; left out, the direction decides it (see SortNulls) */
     nulls?: SortNulls | undefined;
 };
 /**
  * What every list builder takes (buildListQuery, buildDerivedListQuery, queryHelpers.listOptions):
- * the list schema's output, or a query the app builds itself, its arrays read only (K10 of r17)
+ * the list schema's output, or a query the app builds itself. The builders never change its arrays
  */
 type ListQueryInput<TSortField extends string = string> = {
+    /** the previous page's next cursor, to read the page after it; null or absent reads the first page */
     cursor?: string | null | undefined;
+    /** the parsed filter; null or absent filters nothing */
     filterAst?: FilterAST | null | undefined;
+    /** the most rows the page holds, a whole number from 1 */
     limit: number;
+    /** the 1-based page to read by number; null or absent is page 1. A cursor, when given, wins */
     page?: number | null | undefined;
-    /** the deepest page this query may read (query/trusted.ts); absent, the default maxPage */
+    /** the deepest page this query may read; absent, the default maxPage. A deeper page is a 400 */
     pageBound?: number | undefined;
-    /** the largest limit this query may take; absent, the default maxLimit (Q16 of r18) */
+    /** the largest limit this query may take; absent, the default maxLimit. A larger limit is a 400 */
     limitBound?: number | undefined;
     /** the column the list schema breaks ties on; a derived list's idColumn must name it */
     tiebreak?: string | undefined;
+    /** the parsed `select`; null or absent selects every field */
     parsedFields?: ParsedFields | null | undefined;
+    /** the sort keys in order; empty sorts by the tiebreak column alone */
     parsedSort: readonly SortField<TSortField>[];
+    /** the search text, trimmed; null, absent or blank searches nothing */
     q?: string | null | undefined;
-    /** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
+    /**
+     * The list schema sets it. A builder throws a 500 on a filter or an order without it, as neither
+     * was checked against the fields the endpoint declares; set it only on ones your code checked
+     */
     validated?: true | undefined;
 };
+/** Lowers a computed filter field's condition to SQL; null when it does not take the operator, which the builder answers with a 500 */
 type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null;
+/** The ORDER BY term of a computed sort field in `direction`; a list sorted on one pages by number, and a cursor on it is a 400 */
 type ComputedSortResolver = (direction: SortDirection) => SQL;
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
 
@@ -565,34 +604,44 @@ import type { paginationResponseSchema } from "./schema.ts";
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
 /**
- * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
- * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
+ * The name of one column a builder selects for `paginate` to read, which no row it returns keeps: the
+ * tiebreak, the gone-anchor flag, the count, each sort key's storage class, or its stored text
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_combTextKeys" | "_total";
 /**
- * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
- * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ * A row as paginate and paginateMerged return it, without the `ListExtra` columns. A union row type
+ * loses them from each member, so narrowing on its discriminant still reaches each variant's fields
  */
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationResponse = z.output<typeof paginationResponseSchema>;
-/** How a built list pages what it fetched */
+/**
+ * How a built list pages what it fetched, as a builder hands it over on `pagination`; pass it on to
+ * `paginate` whole. It seals and opens cursors without holding the secret as a value, so logging or
+ * serializing it shows none of it
+ */
 type ListPagination = {
     /** the cursor the request resumed from; none on a page by number */
     cursor: string | undefined;
-    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
+    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak */
     cursorable: boolean;
+    /** the scope its cursors are sealed under, as the builder was given it */
     cursorScope: string;
-    /** the extras the builder selected, which every row it reads must carry (Q3) */
+    /** the extras the builder selected, which every row it reads must carry, or `paginate` answers a 500 naming the one missing */
     expects: readonly ListExtra[];
     /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
     keyset: KeysetKind;
+    /** the page's row count, the request's limit */
     limit: number;
-    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+    /** true on a list built with `merged`, which `paginateMerged` pages and `paginate` refuses */
     merged: boolean;
+    /** "exact" where the builder was told its driver reads ±Infinity back as itself, so a null cursor value is a real NULL */
     nonFinite: "exact" | undefined;
+    /** the `page` param as sent; a cursor, when the request has one, wins over it */
     page: number | undefined;
+    /** the request's `select`, which `paginate` cuts each row to; null keeps every field */
     parsedFields: ParsedFields | null;
+    /** the order the list was read in, which the next cursor is minted under */
     parsedSort: readonly SortField[];
     /** the most rows the built query reads: one past the page, so paginate can tell there is more */
     window: number;
@@ -632,7 +681,9 @@ declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFi
  * the next cursor, sealed under the builder's options; none for a list no cursor can resume
  */
 declare function paginate<T extends object>(items: readonly T[], built: {
+    /** the built list's pagination, as its builder returned it */
     pagination: ListPagination & {
+        /** false: a merged list goes to `paginateMerged` */
         merged: false;
     };
 }): readonly [Array<ListRow<T>>, PaginationResponse];
@@ -672,10 +723,15 @@ type CursorPayload = {
     s: string;
     v: unknown[];
 };
+/** An opened cursor, as `readCursor` returns it */
 type DecodedCursor = {
+    /** per sort value, true where it is the stored text of its key rather than the value as read */
     carried: boolean[];
+    /** the tiebreak id of the row the next page starts after */
     id: CursorId;
+    /** the signature of the sort it was minted under, as `sortSignature` writes it */
     sort: string;
+    /** one value per sort key, in order */
     values: CursorValue[];
 };
 type OpenedCursor = DecodedCursor & {
@@ -738,10 +794,15 @@ type KeysetKind = "derived" | "merged" | "table";
  * integer key past ±(2^53 − 1), which it binds as the driver rounded it
  */
 declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
+    /** the sort fields the list binds as the row read them, with no row to read a bound from; every one on a derived list */
     asRead?: ReadonlySet<string> | undefined;
+    /** the sort fields a long value of may go by reference to its row; every one when not given */
     byReference?: ReadonlySet<string> | undefined;
+    /** the sort fields whose value in `row` is the key's stored text, which the next page binds as itself */
     carried?: ReadonlySet<string> | undefined;
+    /** the field of `row` that holds the tiebreak id; default `id` */
     idField?: string | undefined;
+    /** how a value too long for the cap is carried: by reference on "table", the default; refused with a 500 on "derived" or "merged" */
     keyset?: KeysetKind | undefined;
 }): string;
 /**
@@ -756,13 +817,15 @@ export { createCursor, fitCursor, type KeysetKind };
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
 type CursorOptions = {
+    /** the list's name, its route and tenant, such as `members:${orgId}`; a cursor sealed under one opens under no other. Empty is a 500 */
     cursorScope: string;
+    /** the app's secret, at least `MIN_CURSOR_SECRET_BYTES` bytes of UTF-8, the same on every worker; a shorter one is a 500 */
     cursorSecret: string;
     /**
      * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
      * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
      * right after it. Unset, as on D1, which reads ±Infinity as null, such a list resumes from the
-     * earliest value the null may stand for, repeating rows and skipping none (U24).
+     * earliest value the null may stand for, repeating rows and skipping none.
      */
     nonFinite?: "exact" | undefined;
 };
@@ -830,11 +893,17 @@ export { carriedTexts, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedCl
  * Combines filter, sort, fields, and pagination into validated schemas.
  */
 import * as z from "zod";
+/** The zod schema of a list response's `pagination` */
 export type PaginationResponseSchema = z.ZodObject<{
+    /** rows the filter matches across all pages; null on a cursor page, or a page past the end of one database */
     count: z.ZodNullable<z.ZodNumber>;
+    /** true when a next page exists */
     hasMore: z.ZodBoolean;
+    /** the page size the request read with */
     limit: z.ZodNumber;
+    /** the cursor of the next page; null on the last page, or a list no cursor can resume */
     nextCursor: z.ZodNullable<z.ZodString>;
+    /** the page number; null on a cursor page */
     page: z.ZodNullable<z.ZodNumber>;
 }, z.core.$strip>;
 /** Pagination response meta schema for list endpoints */
@@ -849,13 +918,16 @@ export { paginationResponseSchema };
 /** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
 type CursorId = bigint | number | string;
 /**
- * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * A sort value carried by reference: the prefix of it that fit and the whole
  * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
  * rest is read from the row while it still has that prefix and length
  */
 declare class CursorRef {
+    /** the whole value's length, in code points */
     readonly length: number;
+    /** the longest start of the value that fit the cursor */
     readonly prefix: string;
+    /** A reference to a value `length` code points long that starts with `prefix` */
     constructor(prefix: string, length: number);
 }
 /** What a sort key can hold and its database can compare, or a long one carried by reference */
@@ -877,28 +949,38 @@ export { carried, CursorRef, decodeId, decodeValue, encodeValue, type CursorId, 
 import * as z from "zod";
 import { baseListQueryShape } from "./schema-params.ts";
 import type { ListQueryConfig, ListQueryOutput, OutputStableShape } from "./schema-types.ts";
-/**
- * The optional params beside cursor, page and limit; each key exists only when advertised. A zod
- * shape's key is absent or a schema, never undefined, which zod's shape refuses: Partial says so
- * under exactOptionalPropertyTypes, where `?:` on an input bag takes undefined (KT8 of r22b)
- */
+/** The params beside cursor, page and limit; each but `order` is present only where the config declares it */
 type OptionalShape = {
+    /** the sort, `field[.asc|.desc][.nullsfirst|.nullslast]` keys joined by commas */
     order: z.ZodOptional<z.ZodString>;
 } & Partial<{
+    /** the filter expression, present where the config's `filter` names a field */
     filter: z.ZodOptional<z.ZodString>;
+    /** the search text, present where the config has `search` */
     q: z.ZodOptional<z.ZodString>;
+    /** the language tag, present where the config sets `lang` */
     lang: z.ZodOptional<z.ZodString>;
+    /** the sparse fieldset, present where the config has `fields` */
     select: z.ZodOptional<z.ZodString>;
 }>;
+/** The query params a list endpoint takes, as zod schemas of their query-string text */
 export type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
+    /** the page size, decimal digits from 1 to maxLimit; the default limit when absent */
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    /** the page number, decimal digits from 1 to maxPage */
     page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 };
+/** A list endpoint's request object, before it is parsed: strict, so any param it does not take is a 400 */
 export type ListQueryRequest = z.ZodObject<ListQueryShape, z.core.$strict>;
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
 type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryRequest, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
     [K in keyof T]: z.infer<T[K]>;
 }>, z.output<ListQueryRequest>>>;
+/**
+ * The zod schema of a list endpoint's query string, parsing it into the `ListQueryOutput` every list
+ * builder takes. Each param is published with OpenAPI text from this config. A config it cannot
+ * take, a bound out of range or an `extend` key the schema owns, throws a TypeError at build
+ */
 declare function createListQuerySchema<T extends OutputStableShape<T> = Record<never, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
 export { createListQuerySchema, type ListQuerySchema };
 
@@ -910,26 +992,39 @@ export { createListQuerySchema, type ListQuerySchema };
  */
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
+/** The query params a single-resource endpoint takes, as zod schemas of their query-string text */
 export type RetrieveShape = {
+    /** the sparse fieldset */
     select: z.ZodOptional<z.ZodString>;
 } & Partial<{
+    /** the language tag, present where the config sets `lang` */
     lang: z.ZodOptional<z.ZodString>;
 }>;
+/** A single-resource endpoint's request object, before it is parsed: strict, so any param it does not take is a 400 */
 export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveRequest, z.ZodTransform<Awaited<RetrieveQueryOutput & {
     [K in keyof T]: z.infer<T[K]>;
 }>, z.output<RetrieveRequest>>>;
+/**
+ * The zod schema of a single-resource endpoint's query string: `select`, `lang` where declared, and
+ * `extend`'s fields. An `extend` key the schema owns throws a TypeError at build
+ */
 declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
 export { createRetrieveQuerySchema, type RetrieveQuerySchema };
 
 // query/schema-limits.d.ts
 import type { ListQueryLimits } from "./schema-types.ts";
+/**
+ * The page sizes a list takes when its `pagination` leaves one out: 20 rows, at most 100, and pages
+ * up to 10 000. Past maxPage the database would skip too many rows to read a page by number; a cursor pages on
+ */
 declare const PAGINATION_DEFAULTS: {
     readonly defaultLimit: 20;
     readonly maxLimit: 100;
     readonly maxPage: 10000;
 };
+/** The request bounds a list takes when its `limits` leave one out: `FILTER_LIMITS`, a 2048-character filter, 8 search words and 3 sort keys */
 declare const LIST_QUERY_LIMITS: ListQueryLimits;
 declare const MAX_QUERY_BYTES: number;
 declare const REQUEST_BYTES: {
@@ -956,38 +1051,57 @@ import type { FilterLimits } from "./filter.ts";
 import type { LimitsGiven } from "./filter-validate.ts";
 import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts";
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
+/** The fields an endpoint's `select` may name; any other is a 400 naming it */
 type FieldsConfig = {
+    /** the relations `select` may embed as `name(...)`; omitted, none */
     relations?: readonly string[] | undefined;
+    /** each relation's selectable fields, which its `*` expands to; a relation with no entry selects none */
     relationFields?: Record<string, readonly string[]> | undefined;
+    /** the top-level fields, which `*` expands to; a `@`-prefixed computed field is always taken, for the handler to fill */
     scalars: readonly string[];
 };
+/**
+ * A zod shape for `extend` whose every schema outputs the type it takes: the schema checks its parsed
+ * output again, so a transform or a default would run on its own result
+ */
 type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
     [K in keyof T]: z.ZodType<z.infer<T[K]>, z.infer<T[K]>>;
 };
-/** Bounds on one list request; `maxFilterLength` is checked before the filter is parsed */
+/** Bounds on one list request, each a whole number from 0, past which the request is a 400; `LIST_QUERY_LIMITS` holds the defaults */
 type ListQueryLimits = FilterLimits & {
+    /** the most characters `filter` holds, checked before it is parsed; default 2048 */
     maxFilterLength: number;
+    /** the most whitespace-separated words `q` holds; default 8 */
     maxSearchTerms: number;
+    /** the most keys one `order` holds, from 1; default 3 */
     maxSortKeys: number;
 };
+/** A list's page sizes; createListQuerySchema throws a TypeError naming the key it cannot take */
 type PaginationConfig = {
+    /** the limit a request without `limit` gets, from 1 to maxLimit; default 20 */
     defaultLimit?: number | undefined;
+    /** the largest `limit` a request may send, a whole number from 1; default 100 */
     maxLimit?: number | undefined;
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
     maxPage?: number | undefined;
 };
+/** A name the list query schema owns, as a param or in its output, which `extend` may not take */
 export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
+/** A name the retrieve query schema owns, which `extend` may not take */
 export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
+/** What createListQuerySchema builds a list endpoint's query schema from; each optional param exists only where declared, and any other param is a 400 */
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: (T & {
         [K in ReservedListKey]?: never | undefined;
     }) | undefined;
+    /** The fields `select` may name. Omitted: the endpoint takes no `select`. */
     fields?: FieldsConfig | undefined;
     /** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
     filter?: Record<string, FieldType> | undefined;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
     lang?: true | undefined;
+    /** Bounds that replace the defaults in `LIST_QUERY_LIMITS`, each on its own */
     limits?: LimitsGiven<ListQueryLimits> | undefined;
     /**
      * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
@@ -995,48 +1109,64 @@ type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSor
      * which refuses a `q` it cannot apply.
      */
     search?: readonly string[] | undefined;
+    /** Page sizes and the deepest page; omitted, the defaults in `PAGINATION_DEFAULTS` */
     pagination?: PaginationConfig | undefined;
+    /** The fields `order` may sort on, as published; an `order` naming any other is a 400 */
     sort: TSortFields;
     /**
-     * The column the list breaks ties on, published as `stableTiebreak` (QL10 of r22b). Omitted:
-     * `id`, as buildListQuery breaks ties; a derived list names its `idColumn`'s.
+     * The column the list breaks ties on, published as `stableTiebreak`. Omitted: `id`, as
+     * buildListQuery breaks ties; a derived list names its `idColumn`'s.
      */
     tiebreak?: string | undefined;
 };
+/** What createRetrieveQuerySchema builds a single-resource endpoint's query schema from */
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: (T & {
         [K in ReservedRetrieveKey]?: never | undefined;
     }) | undefined;
+    /** The fields `select` may name */
     fields: FieldsConfig;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
     lang?: true | undefined;
 };
+/** A list query schema's parsed output, which every list builder takes as it is */
 type ListQueryOutput<TSortField extends string = string> = {
+    /** the `cursor` param as sent; it wins over `page` when both are */
     cursor: string | undefined;
+    /** the checked filter, each value typed as its field; null without a `filter` */
     filterAst: FilterAST | null;
+    /** the `lang` param as sent */
     lang: string | undefined;
+    /** the `limit` param, or the default limit when absent */
     limit: number;
+    /** the `page` param, a whole number from 1 to maxPage */
     page: number | undefined;
+    /** the checked `select`, `*` expanded to the declared fields; null without one, which selects every field */
     parsedFields: ParsedFields | null;
+    /** the `order` keys in order; empty without an `order` */
     parsedSort: Array<SortField<TSortField>>;
+    /** the `q` param as sent */
     q: string | undefined;
+    /** each sorted field's direction */
     sortOrderBy: Partial<Record<TSortField, SortDirection>>;
     /**
-     * The schema's own maxPage on its output, which holds the page wherever it is read, a spread of
-     * this object included (C7 of r19). A parsed object built by hand leaves it out for the default
-     * maxPage, or states the bound it means (query/trusted.ts, U29)
+     * The schema's own maxPage, which holds the page wherever this object is read, a spread of it
+     * included. A query built by hand leaves it out for the default maxPage, or states the bound it means
      */
     pageBound?: number | undefined;
-    /** The schema's own maxLimit, which holds the limit as `pageBound` holds the page (Q16 of r18, C7 of r19) */
+    /** The schema's own maxLimit, which holds the limit as `pageBound` holds the page */
     limitBound?: number | undefined;
     /** The column the schema says the list breaks ties on, `id` by default, which a derived list's idColumn names */
     tiebreak?: string | undefined;
-    /** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
+    /** Always true: the filter and the order were checked against the endpoint's fields */
     validated: true;
 };
+/** A retrieve query schema's parsed output */
 type RetrieveQueryOutput = {
+    /** the `lang` param as sent */
     lang: string | undefined;
+    /** the checked `select`, `*` expanded to the declared fields; null without one, which selects every field */
     parsedFields: ParsedFields | null;
 };
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
@@ -1049,7 +1179,9 @@ import type { FilterAST, ParsedFields } from "./types.ts";
 /** The `select` param for an endpoint of these fields, its text and examples theirs */
 declare const selectQueryFieldFor: (fields: FieldsConfig) => z.ZodOptional<z.ZodString>;
 declare const langQueryField: z.ZodOptional<z.ZodString>;
+/** The params every list endpoint takes, whatever its config */
 declare const baseListQueryShape: {
+    /** the `nextCursor` of the previous page, opened only by the list's builder; it wins over `page` */
     cursor: z.ZodOptional<z.ZodString>;
 };
 declare const parsedFieldsSchema: z.ZodType<ParsedFields, ParsedFields>;
@@ -1070,7 +1202,9 @@ declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.Zod
  * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
  */
 declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<CountParam>;
+/** The params and output keys a list query schema owns, which `extend` may not name: one would replace a checked value */
 declare const RESERVED_LIST_KEYS: readonly ["cursor", "filter", "filterAst", "lang", "limit", "limitBound", "order", "page", "pageBound", "parsedFields", "parsedSort", "q", "select", "sortOrderBy", "tiebreak", "validated"];
+/** The params and output keys a retrieve query schema owns, which `extend` may not name */
 declare const RESERVED_RETRIEVE_KEYS: readonly ["lang", "parsedFields", "select"];
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
 declare function assertNotReserved(builder: string, extendFields: Record<string, unknown> | undefined, reserved: readonly string[]): void;
@@ -1109,7 +1243,7 @@ import type { SortField } from "./types.ts";
  *
  * An entry that is empty, names no field (`asc`, `.desc`, a trailing comma) or has whitespace around
  * it, and a field named twice, refuse the whole order as null, as parseFilter refuses a filter, rather
- * than drop it and widen the request to the default order (QL7 of r22b).
+ * than drop it and widen the request to the default order.
  */
 declare function parseOrder(input: string | null | undefined): SortField[] | null;
 /** Each field `fields` names more than once, once each */
@@ -1123,6 +1257,7 @@ export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseF
 
 // query/filter-validate.d.ts
 import type { FieldType, FilterAST, FilterOperator } from "./types.ts";
+/** The operators each field type takes when its spec lists none; `is` takes null and notnull on every type */
 declare const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]>;
 /**
  * A field as a runtime field map declares it: its type, the operators it takes when not its
@@ -1130,32 +1265,43 @@ declare const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]>;
  * column that stores it holds, in place of epoch milliseconds
  */
 type FilterFieldSpec = {
+    /** "iso", on a date field only: values are ISO 8601 text, not epoch milliseconds */
     format?: "iso" | undefined;
+    /** the operators the field takes in place of its type's; `contains` on any type, and gt to lte on a string, beyond them */
     operators?: readonly FilterOperator[] | undefined;
+    /** the type each value is checked and typed as */
     type: FieldType;
 };
 /** A field of `validateFilter`'s map: a bare type, or a spec */
 type FilterField = FieldType | FilterFieldSpec;
+/** A checked filter, or every reason it was refused */
 type FilterValidationResult = {
+    /** the filter, each value typed as its field declares */
     ast: FilterAST;
+    /** true: the filter passed every check */
     valid: true;
 } | {
+    /** one message per problem, each naming its field, for a 400's detail */
     errors: string[];
+    /** false: the filter was refused */
     valid: false;
 };
 /** Bounds on one filter expression. Each condition is a predicate SQLite evaluates per row. */
 type FilterLimits = {
+    /** Conditions in the whole filter, every group counted */
     maxConditions: number;
     /** Nested or()/and() groups below the top level */
     maxDepth: number;
+    /** Members of one in/nin list */
     maxInValues: number;
     /** Bytes of a like or ilike pattern, a value with an inner `*`, once escaped: D1 caps a pattern at 50 */
     maxPatternBytes: number;
     /** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
     maxValues: number;
 };
+/** The default filter bounds: 20 conditions, 3 nested groups, 50 in/nin members, 50 pattern bytes and 60 values */
 declare const FILTER_LIMITS: FilterLimits;
-/** A limits bag as a caller gives it: any key left out or set to undefined keeps its default (KT1 of r22b) */
+/** Bounds as a caller gives them: a key left out or set to undefined keeps its default, and any other is a whole number from 0 */
 type LimitsGiven<T> = {
     [K in keyof T]?: number | undefined;
 };
@@ -1185,6 +1331,7 @@ export { FILTER_LIMITS, limitsOver, OPERATORS_BY_TYPE, validateFilter, type Filt
  * - `@name`: a computed field
  */
 import type { FilterAST, FilterOperator } from "./types.ts";
+/** Every operator the filter grammar parses; `validateFilter` holds each field to its type's */
 declare const FILTER_OPERATORS: readonly [FilterOperator, ...FilterOperator[]];
 /**
  * The AST of a filter string, or null when there is none or any part of it cannot be read: a
@@ -1209,8 +1356,10 @@ type Typed = {
  * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
  */
 declare function parseFilterNumber(raw: string): {
+    /** the number `raw` names */
     value: number;
 } | {
+    /** why `raw` is no number a filter takes */
     error: string;
 };
 declare function typedValue(field: CheckedField, { operator, value }: FilterCondition): Typed;

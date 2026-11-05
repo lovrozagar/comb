@@ -11,6 +11,7 @@
 import type { FilterAST, FilterCondition, FilterGroup, FilterOperator } from "./types.ts"
 
 /* A non-empty tuple, so the list query schema builds its operator enum from it */
+/** Every operator the filter grammar parses; `validateFilter` holds each field to its type's */
 const FILTER_OPERATORS: readonly [FilterOperator, ...FilterOperator[]] = [
 	"eq",
 	"ne",

@@ -9,14 +9,17 @@ import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 type CursorId = bigint | number | string
 
 /**
- * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * A sort value carried by reference: the prefix of it that fit and the whole
  * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
  * rest is read from the row while it still has that prefix and length
  */
 class CursorRef {
+	/** the whole value's length, in code points */
 	readonly length: number
+	/** the longest start of the value that fit the cursor */
 	readonly prefix: string
 
+	/** A reference to a value `length` code points long that starts with `prefix` */
 	constructor(prefix: string, length: number) {
 		this.prefix = prefix
 		this.length = length

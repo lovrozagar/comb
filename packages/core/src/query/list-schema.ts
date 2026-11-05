@@ -31,24 +31,32 @@ import type { FieldType } from "./types.ts"
 
 type AdvertisedConfig = Pick<ListQueryConfig, "fields" | "filter" | "lang" | "search" | "sort">
 
-/**
- * The optional params beside cursor, page and limit; each key exists only when advertised. A zod
- * shape's key is absent or a schema, never undefined, which zod's shape refuses: Partial says so
- * under exactOptionalPropertyTypes, where `?:` on an input bag takes undefined (KT8 of r22b)
- */
-type OptionalShape = { order: z.ZodOptional<z.ZodString> } & Partial<{
+// KT8 of r22b: Partial, not `?:`, as a zod shape's key is absent or a schema, never undefined
+/** The params beside cursor, page and limit; each but `order` is present only where the config declares it */
+type OptionalShape = {
+	/** the sort, `field[.asc|.desc][.nullsfirst|.nullslast]` keys joined by commas */
+	order: z.ZodOptional<z.ZodString>
+} & Partial<{
+	/** the filter expression, present where the config's `filter` names a field */
 	filter: z.ZodOptional<z.ZodString>
+	/** the search text, present where the config has `search` */
 	q: z.ZodOptional<z.ZodString>
+	/** the language tag, present where the config sets `lang` */
 	lang: z.ZodOptional<z.ZodString>
+	/** the sparse fieldset, present where the config has `fields` */
 	select: z.ZodOptional<z.ZodString>
 }>
 
+/** The query params a list endpoint takes, as zod schemas of their query-string text */
 export type ListQueryShape = typeof baseListQueryShape &
 	OptionalShape & {
+		/** the page size, decimal digits from 1 to maxLimit; the default limit when absent */
 		limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>
+		/** the page number, decimal digits from 1 to maxPage */
 		page: z.ZodOptional<z.ZodCoercedNumber<unknown>>
 	}
 
+/** A list endpoint's request object, before it is parsed: strict, so any param it does not take is a 400 */
 export type ListQueryRequest = z.ZodObject<ListQueryShape, z.core.$strict>
 
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
@@ -142,6 +150,11 @@ function listLimitsOf(given: ListQueryConfig["limits"]): ListQueryLimits {
 	)
 }
 
+/**
+ * The zod schema of a list endpoint's query string, parsing it into the `ListQueryOutput` every list
+ * builder takes. Each param is published with OpenAPI text from this config. A config it cannot
+ * take, a bound out of range or an `extend` key the schema owns, throws a TypeError at build
+ */
 function createListQuerySchema<
 	T extends OutputStableShape<T> = Record<never, never>,
 	const TSortFields extends readonly string[] = readonly string[],

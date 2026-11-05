@@ -18,7 +18,15 @@ const MAX_EPOCH_MS = 8.64e15
  * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
  * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
  */
-function parseFilterNumber(raw: string): { value: number } | { error: string } {
+function parseFilterNumber(raw: string):
+	| {
+			/** the number `raw` names */
+			value: number
+	  }
+	| {
+			/** why `raw` is no number a filter takes */
+			error: string
+	  } {
 	const value = Number(raw)
 	if (!NUMBER.test(raw) || !Number.isFinite(value)) return { error: `expects a number, got '${raw}'` }
 	if (Math.abs(value) > Number.MAX_SAFE_INTEGER) {

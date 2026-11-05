@@ -5,24 +5,31 @@
  * UTC; a fraction past milliseconds is cut, as a JS Date holds none.
  */
 
+// Q4 of r17
 /**
- * An ISO date filter's value as validateFilter types it (Q4 of r17): the instant, by its epoch
- * milliseconds and its `toISOString()` text, so a lowering binds the one its column stores and
- * never reads the text back. It writes itself as its text, in a string and in JSON.
+ * An ISO date filter's value as validateFilter types it: the instant, by its epoch milliseconds and
+ * its `toISOString()` text, so a lowering binds whichever its column stores. A bare date is
+ * midnight UTC, and a fraction past milliseconds is cut. It writes itself as its text, in a string
+ * and in JSON
  */
 class IsoInstant {
+	/** the instant in epoch milliseconds */
 	readonly ms: number
+	/** the instant as `toISOString()` writes it, in UTC */
 	readonly text: string
 
+	/** The instant `ms` epoch milliseconds name */
 	constructor(ms: number) {
 		this.ms = ms
 		this.text = new Date(ms).toISOString()
 	}
 
+	/** The instant's ISO text */
 	toJSON(): string {
 		return this.text
 	}
 
+	/** The instant's ISO text */
 	toString(): string {
 		return this.text
 	}

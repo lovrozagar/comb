@@ -57,13 +57,17 @@ function createCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
 	options: CursorOptions & {
-		/* the sort fields whose keys the list binds as read (QL1 of r22b); every one on a derived list */
+		// QL1 of r22b
+		/** the sort fields the list binds as the row read them, with no row to read a bound from; every one on a derived list */
 		asRead?: ReadonlySet<string> | undefined
-		/* the sort fields whose keys read a reference back (refersBack); every one when not given */
+		/** the sort fields a long value of may go by reference to its row; every one when not given */
 		byReference?: ReadonlySet<string> | undefined
-		/* the sort fields whose values are the stored text the list carried, bound as themselves (comb-9d's AB2 ruling) */
+		// AB2 ruling
+		/** the sort fields whose value in `row` is the key's stored text, which the next page binds as itself */
 		carried?: ReadonlySet<string> | undefined
+		/** the field of `row` that holds the tiebreak id; default `id` */
 		idField?: string | undefined
+		/** how a value too long for the cap is carried: by reference on "table", the default; refused with a 500 on "derived" or "merged" */
 		keyset?: KeysetKind | undefined
 	},
 ): string {

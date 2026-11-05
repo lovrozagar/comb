@@ -161,6 +161,11 @@ function mergeRelation(relations: Record<string, FieldSelection | null>, name: s
 	}
 }
 
+/**
+ * `data` cut to a parsed `select`: its named scalars, or every key under `*`, and each embedded
+ * relation, an object or each element of an array, cut to its own selection. A key the row lacks is
+ * left out, and a null or undefined relation stays as it is
+ */
 function filterBySelect<T extends Record<string, unknown>>(data: T, fields: ParsedFields): Partial<T> {
 	return filterBySelection(data, fields.root) as Partial<T>
 }

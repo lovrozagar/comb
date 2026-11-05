@@ -16,7 +16,15 @@ import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts
 import { validateSelectWithConfig } from "./select-validate.ts"
 
 /* a zod shape: `lang` is absent or a schema, never undefined, as list-schema.ts's OptionalShape says */
-export type RetrieveShape = { select: z.ZodOptional<z.ZodString> } & Partial<{ lang: z.ZodOptional<z.ZodString> }>
+/** The query params a single-resource endpoint takes, as zod schemas of their query-string text */
+export type RetrieveShape = {
+	/** the sparse fieldset */
+	select: z.ZodOptional<z.ZodString>
+} & Partial<{
+	/** the language tag, present where the config sets `lang` */
+	lang: z.ZodOptional<z.ZodString>
+}>
+/** A single-resource endpoint's request object, before it is parsed: strict, so any param it does not take is a 400 */
 export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>
 
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
@@ -25,6 +33,10 @@ type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<
 	z.ZodTransform<Awaited<RetrieveQueryOutput & { [K in keyof T]: z.infer<T[K]> }>, z.output<RetrieveRequest>>
 >
 
+/**
+ * The zod schema of a single-resource endpoint's query string: `select`, `lang` where declared, and
+ * `extend`'s fields. An `extend` key the schema owns throws a TypeError at build
+ */
 function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(
 	config: RetrieveQueryConfig<T>,
 ): RetrieveQuerySchema<T> {

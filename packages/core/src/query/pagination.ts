@@ -17,15 +17,17 @@ import type { paginationResponseSchema } from "./schema.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 import type * as z from "zod"
 
+// Q3 of r17, Q2 of r19, Q2 of r21
 /**
- * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
- * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
+ * The name of one column a builder selects for `paginate` to read, which no row it returns keeps: the
+ * tiebreak, the gone-anchor flag, the count, each sort key's storage class, or its stored text
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_combTextKeys" | "_total"
 
+// Q3 of r19
 /**
- * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
- * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ * A row as paginate and paginateMerged return it, without the `ListExtra` columns. A union row type
+ * loses them from each member, so narrowing on its discriminant still reaches each variant's fields
  */
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never
 
@@ -42,23 +44,35 @@ const EXTRAS: readonly ListExtra[] = [
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationResponse = z.output<typeof paginationResponseSchema>
 
-/** How a built list pages what it fetched */
+/**
+ * How a built list pages what it fetched, as a builder hands it over on `pagination`; pass it on to
+ * `paginate` whole. It seals and opens cursors without holding the secret as a value, so logging or
+ * serializing it shows none of it
+ */
 type ListPagination = {
 	/** the cursor the request resumed from; none on a page by number */
 	cursor: string | undefined
-	/** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
+	// Q6, Q3
+	/** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak */
 	cursorable: boolean
+	/** the scope its cursors are sealed under, as the builder was given it */
 	cursorScope: string
-	/** the extras the builder selected, which every row it reads must carry (Q3) */
+	/** the extras the builder selected, which every row it reads must carry, or `paginate` answers a 500 naming the one missing */
 	expects: readonly ListExtra[]
 	/** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
 	keyset: KeysetKind
+	/** the page's row count, the request's limit */
 	limit: number
-	/** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+	// K8 of r17
+	/** true on a list built with `merged`, which `paginateMerged` pages and `paginate` refuses */
 	merged: boolean
+	/** "exact" where the builder was told its driver reads ±Infinity back as itself, so a null cursor value is a real NULL */
 	nonFinite: "exact" | undefined
+	/** the `page` param as sent; a cursor, when the request has one, wins over it */
 	page: number | undefined
+	/** the request's `select`, which `paginate` cuts each row to; null keeps every field */
 	parsedFields: ParsedFields | null
+	/** the order the list was read in, which the next cursor is minted under */
 	parsedSort: readonly SortField[]
 	/** the most rows the built query reads: one past the page, so paginate can tell there is more */
 	window: number
@@ -171,7 +185,13 @@ function mintFrom(
  */
 function paginate<T extends object>(
 	items: readonly T[],
-	built: { pagination: ListPagination & { merged: false } },
+	built: {
+		/** the built list's pagination, as its builder returned it */
+		pagination: ListPagination & {
+			/** false: a merged list goes to `paginateMerged` */
+			merged: false
+		}
+	},
 ): readonly [Array<ListRow<T>>, PaginationResponse] {
 	const pagination = paginationIn(built, false)
 	refuseOverRead(items.length, pagination)

@@ -12,38 +12,60 @@ import { REQUEST_BYTES } from "./schema-limits.ts"
 import type { FieldsConfig } from "./schema-types.ts"
 import type { FieldType, FilterOperator } from "./types.ts"
 
+/** The OpenAPI description of the `cursor` param */
 const CURSOR_DESCRIPTION =
 	"Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent."
 
+/** The OpenAPI description of the `page` param */
 const PAGE_DESCRIPTION =
 	"1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present."
+/** The OpenAPI examples of the `page` param */
 const PAGE_EXAMPLES: number[] = [1, 2]
 
+/** The OpenAPI description of the `lang` param */
 const LANG_DESCRIPTION =
 	"BCP-47 language tag selecting localized text fields (falls back to default locale when absent)."
+/** The OpenAPI examples of the `lang` param */
 const LANG_EXAMPLES: string[] = ["en", "de", "fr"]
 
+/** The opening sentences of the `select` param's OpenAPI description; `selectParamMeta` adds the endpoint's fields */
 const SELECT_DESCRIPTION =
 	"PostgREST-style sparse fieldset. Scalars comma-separated; relations embedded as name(fields); wildcard * selects all scalars. Docs: https://docs.postgrest.org/en/stable/references/api/resource_embedding.html"
 
-export type ParamMeta = { description: string; examples: string[] }
+/** A query param's OpenAPI text, for `.meta()` on its zod schema */
+export type ParamMeta = {
+	/** the param's description */
+	description: string
+	/** values the param accepts */
+	examples: string[]
+}
 
 /*
  * A cursor publishes no example: it is sealed under the app's secret and the list's scope, so no
  * value opens on every endpoint, and one sealed under any other is an invalid_cursor (CS7 of r22b).
  */
 
-/** The `limit` param's text, its default and its cap the endpoint's own, and examples it takes (QL8 of r22b) */
-function limitParamMeta(defaultLimit: number, maxLimit: number): { description: string; examples: number[] } {
+// QL8 of r22b
+/** The `limit` param's OpenAPI text, stating the endpoint's default and cap, which are its examples */
+function limitParamMeta(
+	defaultLimit: number,
+	maxLimit: number,
+): {
+	/** the param's description */
+	description: string
+	/** the default and the cap, once each */
+	examples: number[]
+} {
 	return {
 		description: `Maximum number of items per page, in decimal digits. Defaults to ${defaultLimit}, at most ${maxLimit}.`,
 		examples: [...new Set([defaultLimit, maxLimit])],
 	}
 }
 
+// CS7, QL8 of r22b
 /**
- * The `select` param's text and examples, from the fields the endpoint declares (CS7, QL8 of
- * r22b): its first scalars, one relation with one of its declared fields when it has one, and `*`
+ * The `select` param's OpenAPI text, listing the fields and relations `fields` declares. Its examples
+ * are the first scalars, one relation with one of its fields when one has any, and `*`
  */
 function selectParamMeta(fields: FieldsConfig): ParamMeta {
 	const relationFields = fields.relationFields ?? {}
@@ -85,6 +107,10 @@ function sampleCondition(field: string, type: FieldType): string {
 	}
 }
 
+/**
+ * The `filter` param's OpenAPI text: its grammar, each field with the operators its type takes, and
+ * `limits`. Its examples are built from the first fields, so each parses on this endpoint
+ */
 function filterParamMeta(
 	fields: Record<string, FieldType>,
 	operatorsFor: (type: FieldType) => readonly FilterOperator[],
@@ -113,7 +139,14 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta & { pattern: string } {
+/** The `order` param's OpenAPI text over the sortable fields in `sort`, the first of which is the default, descending */
+function orderParamMeta(
+	sort: readonly string[],
+	maxSortKeys: number,
+): ParamMeta & {
+	/** a regular expression matching every `order` this endpoint takes, up to `maxSortKeys` keys */
+	pattern: string
+} {
 	const [first = "", second] = sort
 	const entry = `(?:${sort.map(escapeRegExp).join("|")})(?:\\.(?:asc|desc))?(?:\\.(?:nullsfirst|nullslast))?`
 	return {
@@ -130,6 +163,7 @@ function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta
 	}
 }
 
+/** The `q` param's OpenAPI text over the fields in `search`, with at most `maxTerms` words */
 function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta {
 	return {
 		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms, and at most ${REQUEST_BYTES.q} bytes however a URL or a form encodes it.`,

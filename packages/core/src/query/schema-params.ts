@@ -26,7 +26,11 @@ const langQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().mi
 	examples: LANG_EXAMPLES,
 })
 
-const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString> } = {
+/** The params every list endpoint takes, whatever its config */
+const baseListQueryShape: {
+	/** the `nextCursor` of the previous page, opened only by the list's builder; it wins over `page` */
+	cursor: z.ZodOptional<z.ZodString>
+} = {
 	/* any string: readCursor answers every one it cannot use, past MAX_CURSOR_LENGTH included, with
 	   invalid_cursor, so a client restarts on one key (C5); the bound is published all the same */
 	cursor: /* @__PURE__ */ z.string().optional().meta({
@@ -164,8 +168,8 @@ function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<
 	return maxPage === PAGINATION_DEFAULTS.maxPage ? defaultPageSchema : pageSchema(maxPage)
 }
 
-/* the params and output keys a list query schema owns: an extension under one would replace a checked value */
 // lookup-table: the names an extension may not take, the type's source too
+/** The params and output keys a list query schema owns, which `extend` may not name: one would replace a checked value */
 const RESERVED_LIST_KEYS = [
 	"cursor",
 	"filter",
@@ -185,8 +189,8 @@ const RESERVED_LIST_KEYS = [
 	"validated",
 ] as const
 
-/* the same for a retrieve query schema */
 // lookup-table: the names an extension may not take, the type's source too
+/** The params and output keys a retrieve query schema owns, which `extend` may not name */
 const RESERVED_RETRIEVE_KEYS = ["lang", "parsedFields", "select"] as const
 
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
