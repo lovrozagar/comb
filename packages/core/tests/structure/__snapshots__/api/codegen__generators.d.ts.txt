@@ -31,9 +31,13 @@ export type { ImportStyle } from "../utils/paths.ts";
 
 // codegen/generators/columns.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the columns generator writes each table's column references */
 export type ColumnsConfig = {
+    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
     filePrefix?: string | undefined;
+    /** the directory `rqb-cols/`, `sql-cols/` and `table-names/` are written under, relative to the codegen working directory */
     output: string;
+    /** also export each file from the working directory's package.json, as `./rqb-cols/<table>`, `./sql-cols/<table>` and `./table-names`; nothing when it has none */
     updatePackageJson?: boolean | undefined;
 };
 /** Generate column refs and table names from analyzed tables */
@@ -44,7 +48,9 @@ import type { TableMeta } from "../analyzer-types.ts";
 import { type Constraint, type ConstraintMap } from "./constraints-code.ts";
 import type { GeneratorContext } from "./context-types.ts";
 type Dialect = "postgres" | "sqlite";
+/** Where the constraints generator writes the constraint map */
 export type ConstraintsConfig = {
+    /** the file written, relative to the codegen working directory */
     output: string;
     /** comb.config.ts's `partitions`: each partitioned table's partitions, keyed as the map keys it */
     partitions?: Readonly<Record<string, readonly string[]>> | undefined;
@@ -66,12 +72,20 @@ export {};
 // codegen/generators/fts.d.ts
 import { type FtsTableConfig } from "./fts-sql.ts";
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the fts generator writes and which tables it indexes */
 export type FtsGeneratorConfig = {
     /** file name stem; defaults to `db.<dbName>` */
     filePrefix?: string | undefined;
+    /** each table, by its SQL name, to its FTS5 index; an unknown table throws, and none writes nothing and logs it */
     fts: Record<string, FtsTableConfig>;
+    /** the directory the two files are written to, relative to the codegen working directory */
     output: string;
 };
+/**
+ * Write `<filePrefix>.fts.gen.sql`, the FTS5 virtual tables and the triggers that keep them in step
+ * with their tables, and `<filePrefix>.fts.gen.ts`, each index's table and columns for queries to
+ * name. An unknown column throws; a repeated one warns
+ */
 declare function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void;
 export { generateFts };
 
@@ -119,25 +133,29 @@ import type { GeneratorContext } from "./context-types.ts";
  * it does not recognise keeps working across comb releases.
  */
 declare const MANIFEST_VERSION = 3;
+/** One column of a manifest entity, with what a write of it is held to */
 type ManifestColumn = {
+    /** the column's property name in its table's definition */
     name: string;
     /** The `c.*` helper that declared it — text, integer, enum, json, ref, … */
     kind: string;
     /**
      * The column's SQL type, its modifier included, as drizzle writes it (`timestamp(3) with time
-     * zone`, `interval day`, `numeric(3, -2)`): with `kind`, the check a plain Postgres type's rule is (AA8 of r22)
+     * zone`, `interval day`, `numeric(3, -2)`): with `kind`, the check a plain Postgres type's rule is
      */
     sqlType: string;
-    /** An array column's dimensions, 0 for a column of one value: its `sqlType` is its element's (A2-5 of r22) */
+    /** An array column's dimensions, 0 for a column of one value: its `sqlType` is its element's */
     dimensions: number;
-    /** Whether a written array's element may be null, as the column's drizzle type declares; false for a column of one value (A2-9 of r22) */
+    /** Whether a written array's element may be null, as the column's drizzle type declares; false for a column of one value */
     nullElements: boolean;
+    /** the column is NOT NULL */
     notNull: boolean;
+    /** the column alone is the table's primary key; false on each column of a composite one, which `compositePrimaryKey` flags */
     primaryKey: boolean;
     /** Declared values for an enum column, or null when not an enum or the list is a const reference */
     enumValues: string[] | null;
     /**
-     * The bounds a written value is held to, as the write DTO enforces them (C2 of r20): a text's
+     * The bounds a written value is held to, as the write DTO enforces them: a text's
      * length, its kind's and the declared together, a number's value, clamped to what the column
      * holds; an array's are each element's. Null where none, and on a plain Postgres column whose
      * type has a rule of its own (a uuid, an inet, a real), which `kind` and `sqlType` name
@@ -145,10 +163,11 @@ type ManifestColumn = {
     max: number | null;
     /** The most bytes a written JSON value takes serialized, null for none and for any other column */
     maxBytes: number | null;
+    /** the smallest value a write takes, measured as `max` is; null where none */
     min: number | null;
     /** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind` and `sqlType`'s */
     patterns: string[];
-    /** A text column's format, null for any other (C8 of r19) */
+    /** A text column's format, null for any other */
     textKind: "email" | "imageUri" | "name" | "password" | "url" | null;
     /** The rewrites a written value takes before `min`, `max` and `patterns` bind it, in order: the DTO's own list (meta-contract §2.1) */
     transform: string[];
@@ -166,27 +185,37 @@ type ManifestColumn = {
      * to a black-box tester. See docs/state-machines.md §5.
      */
     states: {
+        /** the state a new row starts in; null when none is declared */
         initial: string | null;
+        /** the states a row never leaves */
         terminal: string[];
+        /** each state, to the states a row may move to from it; null when none are declared */
         transitions: Record<string, string[]> | null;
     } | null;
 };
+/** One foreign key of a manifest entity */
 type ManifestRelation = {
     /** the referencing column, by its name among this entity's `columns` */
     column: string;
     /** the composite key the column is part of, each column paired by position with the one it references; absent on a single-column key */
     key?: {
+        /** the key's referencing columns, by name, in key order */
         columns: string[];
+        /** the referenced columns, by name, each paired by position with `columns` */
         refColumns: string[];
     } | undefined;
-    /** the referenced entity, by its `name`: schema-qualified on Postgres, never the TypeScript variable (CS5 of r22b; v 3) */
+    /** the referenced entity, by its `name`: schema-qualified on Postgres, never the TypeScript variable (since `v` 3) */
     table: string;
     /** the referenced column, by its name among that entity's `columns` */
     refColumn: string;
+    /** what the database does to this row when the referenced row is deleted (`cascade`, `set null`); null for its default */
     onDelete: string | null;
+    /** what the database does to this row when the referenced key changes; null for its default */
     onUpdate: string | null;
 };
+/** One table of the manifest */
 type ManifestEntity = {
+    /** the table's SQL name, schema-qualified on Postgres; entities are sorted by it */
     name: string;
     /** Variable the table was declared under, for locating it in source */
     varName: string;
@@ -194,33 +223,52 @@ type ManifestEntity = {
     idPrefix: string | null;
     /** Null when the table has a composite primary key — see meta-contract §6.4 */
     identity: string | null;
+    /** the soft-delete timestamp column, or null when rows are deleted outright or the column is private */
     softDelete: string | null;
+    /** the column that scopes rows to a tenant, or null when none, or more than one, is declared or it is private */
     tenantColumn: string | null;
+    /** the primary key spans more than one column */
     compositePrimaryKey: boolean;
+    /** every column, private ones flagged, in declaration order */
     columns: ManifestColumn[];
+    /** every foreign key, in column order */
     relations: ManifestRelation[];
+    /** the unique indexes, as the stamp publishes them */
     uniqueIndexes: {
+        /** the index's name, which a violation of it reports */
         name: string;
+        /** the indexed columns, by name, in index order */
         columns: string[];
     }[];
-    /** each with its predicate, SQL over SQL names, as the stamp publishes them (§6.8; C7 of r17) */
+    /** each with its predicate, SQL over SQL names, as the stamp publishes them (meta-contract §6.8) */
     partialUniqueIndexes: {
+        /** the index's name, which a violation of it reports */
         name: string;
+        /** the indexed columns, by name, in index order */
         columns: string[];
+        /** the rows the columns are unique among, as SQL */
         where: string;
     }[];
+    /** the table's CHECK constraints */
     checkConstraints: {
+        /** the constraint's name, which a violation of it reports */
         name: string;
+        /** the condition every row must meet, as SQL */
         expression: string;
     }[];
 };
+/** The model as JSON, for tools that do not read TypeScript */
 type Manifest = {
+    /** the format version, `MANIFEST_VERSION`: raised only when a field is removed or changes meaning, never when one is added */
     v: number;
+    /** the database's name in comb.config.ts */
     database: string;
+    /** every table, sorted by `name`, so an unchanged schema regenerates an identical file */
     entities: ManifestEntity[];
 };
+/** Where the manifest generator writes */
 type ManifestConfig = {
-    filePrefix?: string | undefined;
+    /** the JSON file written, relative to the codegen working directory */
     output: string;
 };
 /**
@@ -237,9 +285,16 @@ export { buildManifest, generateManifest, type Manifest, type ManifestColumn, ty
 
 // codegen/generators/diagrams.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the diagrams generator writes */
 export type DiagramsConfig = {
+    /** the directory the three files are written to, relative to the codegen working directory */
     output: string;
 };
+/**
+ * Write the schema as `<database>-schema.gen.sql` (DDL a diagram tool such as ChartDB imports),
+ * `<database>-relations.gen.json` (the tables and their foreign keys) and `<database>-ai.gen.txt`
+ * (a compact summary for a model's context), all into `output`
+ */
 export declare function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig): void;
 
 // codegen/generators/dtos/index.d.ts
@@ -248,31 +303,54 @@ export type { DtosConfig } from "./dto-types.ts";
 
 // codegen/generators/entities.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the entities generator writes and what it imports */
 export type EntitiesConfig = {
+    /** the package the generated file imports `generateId` and `generateUlid` from; `@lovrozagar/comb` when omitted */
     importFrom?: string | undefined;
+    /** the file written, relative to the codegen working directory */
     output: string;
+    /** also point the `./entities` export of the package.json nearest the file at it */
     updatePackageJson?: boolean | undefined;
 };
+/**
+ * Write `entityPrefixes`, each c.id("prefix") table's id prefix by its export name, with
+ * `generateEntityId(entity)`, which makes an id carrying that prefix. Writes nothing, and logs it,
+ * when no table declares a prefix
+ */
 declare function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void;
-/** Walk up from dir to find nearest package.json */
 export { generateEntities };
 
 // codegen/generators/enum-checks.d.ts
 import type { TableMeta } from "../analyzer-types.ts";
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the enum-checks generator writes */
 export type EnumChecksConfig = {
+    /** the file written, relative to the codegen working directory */
     output: string;
 };
 /** The name of the CHECK comb writes for an enum column; the constraint map keys its entry by it */
 export declare const enumCheckName: (table: Pick<TableMeta, "sqlName">, fieldName: string) => string;
+/**
+ * Write `<table>EnumChecks(table)` for each table with an enum column: the CHECK constraints that
+ * hold each such column to its values, for the table's drizzle extra config to return. Writes
+ * nothing, and logs it, when no table has one
+ */
 export declare function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void;
 
 // codegen/generators/field-names.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the field-names generator writes */
 export type FieldNamesConfig = {
+    /** the file written, relative to the codegen working directory */
     output: string;
+    /** also point the `./field-names` export of the package.json nearest the file at it */
     updatePackageJson?: boolean | undefined;
 };
+/**
+ * Write each column name across the tables, private ones left out, to an English label: the
+ * snake_case name with its `_json` or `_id` suffix dropped, capitalized and spaced, for a form or
+ * an error message to name a field by. Writes nothing, and logs it, when there are none
+ */
 declare function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): void;
 /** Walk up from dir to find nearest package.json */
 export { generateFieldNames };
@@ -303,7 +381,9 @@ export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): v
 
 // codegen/generators/relations.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the relations generator writes the drizzle relations */
 export type RelationsConfig = {
+    /** the file written, relative to the codegen working directory */
     output: string;
 };
 /** Build the relations graph and generate code from analyzed tables */
@@ -311,7 +391,9 @@ export declare function generateRelations(ctx: GeneratorContext, config: Relatio
 
 // codegen/generators/rows.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the rows generator writes each table's select and insert row types */
 export type RowsConfig = {
+    /** the file written, relative to the codegen working directory */
     output: string;
 };
 /**
@@ -321,7 +403,9 @@ export declare function generateRows(ctx: GeneratorContext, config: RowsConfig):
 
 // codegen/generators/translations.d.ts
 import type { GeneratorContext } from "./context-types.ts";
+/** Where the translations generator writes the error keys and their messages */
 export type TranslationsConfig = {
+    /** the directory `<filePrefix>.error-keys.gen.ts` is written to, with the en-US messages under its `translations/error-keys/`, relative to the codegen working directory */
     baseDir: string;
     /** file name stem, the one the constraints file uses */
     filePrefix: string;
@@ -355,13 +439,17 @@ export type TableInfo = {
     needsSharedMeta: boolean;
     timestampStyle: "camelCase" | "mixed" | "snake_case";
 };
+/** Where the dtos generator writes each table's DTO schemas */
 export type DtosConfig = {
+    /** the stem of each file's name, `<filePrefix>.<table>.gen.ts`; each file is its directory's `index.gen.ts` when omitted */
     filePrefix?: string | undefined;
     /** Package the generated meta stamp imports from. Matches EntitiesConfig. */
     importFrom?: string | undefined;
+    /** the directory each table's directory and `_shared/` are written under, relative to the codegen working directory */
     output: string;
     /** where the relations generator writes, which the `./relations` export points at */
     relationsOutput?: string | undefined;
+    /** also export the files from the working directory's package.json, as `./dtos/<table>`, `./dtos/_shared`, `./relations` and `./tables`; warns when it has none */
     updatePackageJson?: boolean | undefined;
 };
 /** Emitted code for a shared schema constant */

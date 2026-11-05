@@ -20,7 +20,9 @@ import { stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
+/** Where the enum-checks generator writes */
 export type EnumChecksConfig = {
+	/** the file written, relative to the codegen working directory */
 	output: string
 }
 
@@ -66,6 +68,11 @@ function escapeValue(val: string): string {
 		.replace(/\r/g, "\\r")
 }
 
+/**
+ * Write `<table>EnumChecks(table)` for each table with an enum column: the CHECK constraints that
+ * hold each such column to its values, for the table's drizzle extra config to return. Writes
+ * nothing, and logs it, when no table has one
+ */
 export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const { cwd } = ctx

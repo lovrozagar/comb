@@ -217,10 +217,17 @@ function generateRelationsJSON(tables: Table[], relations: Relation[]): Record<s
 	}
 }
 
+/** Where the diagrams generator writes */
 export type DiagramsConfig = {
+	/** the directory the three files are written to, relative to the codegen working directory */
 	output: string
 }
 
+/**
+ * Write the schema as `<database>-schema.gen.sql` (DDL a diagram tool such as ChartDB imports),
+ * `<database>-relations.gen.json` (the tables and their foreign keys) and `<database>-ai.gen.txt`
+ * (a compact summary for a model's context), all into `output`
+ */
 export function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig): void {
 	const { cwd } = ctx
 	const outputDir = path.resolve(cwd, config.output)

@@ -13,7 +13,9 @@ import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
+/** Where the relations generator writes the drizzle relations */
 export type RelationsConfig = {
+	/** the file written, relative to the codegen working directory */
 	output: string
 }
 

@@ -12,13 +12,21 @@ import { ftsColumns, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
+/** Where the fts generator writes and which tables it indexes */
 export type FtsGeneratorConfig = {
 	/** file name stem; defaults to `db.<dbName>` */
 	filePrefix?: string | undefined
+	/** each table, by its SQL name, to its FTS5 index; an unknown table throws, and none writes nothing and logs it */
 	fts: Record<string, FtsTableConfig>
+	/** the directory the two files are written to, relative to the codegen working directory */
 	output: string
 }
 
+/**
+ * Write `<filePrefix>.fts.gen.sql`, the FTS5 virtual tables and the triggers that keep them in step
+ * with their tables, and `<filePrefix>.fts.gen.ts`, each index's table and columns for queries to
+ * name. An unknown column throws; a repeated one warns
+ */
 function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const { cwd } = ctx

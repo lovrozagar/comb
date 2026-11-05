@@ -10,12 +10,21 @@ import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
+/** Where the entities generator writes and what it imports */
 export type EntitiesConfig = {
+	/** the package the generated file imports `generateId` and `generateUlid` from; `@lovrozagar/comb` when omitted */
 	importFrom?: string | undefined
+	/** the file written, relative to the codegen working directory */
 	output: string
+	/** also point the `./entities` export of the package.json nearest the file at it */
 	updatePackageJson?: boolean | undefined
 }
 
+/**
+ * Write `entityPrefixes`, each c.id("prefix") table's id prefix by its export name, with
+ * `generateEntityId(entity)`, which makes an id carrying that prefix. Writes nothing, and logs it,
+ * when no table declares a prefix
+ */
 function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void {
 	const { tables } = ctx.analysis
 	const { cwd } = ctx
@@ -70,5 +79,4 @@ function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void {
 	ctx.log(`  entities: ${outputPath} (${prefixedTables.length} entities)`)
 }
 
-/** Walk up from dir to find nearest package.json */
 export { generateEntities }

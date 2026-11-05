@@ -9,7 +9,9 @@ import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { type ImportStyle, styled } from "../utils/paths.ts"
 
+/** Where the translations generator writes the error keys and their messages */
 export type TranslationsConfig = {
+	/** the directory `<filePrefix>.error-keys.gen.ts` is written to, with the en-US messages under its `translations/error-keys/`, relative to the codegen working directory */
 	baseDir: string
 	/** file name stem, the one the constraints file uses */
 	filePrefix: string

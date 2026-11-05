@@ -38,7 +38,7 @@ export type DatabaseCodegen = {
 	driver?: OrmConfig["driver"] | undefined
 	/** The stem of every generated file name; `db.<name>` when omitted */
 	filePrefix?: string | undefined
-	/** SQLite full-text search: each table, by its export name, to its index; the fts generator writes nothing without it */
+	/** SQLite full-text search: each table, by its SQL name, to its index; the fts generator writes nothing without it */
 	fts?: Record<string, FtsTableConfig> | undefined
 	/** The generators to run; all when omitted */
 	generators?: readonly GeneratorName[] | undefined

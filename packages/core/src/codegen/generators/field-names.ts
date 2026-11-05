@@ -11,8 +11,11 @@ import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
+/** Where the field-names generator writes */
 export type FieldNamesConfig = {
+	/** the file written, relative to the codegen working directory */
 	output: string
+	/** also point the `./field-names` export of the package.json nearest the file at it */
 	updatePackageJson?: boolean | undefined
 }
 
@@ -28,6 +31,11 @@ function fieldToLabel(name: string): string {
 	return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).replaceAll("_", " ")
 }
 
+/**
+ * Write each column name across the tables, private ones left out, to an English label: the
+ * snake_case name with its `_json` or `_id` suffix dropped, capitalized and spaced, for a form or
+ * an error message to name a field by. Writes nothing, and logs it, when there are none
+ */
 function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const { cwd } = ctx

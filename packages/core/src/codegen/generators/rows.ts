@@ -9,7 +9,9 @@ import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { specifierFor } from "../utils/paths.ts"
 
+/** Where the rows generator writes each table's select and insert row types */
 export type RowsConfig = {
+	/** the file written, relative to the codegen working directory */
 	output: string
 }
 
