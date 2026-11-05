@@ -21,8 +21,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
-import { isAlive } from "../../../src/migrate/core/cleanup.ts"
 import { run } from "../../../src/migrate/core/process.ts"
+import { running, runs, type Seen, see, send } from "../../support/pid.ts"
 import { withScratchDb } from "../support/pg.ts"
 import { query } from "../support/pg-roles.ts"
 
@@ -63,7 +63,10 @@ const FILES = [
 ]
 const NAMES = ["20260101000000_a.sql", "20260101000001_b.sql"]
 
-/** The apply of `dir` in a child under a shell that says how it ended; `kill` signals comb's pid alone */
+/**
+ * The apply of `dir` in a child under a shell that says how it ended; `comb` is the apply, seen as
+ * the shell's child as soon as it writes its pid, and `kill` signals it alone
+ */
 function childApply(env: NodeJS.ProcessEnv, target: { devUrl: string; dir: string; url: string }) {
 	const child = spawn(
 		"sh",
@@ -79,12 +82,18 @@ function childApply(env: NodeJS.ProcessEnv, target: { devUrl: string; dir: strin
 		},
 	)
 	let said = ""
+	let comb: Seen | undefined
 	child.stdout.on("data", (chunk: Buffer) => {
 		said += chunk.toString()
+		/* read as the line comes, while the shell, which Node has not reaped, holds the apply as its child */
+		comb ??= see(Number(/^pid (\d+)$/m.exec(said)?.[1]), child.pid)
 	})
 	const ended = new Promise<string[]>((done) => child.on("close", () => done(said.trim().split("\n"))))
-	const pid = () => Number(/^pid (\d+)$/m.exec(said)?.[1])
-	return { ended, kill: (signal: NodeJS.Signals) => process.kill(pid(), signal), pid, said: () => said }
+	const seen = (): Seen => {
+		if (comb === undefined) throw new Error(`the apply never wrote its pid as the shell's child: ${said}`)
+		return comb
+	}
+	return { comb: seen, ended, kill: (sent: NodeJS.Signals) => expect(send(seen(), sent)).toBe(true), said: () => said }
 }
 
 /* how long comb has to end once signalled, well under the case's timeout, so withScratchDb still drops its databases */
@@ -95,7 +104,7 @@ const STOP_WITHIN_MS = 20_000
  * and its Atlas child are killed and the case fails with their pids and state, so a red run leaves
  * nothing running and nothing on the server
  */
-async function endedWithin(child: ReturnType<typeof childApply>, atlas: number): Promise<string[]> {
+async function endedWithin(child: ReturnType<typeof childApply>, atlas: Seen): Promise<string[]> {
 	let timer: NodeJS.Timeout | undefined
 	const late = new Promise<"late">((done) => {
 		timer = setTimeout(() => done("late"), STOP_WITHIN_MS)
@@ -103,12 +112,12 @@ async function endedWithin(child: ReturnType<typeof childApply>, atlas: number):
 	const end = await Promise.race([child.ended, late])
 	clearTimeout(timer)
 	if (end !== "late") return end
-	const comb = child.pid()
-	const state = { atlasRunning: isAlive(atlas), combRunning: isAlive(comb), said: child.said().trim().split("\n") }
-	for (const pid of [comb, atlas].filter(isAlive)) process.kill(pid, "SIGKILL")
+	const comb = child.comb()
+	const state = { atlasRunning: runs(atlas), combRunning: runs(comb), said: child.said().trim().split("\n") }
+	for (const each of [comb, atlas]) send(each, "SIGKILL")
 	await child.ended
 	throw new Error(
-		`comb ${comb} (Atlas ${atlas}) had not ended ${STOP_WITHIN_MS} ms after the signal: ${JSON.stringify(state)}`,
+		`comb ${comb.pid} (Atlas ${atlas.pid}) had not ended ${STOP_WITHIN_MS} ms after the signal: ${JSON.stringify(state)}`,
 	)
 }
 
@@ -145,7 +154,8 @@ describe("a Postgres apply stopped by a signal while Atlas applies (PA4 of r22)"
 					}
 					const child = childApply(env, { devUrl, dir, url })
 					await until(() => existsSync(`${state}.pid`), "the held apply call")
-					const atlas = Number(readFileSync(`${state}.pid`, "utf8"))
+					/* the held Atlas call, seen as comb's child while it waits for the signal */
+					const atlas = running(Number(readFileSync(`${state}.pid`, "utf8")), child.comb().pid)
 					child.kill(signal)
 					const said = await endedWithin(child, atlas)
 					const revisions = await query(
@@ -157,7 +167,7 @@ describe("a Postgres apply stopped by a signal while Atlas applies (PA4 of r22)"
 						"SELECT to_regclass('public.a') IS NOT NULL AS a, to_regclass('public.b') IS NOT NULL AS b",
 					)
 					expect({
-						atlasRunning: isAlive(atlas),
+						atlasRunning: runs(atlas),
 						end: said.at(-1),
 						left: readdirSync(tmp),
 						recorded: revisions.map((row) => String(row["version"])),

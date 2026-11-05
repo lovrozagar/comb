@@ -1,9 +1,10 @@
-import { spawn, spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type Run, type RunOptions, run as realRun } from "../../migrate/core/process.ts"
+import { running, runs, type Seen, send, sendGroup } from "../../../tests/support/pid.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot } from "./load.ts"
 
@@ -155,21 +156,11 @@ describe("loadSnapshot on a module that holds the event loop open", () => {
 	}, 60_000)
 })
 
-/** Whether a process of `pid` still runs */
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0)
-		return true
-	} catch {
-		return false
-	}
-}
-
 /** The stuck module in the fixture directory, recording its pids to `pids.json` beside it */
 function stuckTables(): string {
 	fs.writeFileSync(
 		tables(),
-		`import { spawn } from "node:child_process"\nimport fs from "node:fs"\nprocess.on("SIGTERM", () => {})\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\nfs.writeFileSync(${JSON.stringify(path.join(dir, "pids.json"))}, JSON.stringify({ grandchild: grandchild.pid, loader: process.pid }))\nfor (;;) {}\n`,
+		`import { spawn } from "node:child_process"\nimport fs from "node:fs"\nprocess.on("SIGTERM", () => {})\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\nfs.writeFileSync(${JSON.stringify(path.join(dir, "pids.json"))}, JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid }))\nfor (;;) {}\n`,
 	)
 	return tables()
 }
@@ -178,11 +169,15 @@ function stuckTables(): string {
  * The pids the module recorded, once it has, waiting up to 20 s: a loader starts slowly on a machine
  * a full coverage run loads (it once missed a 3 s timeout), and the test is of the kill, not the start
  */
-async function pidsOf(): Promise<{ grandchild: number; loader: number }> {
+async function pidsOf(): Promise<{ grandchild: Seen; loader: Seen; supervisor: Seen }> {
 	const file = path.join(dir, "pids.json")
 	for (let tries = 0; tries < 400 && !fs.existsSync(file); tries++) await new Promise((r) => setTimeout(r, 50))
 	expect(fs.existsSync(file), "the module started and recorded its pids").toBe(true)
-	return JSON.parse(fs.readFileSync(file, "utf8")) as { grandchild: number; loader: number }
+	const pids = JSON.parse(fs.readFileSync(file, "utf8")) as { grandchild: number; loader: number; supervisor: number }
+	/* the supervisor first, then each as the child of the one before, which holds it, so each pid names the process the module started */
+	const supervisor = running(pids.supervisor)
+	const loader = running(pids.loader, pids.supervisor)
+	return { grandchild: running(pids.grandchild, pids.loader), loader, supervisor }
 }
 
 /*
@@ -192,12 +187,11 @@ async function pidsOf(): Promise<{ grandchild: number; loader: number }> {
  */
 describe("loadSnapshot on a module stuck in a synchronous loop, with a process of its own", () => {
 	it("times out, naming the file and the time, and leaves neither the loader nor its grandchild", async () => {
-		await expect(loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 10_000 })).rejects.toThrow(
-			`comb timed out after 10 s loading ${tables()}`,
-		)
+		const loading = loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 10_000 })
 		const { grandchild, loader } = await pidsOf()
+		await expect(loading).rejects.toThrow(`comb timed out after 10 s loading ${tables()}`)
 		await new Promise((r) => setTimeout(r, 200))
-		expect([alive(loader), alive(grandchild)]).toEqual([false, false])
+		expect([runs(loader), runs(grandchild)]).toEqual([false, false])
 	})
 
 	it("leaves nothing when codegen is Ctrl-C'd while the module loads, its scratch included (KC5 of r22b)", async () => {
@@ -211,27 +205,25 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 		const codegen = spawn("bun", [script], { detached: true, env: { ...process.env, TMPDIR: tmp }, stdio: "ignore" })
 		const ended = new Promise((resolve) => codegen.on("exit", resolve))
 		const { grandchild, loader } = await pidsOf()
-		process.kill(-(codegen.pid as number), "SIGINT")
+		expect(sendGroup(codegen, "SIGINT")).toBe(true)
 		await ended
 		await new Promise((r) => setTimeout(r, 200))
-		expect([alive(loader), alive(grandchild), fs.readdirSync(tmp)]).toEqual([false, false, []])
+		expect([runs(loader), runs(grandchild), fs.readdirSync(tmp)]).toEqual([false, false, []])
 	})
 	it("leaves nothing when comb alone gets SIGTERM while the module loads, and ends by it (KC5 of r22b)", async () => {
 		const { codegen, ended, tmp } = codegenOf("bun")
-		const { grandchild, loader } = await pidsOf()
-		const supervisor = parentOf(loader)
+		const { grandchild, loader, supervisor } = await pidsOf()
 		/* a supervisor, a container stop or a CI step timeout signals comb's pid alone, not its group */
-		process.kill(codegen.pid as number, "SIGTERM")
+		expect(codegen.kill("SIGTERM")).toBe(true)
 		const end = await ended
 		expect([await leftOf([supervisor, loader, grandchild]), fs.readdirSync(tmp), end]).toEqual([[], [], "SIGTERM"])
 	})
 
 	it("leaves neither the supervisor nor the module when comb is killed outright while it loads (KC5 of r22b)", async () => {
 		const { codegen, ended } = codegenOf("bun")
-		const { grandchild, loader } = await pidsOf()
-		const supervisor = parentOf(loader)
+		const { grandchild, loader, supervisor } = await pidsOf()
 		/* no step of comb's runs on SIGKILL: the supervisor reads comb's end from its stdin closing */
-		process.kill(codegen.pid as number, "SIGKILL")
+		expect(codegen.kill("SIGKILL")).toBe(true)
 		await ended
 		expect(await leftOf([supervisor, loader, grandchild])).toEqual([])
 	})
@@ -252,23 +244,16 @@ function codegenOf(runtime: "bun" | "node") {
 	return { codegen, ended, tmp }
 }
 
-/** The parent of process `pid`, as ps reads it */
-function parentOf(pid: number): number {
-	const ppid = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim())
-	expect(ppid).toBeGreaterThan(1)
-	return ppid
-}
-
 /**
- * Which of `pids` still run 10 s on: each one left is then killed, so a red run leaves nothing
+ * The pids of `seen` still running 10 s on: each one left is then killed, so a red run leaves nothing
  * behind; a killed process stays a zombie until it is reaped, so the wait polls
  */
-async function leftOf(pids: readonly number[]): Promise<number[]> {
-	for (const deadline = Date.now() + 10_000; Date.now() < deadline && pids.some(alive);)
+async function leftOf(seen: readonly Seen[]): Promise<number[]> {
+	for (const deadline = Date.now() + 10_000; Date.now() < deadline && seen.some(runs);)
 		await new Promise((r) => setTimeout(r, 100))
-	const left = pids.filter(alive)
-	for (const pid of left) process.kill(pid, "SIGKILL")
-	return left
+	const left = seen.filter(runs)
+	for (const each of left) send(each, "SIGKILL")
+	return left.map((each) => each.pid)
 }
 
 /* F44 of the 0.13.0 round: a seeder the tables module imports only on demand never runs at codegen */

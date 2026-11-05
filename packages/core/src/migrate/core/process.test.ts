@@ -4,7 +4,8 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ATLAS_RANGE, run, runPeer } from "./process.ts"
 import { onBun } from "../../../tests/support/runtime.ts"
-import { alive, deliver, stubKill, until } from "../../../tests/support/signals.ts"
+import { running, runs } from "../../../tests/support/pid.ts"
+import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 
 describe("run", () => {
 	it("returns the exit code and both streams", async () => {
@@ -283,10 +284,10 @@ describe("run under a signal (PA4 of r22)", () => {
 				resumed = true
 			})
 			await until(() => existsSync(ready), "the child listening")
-			const child = Number(readFileSync(ready, "utf8"))
+			const child = running(Number(readFileSync(ready, "utf8")), process.pid)
 			await deliver(signal)
 			await until(() => kill.calls().length > 0, "comb's end")
-			expect([readFileSync(got, "utf8"), alive(child), kill.calls(), resumed]).toEqual([
+			expect([readFileSync(got, "utf8"), runs(child), kill.calls(), resumed]).toEqual([
 				signal,
 				false,
 				[[process.pid, signal]],

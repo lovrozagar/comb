@@ -23,19 +23,6 @@ export async function deliver(signal: "SIGINT" | "SIGTERM"): Promise<void> {
 	}
 }
 
-/* process.kill as the OS answers it, bound before any test stubs it */
-const realKill = process.kill.bind(process)
-
-/** Whether process `pid` runs, read past a stubbed process.kill */
-export function alive(pid: number): boolean {
-	try {
-		realKill(pid, 0)
-		return true
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM"
-	}
-}
-
 /** process.kill stubbed for each test of the calling describe; `calls` are the ends asked for */
 export function stubKill(): { calls: () => unknown[][] } {
 	let kill: MockInstance<typeof process.kill> | undefined

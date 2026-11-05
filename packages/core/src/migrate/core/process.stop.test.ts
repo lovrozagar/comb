@@ -9,13 +9,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type RunResult, run } from "./process.ts"
-import { alive, deliver, stubKill, until } from "../../../tests/support/signals.ts"
+import { running, runs, type Seen, see, send } from "../../../tests/support/pid.ts"
+import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 
 /* how long a case waits for a stop before it kills what it started and fails: well past killAfterMs, well under vitest's timeout */
 const BOUND_MS = 5000
-
-/* process.kill as the OS answers it, bound before any case stubs it, so a bound's SIGKILL lands */
-const realKill = process.kill.bind(process)
 
 /* the grace each case gives a child that traps SIGTERM */
 const KILL_AFTER_MS = 300
@@ -33,23 +31,33 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 const TRAPPING = (pids: string, out = 0) =>
 	`process.on('SIGTERM', () => {}); const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); process.stdout.write('x'.repeat(${out})); setInterval(() => {}, 1000)`
 
-/** The child's and grandchild's pids, once the child wrote them */
-async function pidsOf(pids: string): Promise<[number, number]> {
+/** The pids the child wrote, once it has */
+async function written(pids: string): Promise<[number, number]> {
 	await until(() => existsSync(pids) && readFileSync(pids, "utf8") !== "", "the child's pids")
 	return JSON.parse(readFileSync(pids, "utf8")) as [number, number]
 }
 
-/** Which of `pids` still run 2 s on; each one left is killed, so a red run leaves nothing */
-async function leftOf(pids: readonly number[]): Promise<number[]> {
-	for (const deadline = Date.now() + 2000; Date.now() < deadline && pids.some(alive);)
+/**
+ * The child and grandchild, seen once the child wrote their pids: the child as this worker's, which
+ * holds it, the grandchild as the child's; either is undefined when it had ended by then, as a
+ * grandchild a stop's SIGTERM reaches at once has
+ */
+async function pidsOf(pids: string): Promise<[Seen | undefined, Seen | undefined]> {
+	const [child, grandchild] = await written(pids)
+	return [see(child, process.pid), see(grandchild, child)]
+}
+
+/** The pids of `seen` still running 2 s on; each one left is killed, so a red run leaves nothing */
+async function leftOf(seen: ReadonlyArray<Seen | undefined>): Promise<number[]> {
+	for (const deadline = Date.now() + 2000; Date.now() < deadline && seen.some(runs);)
 		await new Promise((resolve) => setTimeout(resolve, 50))
-	const left = pids.filter(alive)
-	for (const pid of left) realKill(pid, "SIGKILL")
-	return left
+	const left = seen.filter((each) => each !== undefined).filter(runs)
+	for (const each of left) send(each, "SIGKILL")
+	return left.map((each) => each.pid)
 }
 
 /** `result`, once it settles within BOUND_MS; else the child and grandchild are killed and the case fails naming them */
-async function bounded<T>(result: Promise<T>, pids: string): Promise<T> {
+async function bounded<T>(result: Promise<T>, seen: ReadonlyArray<Seen | undefined>): Promise<T> {
 	let timer: NodeJS.Timeout | undefined
 	const late = new Promise<"late">((resolve) => {
 		timer = setTimeout(() => resolve("late"), BOUND_MS)
@@ -57,10 +65,8 @@ async function bounded<T>(result: Promise<T>, pids: string): Promise<T> {
 	const end = await Promise.race([result, late])
 	clearTimeout(timer)
 	if (end !== "late") return end
-	const found = existsSync(pids) ? (JSON.parse(readFileSync(pids, "utf8")) as number[]) : []
-	const running = found.filter(alive)
-	for (const pid of running) realKill(pid, "SIGKILL")
-	throw new Error(`run had not settled ${BOUND_MS} ms into the stop; still running: ${JSON.stringify(running)}`)
+	const left = seen.filter((each) => each !== undefined && send(each, "SIGKILL")).map((each) => each?.pid)
+	throw new Error(`run had not settled ${BOUND_MS} ms into the stop; still running: ${JSON.stringify(left)}`)
 }
 
 describe("run stopping a child that traps SIGTERM (PA4 of r22)", () => {
@@ -84,9 +90,9 @@ describe("run stopping a child that traps SIGTERM (PA4 of r22)", () => {
 		async ({ code, limit, out, stderr }) => {
 			const pids = join(dir, "pids")
 			const result = run("node", ["-e", TRAPPING(pids, out)], { ...limit, killAfterMs: KILL_AFTER_MS })
-			const [child, grandchild] = await pidsOf(pids)
-			const ended: RunResult = await bounded(result, pids)
-			expect([ended.code, ended.stderr, await leftOf([child, grandchild])]).toEqual([code, stderr, []])
+			const seen = await pidsOf(pids)
+			const ended: RunResult = await bounded(result, seen)
+			expect([ended.code, ended.stderr, await leftOf(seen)]).toEqual([code, stderr, []])
 		},
 	)
 })
@@ -103,7 +109,7 @@ describe("run stopped by a signal to comb (PA4 of r22)", () => {
 		await deliver("SIGTERM")
 		await bounded(
 			until(() => kill.calls().length > 0, "comb's end"),
-			pids,
+			[child, grandchild],
 		)
 		expect([await leftOf([child, grandchild]), kill.calls()]).toEqual([[], [[process.pid, "SIGTERM"]]])
 	})
@@ -117,7 +123,7 @@ describe("run stopped by a signal to comb (PA4 of r22)", () => {
 			await deliver("SIGTERM")
 			await bounded(
 				until(() => kill.calls().length > 0, "comb's end"),
-				pids,
+				[child, grandchild],
 			)
 			expect([await leftOf([child, grandchild]), write.mock.calls.map(([text]) => String(text)), kill.calls()]).toEqual(
 				[
@@ -137,22 +143,22 @@ describe("run on Windows, which has no process groups to name (PA4 of r22)", () 
 		const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor
 		Object.defineProperty(process, "platform", { value: "win32" })
 		vi.resetModules()
+		let seen: Array<Seen | undefined> = []
 		try {
 			const { run: windowsRun } = await import("./process.ts")
 			const pids = join(dir, "pids")
 			const script = `const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); setInterval(() => {}, 1000)`
 			const result = windowsRun("node", ["-e", script], { timeoutMs: 300 })
-			const [child, grandchild] = await pidsOf(pids)
-			const ended = await bounded(result, pids)
-			const outlived = alive(grandchild)
-			expect([ended.code, await leftOf([child]), outlived]).toEqual([124, [], true])
+			const [child, grandchild] = await written(pids)
+			/* the grandchild, which outlives the child here, is seen before the timeout ends the child */
+			seen = [see(child, process.pid), running(grandchild, child)]
+			const ended = await bounded(result, seen)
+			const outlived = runs(seen[1])
+			expect([ended.code, await leftOf([seen[0]]), outlived]).toEqual([124, [], true])
 		} finally {
 			Object.defineProperty(process, "platform", platform)
 			vi.resetModules()
-			const found = existsSync(join(dir, "pids"))
-				? (JSON.parse(readFileSync(join(dir, "pids"), "utf8")) as number[])
-				: []
-			for (const pid of found.filter(alive)) realKill(pid, "SIGKILL")
+			for (const each of seen) send(each, "SIGKILL")
 		}
 	})
 })

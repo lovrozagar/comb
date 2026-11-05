@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process"
 import { join } from "node:path"
+import { type Seen, see, send } from "../../support/pid.ts"
 import { pgUrl } from "./pg.ts"
 import { query, roleOf } from "./pg-roles.ts"
 
@@ -26,7 +27,9 @@ export const replayDatabases = async (role: string): Promise<string[]> =>
 
 /**
  * A check of the directory in a child process, under a shell that says how it ended, as a terminal
- * or a CI runner reads it; `kill` sends the child a signal, and `ended` is all it wrote, its end last
+ * or a CI runner reads it; `kill` sends the check a signal, and `ended` is all it wrote, its end last.
+ * The check is seen as the shell's child as soon as it writes its pid, so neither signal reaches a
+ * later process given its pid.
  */
 export function childCheck(devUrl: string, url: string, dir: string) {
 	const child = spawn(
@@ -40,20 +43,28 @@ export function childCheck(devUrl: string, url: string, dir: string) {
 		{ stdio: ["ignore", "pipe", "inherit"] },
 	)
 	let said = ""
+	let check: Seen | undefined
 	child.stdout.on("data", (chunk: Buffer) => {
 		said += chunk.toString()
+		/* read as the line comes, while the shell, which Node has not reaped, holds the check as its child */
+		check ??= see(Number(/^pid (\d+)$/m.exec(said)?.[1]), child.pid)
 	})
 	const ended = new Promise<string[]>((done) => child.on("close", () => done(said.trim().split("\n"))))
-	const pid = async (): Promise<number> => {
+	const seen = async (): Promise<Seen> => {
 		while (!/^pid \d+$/m.test(said)) await new Promise((done) => setTimeout(done, 20))
-		return Number(/^pid (\d+)$/m.exec(said)?.[1])
+		if (check === undefined) throw new Error(`the check wrote a pid that is not the shell's child: ${said}`)
+		return check
 	}
-	/* the check's pid once it wrote it, and its shell's */
-	const pids = (): number[] => [child.pid ?? 0, Number(/^pid (\d+)$/m.exec(said)?.[1] ?? 0)]
+	/* the shell's pid, and the check's once it wrote it */
+	const pids = (): number[] => [child.pid ?? 0, check?.pid ?? 0]
 	const hardKill = (): void => {
-		for (const each of pids().toReversed()) if (each > 0) process.kill(each, "SIGKILL")
+		if (check !== undefined) send(check, "SIGKILL")
+		child.kill("SIGKILL")
 	}
-	return { ended, hardKill, kill: async (signal: NodeJS.Signals) => process.kill(await pid(), signal), pids }
+	const kill = async (sent: NodeJS.Signals): Promise<void> => {
+		if (!send(await seen(), sent)) throw new Error(`the check ${check?.pid} had ended before ${sent}`)
+	}
+	return { ended, hardKill, kill, pids }
 }
 
 /* how long a signalled check may take to end, well under the case's timeout, before the case kills it and fails */

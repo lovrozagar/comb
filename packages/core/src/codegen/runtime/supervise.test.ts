@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { running, runs, type Seen } from "../../../tests/support/pid.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { main, supervise } from "./supervise.mjs"
 
@@ -13,37 +14,25 @@ beforeEach(() => {
 
 afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
 
-/** Whether a process of `pid` still runs */
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0)
-		return true
-	} catch {
-		return false
-	}
-}
-
 /**
- * Whether `pid` is gone before `ms` pass: a killed process stays a zombie, which signal 0 still
+ * Whether `seen` is gone before `ms` pass: a killed process stays a zombie, which signal 0 still
  * finds, until its new parent reaps it, and how soon that happens depends on the machine's load
  */
-async function goneWithin(pid: number, ms: number): Promise<boolean> {
+async function goneWithin(seen: Seen, ms: number): Promise<boolean> {
 	for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise((r) => setTimeout(r, 50)))
-		if (!alive(pid)) return true
-	return !alive(pid)
+		if (!runs(seen)) return true
+	return !runs(seen)
 }
 
-/** A child that starts a sleeping grandchild, writes its pid to `pids`, ignores SIGTERM and never ends */
+/** A child that starts a sleeping grandchild, writes its own pid and the grandchild's to `pids`, ignores SIGTERM and never ends */
 const stuck = (pids: string) =>
-	`const { spawn } = require("node:child_process"); process.on("SIGTERM", () => {}); const g = spawn("sleep", ["600"], { stdio: "ignore" }); require("node:fs").writeFileSync(${JSON.stringify(pids)}, String(g.pid)); setInterval(() => {}, 1000)`
+	`const { spawn } = require("node:child_process"); process.on("SIGTERM", () => {}); const g = spawn("sleep", ["600"], { stdio: "ignore" }); require("node:fs").writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); setInterval(() => {}, 1000)`
 
-/** The grandchild's pid, once the child has written it */
-async function grandchildOf(pids: string): Promise<number> {
+/** The grandchild, seen as the child's once the child has written their pids */
+async function grandchildOf(pids: string): Promise<Seen> {
 	for (let tries = 0; tries < 100 && !fs.existsSync(pids); tries++) await new Promise((r) => setTimeout(r, 50))
-	const pid = Number(fs.readFileSync(pids, "utf8"))
-	// signal 0 on pid 0 or 1 would probe this test's own group or init, never the grandchild
-	expect(pid).toBeGreaterThan(1)
-	return pid
+	const [child, grandchild] = JSON.parse(fs.readFileSync(pids, "utf8")) as [number, number]
+	return running(grandchild, child)
 }
 
 describe("supervise: a child in a process group of its own", () => {
@@ -137,7 +126,7 @@ describe("main: the supervisor's process", () => {
 		await ended
 		expect(fake.exits[0]).toBe(130)
 		await new Promise((r) => setTimeout(r, 200))
-		expect(alive(grandchild)).toBe(false)
+		expect(runs(grandchild)).toBe(false)
 	})
 
 	it("kills the group when codegen's pipe on its stdin ends, however codegen ended, then exits 129 (KC5 of r22b)", async () => {
