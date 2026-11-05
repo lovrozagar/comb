@@ -1,6 +1,12 @@
 import type { D1SessionLike } from "./d1-types.ts"
 
-type TaggedBookmark = { bookmark: string; tag: string }
+/** A tracked session's bookmark, for the client to send back so its next request reads at least that far */
+type TaggedBookmark = {
+	/** the session's D1 bookmark, opaque; openD1Session given it as `bookmark` reads at least this far */
+	bookmark: string
+	/** the tag the session was tracked under, telling one database's bookmark from another's */
+	tag: string
+}
 
 /**
  * Accumulates D1 sessions for later bookmark extraction.

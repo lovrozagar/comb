@@ -363,23 +363,28 @@ export type { LogFn, ShardBindingOf, ShardDbHandle, ShardDriver, ShardEnv, Shard
 
 // sqlite/d1/d1-types.d.ts
 /**
- * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
+ * The D1 surface comb calls, as structural types of its own, as the router's KV is: a
  * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
  * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
  * neither installed. Where comb hands a client on, it hands the caller's own type back.
  */
 /** A prepared statement as comb uses one: bound, then batched */
 type D1StatementLike = {
+    /** binds `values` to the statement's `?` placeholders in order, and returns the bound statement */
     bind(...values: unknown[]): D1StatementLike;
 };
 /** One statement's answer in a batch: the rows comb reads */
 type D1AnswerLike<T> = {
+    /** the rows the statement returned, in order; empty for a write without RETURNING */
     results: T[];
 };
 /** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
 type D1SessionLike = {
+    /** runs `statements` in order as one transaction, which a failing statement rolls back whole; one answer per statement, in order */
     batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    /** the bookmark of the session's latest query, which a session opened on it reads at least as far as; null before its first query */
     getBookmark(): string | null;
+    /** prepares `query`, its values written as `?` placeholders, to bind and batch */
     prepare(query: string): D1StatementLike;
 };
 /** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
