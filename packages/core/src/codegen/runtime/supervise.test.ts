@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { running, runs, type Seen } from "../../../tests/support/pid.ts"
+import { recordWhole, running, runs, type Seen } from "../../../tests/support/pid.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { main, supervise } from "./supervise.mjs"
 
@@ -26,7 +26,7 @@ async function goneWithin(seen: Seen, ms: number): Promise<boolean> {
 
 /** A child that starts a sleeping grandchild, writes its own pid and the grandchild's to `pids`, ignores SIGTERM and never ends */
 const stuck = (pids: string) =>
-	`const { spawn } = require("node:child_process"); process.on("SIGTERM", () => {}); const g = spawn("sleep", ["600"], { stdio: "ignore" }); require("node:fs").writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); setInterval(() => {}, 1000)`
+	`const { spawn } = require("node:child_process"); process.on("SIGTERM", () => {}); const g = spawn("sleep", ["600"], { stdio: "ignore" }); ${recordWhole(pids, "JSON.stringify([process.pid, g.pid])")}; setInterval(() => {}, 1000)`
 
 /** The grandchild, seen as the child's once the child has written their pids */
 async function grandchildOf(pids: string): Promise<Seen> {

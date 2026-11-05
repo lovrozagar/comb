@@ -9,7 +9,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type RunResult, run } from "./process.ts"
-import { running, runs, type Seen, see, send } from "../../../tests/support/pid.ts"
+import { recordWhole, running, runs, type Seen, see, send } from "../../../tests/support/pid.ts"
 import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 
 /* how long a case waits for a stop before it kills what it started and fails: well past killAfterMs, well under vitest's timeout */
@@ -29,11 +29,11 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
  * `pids`, then writes `out` bytes to stdout and waits
  */
 const TRAPPING = (pids: string, out = 0) =>
-	`process.on('SIGTERM', () => {}); const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); process.stdout.write('x'.repeat(${out})); setInterval(() => {}, 1000)`
+	`process.on('SIGTERM', () => {}); const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); ${recordWhole(pids, "JSON.stringify([process.pid, g.pid])")}; process.stdout.write('x'.repeat(${out})); setInterval(() => {}, 1000)`
 
 /** The pids the child wrote, once it has */
 async function written(pids: string): Promise<[number, number]> {
-	await until(() => existsSync(pids) && readFileSync(pids, "utf8") !== "", "the child's pids")
+	await until(() => existsSync(pids), "the child's pids")
 	return JSON.parse(readFileSync(pids, "utf8")) as [number, number]
 }
 
@@ -103,7 +103,7 @@ describe("run stopped by a signal to comb (PA4 of r22)", () => {
 	it("leaves no process of the child's group, a grandchild it started included", async () => {
 		const pids = join(dir, "pids")
 		/* the child ends on SIGTERM as node does by default; its sleeping grandchild only goes with the group */
-		const script = `const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); setInterval(() => {}, 1000)`
+		const script = `const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); ${recordWhole(pids, "JSON.stringify([process.pid, g.pid])")}; setInterval(() => {}, 1000)`
 		void run("node", ["-e", script])
 		const [child, grandchild] = await pidsOf(pids)
 		await deliver("SIGTERM")
@@ -147,7 +147,7 @@ describe("run on Windows, which has no process groups to name (PA4 of r22)", () 
 		try {
 			const { run: windowsRun } = await import("./process.ts")
 			const pids = join(dir, "pids")
-			const script = `const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, g.pid])); setInterval(() => {}, 1000)`
+			const script = `const g = require('child_process').spawn('sleep', ['600'], { stdio: 'ignore' }); ${recordWhole(pids, "JSON.stringify([process.pid, g.pid])")}; setInterval(() => {}, 1000)`
 			const result = windowsRun("node", ["-e", script], { timeoutMs: 300 })
 			const [child, grandchild] = await written(pids)
 			/* the grandchild, which outlives the child here, is seen before the timeout ends the child */

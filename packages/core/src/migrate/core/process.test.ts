@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ATLAS_RANGE, run, runPeer } from "./process.ts"
 import { onBun } from "../../../tests/support/runtime.ts"
-import { running, runs } from "../../../tests/support/pid.ts"
+import { recordWhole, running, runs } from "../../../tests/support/pid.ts"
 import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 
 describe("run", () => {
@@ -265,7 +265,7 @@ describe("run, asynchronous (PA4 of r22)", () => {
 
 /** A child that writes `ready` once it listens, then waits; on a signal it writes which to `got` and ends by it */
 const SIGNALLED = (ready: string, got: string) =>
-	`for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => { require('fs').writeFileSync(${JSON.stringify(got)}, s); process.kill(process.pid, 'SIGKILL') }); require('fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid)); setInterval(() => {}, 1000)`
+	`for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => { require('fs').writeFileSync(${JSON.stringify(got)}, s); process.kill(process.pid, 'SIGKILL') }); ${recordWhole(ready, "String(process.pid)")}; setInterval(() => {}, 1000)`
 
 describe("run under a signal (PA4 of r22)", () => {
 	const kill = stubKill()

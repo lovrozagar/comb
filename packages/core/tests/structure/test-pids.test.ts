@@ -8,9 +8,12 @@
  * of its own sent. The repo's lint refuses the bare forms (lint/test-signals.test.ts); these tests
  * hold pid.ts to knowing a recorded process from a later one.
  */
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, spawn, spawnSync } from "node:child_process"
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { runs, see, send, sendGroup } from "../support/pid.ts"
+import { recordWhole, runs, see, send, sendGroup } from "../support/pid.ts"
 
 const ended = (child: ChildProcess) => new Promise((done) => child.on("exit", (code, end) => done(end ?? code)))
 
@@ -56,5 +59,35 @@ describe("the tests' signals to processes they recorded", () => {
 		expect(sendGroup(child, "SIGTERM")).toBe(true)
 		expect(await end).toBe("SIGTERM")
 		expect(sendGroup(child, "SIGTERM")).toBe(false)
+	})
+})
+
+describe("the pids a test's child records", () => {
+	/*
+	 * a child's writeFileSync creates the file before it writes it, so a test waiting for the file
+	 * to exist could read it empty: load.test.ts read a grandchild's pid as 0 in run 42083475773
+	 */
+	it("leave no file half written to a test waiting for it, from a script node or bun runs either way", () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-record-"))
+		try {
+			const reads = [
+				[process.execPath, "-e"],
+				[process.execPath, "--input-type=module", "-e"],
+				["bun", "-e"],
+			].map((cmd, i) => {
+				const file = join(dir, `pids-${i}.json`)
+				const [bin, ...flags] = cmd as [string, ...string[]]
+				const ran = spawnSync(bin, [...flags, recordWhole(file, "JSON.stringify([process.pid])")], { encoding: "utf8" })
+				return [ran.status, (JSON.parse(readFileSync(file, "utf8")) as number[]).length]
+			})
+			expect(reads).toEqual([
+				[0, 1],
+				[0, 1],
+				[0, 1],
+			])
+			expect(readdirSync(dir).sort()).toEqual(["pids-0.json", "pids-1.json", "pids-2.json"])
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })

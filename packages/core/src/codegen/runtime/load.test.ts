@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type Run, type RunOptions, run as realRun } from "../../migrate/core/process.ts"
-import { running, runs, type Seen, send, sendGroup } from "../../../tests/support/pid.ts"
+import { recordWhole, running, runs, type Seen, send, sendGroup } from "../../../tests/support/pid.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, watchSupervisor } from "./load.ts"
 
@@ -67,7 +67,7 @@ const tables = () => path.join(dir, "db.core.tables.ts")
 /** The loader's watch alone, as `groups` writes it, in a process leading a group of its own, with a grandchild; its end once its stdin closes */
 async function watchedEnd(groups: boolean): Promise<{ end: NodeJS.Signals | number | null; left: number[] }> {
 	const file = path.join(dir, "grandchild.json")
-	const script = `${watchSupervisor(groups)}const { spawn } = await import("node:child_process"); const g = spawn("sleep", ["600"], { stdio: "ignore" }); (await import("node:fs")).writeFileSync(${JSON.stringify(file)}, String(g.pid))`
+	const script = `${watchSupervisor(groups)}const { spawn } = await import("node:child_process"); const g = spawn("sleep", ["600"], { stdio: "ignore" }); ${recordWhole(file, "String(g.pid)")}`
 	const loader = spawn(process.execPath, ["--input-type=module", "-e", script], {
 		detached: true,
 		stdio: ["pipe", "ignore", "ignore"],
@@ -189,7 +189,7 @@ describe("loadSnapshot on a module that holds the event loop open", () => {
 function stuckTables(): string {
 	fs.writeFileSync(
 		tables(),
-		`import { spawn } from "node:child_process"\nimport fs from "node:fs"\nprocess.on("SIGTERM", () => {})\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\nfs.writeFileSync(${JSON.stringify(path.join(dir, "pids.json"))}, JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid }))\nfor (;;) {}\n`,
+		`import { spawn } from "node:child_process"\nprocess.on("SIGTERM", () => {})\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\n${recordWhole(path.join(dir, "pids.json"), "JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid })")}\nfor (;;) {}\n`,
 	)
 	return tables()
 }
@@ -266,7 +266,7 @@ describe("loadSnapshot when the supervisor dies unseen while the module waits", 
 	it("leaves neither the loader nor its grandchild", async () => {
 		fs.writeFileSync(
 			tables(),
-			`import { spawn } from "node:child_process"\nimport fs from "node:fs"\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\nfs.writeFileSync(${JSON.stringify(path.join(dir, "pids.json"))}, JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid }))\nawait new Promise(() => setInterval(() => {}, 1000))\n`,
+			`import { spawn } from "node:child_process"\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\n${recordWhole(path.join(dir, "pids.json"), "JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid })")}\nawait new Promise(() => setInterval(() => {}, 1000))\n`,
 		)
 		const loading = loadSnapshot(tables(), { run: realRun })
 		const { grandchild, loader, supervisor } = await pidsOf()

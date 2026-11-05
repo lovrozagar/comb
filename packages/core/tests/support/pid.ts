@@ -71,6 +71,18 @@ export function runs(seen: Seen | undefined): boolean {
 	return seen !== undefined && stat(seen.pid)?.started === seen.started
 }
 
+/**
+ * The source a child runs to record `text`, a JavaScript expression it evaluates, in `file` whole:
+ * writeFileSync creates a file before it writes it, so a test that waits for the file to exist may
+ * read it empty (load.test.ts read a grandchild's pid as 0 in CI run 42083475773). It writes beside
+ * the file, then renames into it, which no reader sees half done. It runs in a CommonJS or module
+ * script, under node or bun, as it reaches fs by process.getBuiltinModule.
+ */
+export function recordWhole(file: string, text: string): string {
+	const part = JSON.stringify(`${file}.part`)
+	return `{ const fs = process.getBuiltinModule("node:fs"); fs.writeFileSync(${part}, ${text}); fs.renameSync(${part}, ${JSON.stringify(file)}) }`
+}
+
 /** Sends `signal` to `seen` while it runs, and answers whether it did; a later process given its pid gets nothing */
 export function send(seen: Seen | undefined, signal: NodeJS.Signals): boolean {
 	if (seen === undefined || !runs(seen)) return false
