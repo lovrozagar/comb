@@ -58,6 +58,10 @@ function holds(first: string): string {
 	return warning?.match(/while this file holds (.*); those locks last to the file's COMMIT/)?.[1] ?? ""
 }
 
+/** What comb says the file holds of `named`, and of a DROP … CASCADE of `object`, whose dependents no fact shows */
+const cascading = (named: string, object: string): string =>
+	`${named}, and this file's DROP … CASCADE locks what depends on ${object}, which only check on a postgres:// devUrl names`
+
 /* each statement before the VALIDATE, and what comb says the file then holds */
 const HOLDS: Array<[string, string]> = [
 	/* the names Postgres chose: the longer of table and columns cut first to 63 bytes, a character never split, a taken name numbered */
@@ -75,11 +79,23 @@ const HOLDS: Array<[string, string]> = [
 	["ALTER TABLE kr DROP CONSTRAINT kr_k2_fkey;", "k and kr locked against reads and writes"],
 	["ALTER TABLE kr DROP CONSTRAINT kr_fk;", "k and kr locked against reads and writes"],
 	/* a primary key an index makes, named by it unless the constraint is */
-	["ALTER TABLE kq DROP CONSTRAINT kq_k CASCADE;", "kp and kq locked against reads and writes"],
+	[
+		"ALTER TABLE kq DROP CONSTRAINT kq_k CASCADE;",
+		cascading("kp and kq locked against reads and writes", "kq_k on kq"),
+	],
 	/* a primary key a LIKE copies with the indexes, named as a new one is, and none without them */
-	["ALTER TABLE kc DROP CONSTRAINT kc_pkey CASCADE;", "kc and kcr locked against reads and writes"],
-	["ALTER TABLE kn DROP CONSTRAINT kn_own CASCADE;", "kn and knr locked against reads and writes"],
-	["ALTER TABLE kl DROP CONSTRAINT kl_own CASCADE;", "kl and klr locked against reads and writes"],
+	[
+		"ALTER TABLE kc DROP CONSTRAINT kc_pkey CASCADE;",
+		cascading("kc and kcr locked against reads and writes", "kc_pkey on kc"),
+	],
+	[
+		"ALTER TABLE kn DROP CONSTRAINT kn_own CASCADE;",
+		cascading("kn and knr locked against reads and writes", "kn_own on kn"),
+	],
+	[
+		"ALTER TABLE kl DROP CONSTRAINT kl_own CASCADE;",
+		cascading("kl and klr locked against reads and writes", "kl_own on kl"),
+	],
 	/* through a rename of the table, its column, its constraint, a column it references */
 	[
 		"ALTER TABLE users RENAME TO people;\nTRUNCATE people CASCADE;",
@@ -95,7 +111,7 @@ const HOLDS: Array<[string, string]> = [
 	],
 	[
 		"ALTER TABLE orders RENAME CONSTRAINT orders_pkey TO opk;\nALTER TABLE orders DROP CONSTRAINT opk CASCADE;",
-		"items, orders and t2 locked against reads and writes",
+		cascading("items, orders and t2 locked against reads and writes", "opk on orders"),
 	],
 	/* through a table's move to another schema, whose own lock the map leaves to the replay, and a schema's rename */
 	[
@@ -120,11 +136,14 @@ const HOLDS: Array<[string, string]> = [
 	["DROP TABLE t2;\nTRUNCATE orders CASCADE;", "items, orders, t2 and users locked against reads and writes"],
 	[
 		"ALTER TABLE orders DROP CONSTRAINT orders_pkey CASCADE;\nALTER TABLE orders ADD PRIMARY KEY (user_id);\nALTER TABLE orders ALTER COLUMN id TYPE bigint;",
-		"items, orders and t2 locked against reads and writes",
+		cascading("items, orders and t2 locked against reads and writes", "orders_pkey on orders"),
 	],
 	/* what a change that drops no key reaches: none */
-	["ALTER TABLE users DROP COLUMN n CASCADE;", "users locked against reads and writes"],
-	["ALTER TABLE users DROP CONSTRAINT nope CASCADE;", "users locked against reads and writes"],
+	["ALTER TABLE users DROP COLUMN n CASCADE;", cascading("users locked against reads and writes", "users.n")],
+	[
+		"ALTER TABLE users DROP CONSTRAINT nope CASCADE;",
+		cascading("users locked against reads and writes", "nope on users"),
+	],
 	["ALTER TABLE users DROP COLUMN id;", "users locked against reads and writes"],
 	/* a partition under a parent's parent's keys */
 	[

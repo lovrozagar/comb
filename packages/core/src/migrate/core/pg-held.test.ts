@@ -45,8 +45,13 @@ function holds(first: string): string {
 		dialect: "postgres",
 	})
 	const warning = rated.lockWarnings.find((each) => each.startsWith(`${VALIDATE.slice(0, -1)} (`))
-	return warning?.match(/while this file holds (.*); those locks last to the file's COMMIT/)?.[1] ?? ""
+	const said = warning?.match(/while (.*); those locks last to the file's COMMIT/)?.[1] ?? ""
+	return said.replace(/^this file holds /, "")
 }
+
+/** What comb says of a DROP … CASCADE of `objects`, whose dependents the history's text does not show */
+const unnamed = (objects: string): string =>
+	`this file's DROP … CASCADE locks what depends on ${objects}, which only check on a postgres:// devUrl names`
 
 /* each statement before the VALIDATE, and what comb says the file then holds */
 const HOLDS: Array<[string, string]> = [
@@ -87,7 +92,7 @@ const HOLDS: Array<[string, string]> = [
 	/* a domain's scans, and a CASCADE drop of a type, on each table with a column of it */
 	["ALTER DOMAIN posint ADD CONSTRAINT p CHECK (VALUE > 0);", "dm locked against writes"],
 	["ALTER DOMAIN posint VALIDATE CONSTRAINT p;", "dm locked against writes"],
-	["DROP DOMAIN posint CASCADE;", "dm locked against reads and writes"],
+	["DROP DOMAIN posint CASCADE;", `dm locked against reads and writes, and ${unnamed("posint")}`],
 	/* each statement family, on the relation it names */
 	["CREATE POLICY p ON orders USING (true);", "orders locked against reads and writes"],
 	["ALTER POLICY p ON orders USING (false);", "orders locked against reads and writes"],
@@ -134,6 +139,24 @@ const HOLDS: Array<[string, string]> = [
 	["ALTER SEQUENCE s SET SCHEMA s;", "s.s locked against reads and writes"],
 	["DROP SEQUENCE IF EXISTS s;", "s locked against reads and writes"],
 	["CREATE SEQUENCE IF NOT EXISTS s;\nALTER SEQUENCE s RESTART;", "s locked against writes"],
+	/*
+	 * a DROP … CASCADE, of any object, drops what depends on it, a default, a policy's or a view's
+	 * expression among them, and locks their tables, which the history's text does not show
+	 */
+	["DROP SEQUENCE IF EXISTS s CASCADE;", `s locked against reads and writes, and ${unnamed("s")}`],
+	["DROP TABLE orders CASCADE;", `orders locked against reads and writes, and ${unnamed("orders")}`],
+	["DROP FUNCTION trg() CASCADE;", unnamed("trg")],
+	["DROP SCHEMA s, s9 CASCADE;", unnamed("s and s9")],
+	[
+		"DROP EXTENSION IF EXISTS citext CASCADE;\nDROP CAST (int AS posint) CASCADE;",
+		unnamed("(int4 AS posint) and citext"),
+	],
+	["DROP TRIGGER t ON orders CASCADE;", `orders locked against reads and writes, and ${unnamed("t on orders")}`],
+	[
+		"ALTER TABLE orders DROP COLUMN user_id CASCADE;",
+		`orders locked against reads and writes, and ${unnamed("orders.user_id")}`,
+	],
+	["ALTER TABLE users DROP CONSTRAINT k CASCADE;", `it locked against reads and writes, and ${unnamed("k on users")}`],
 ]
 
 /* statements that leave nothing held */
@@ -221,5 +244,17 @@ describe("what a statement before a VALIDATE leaves held (0005)", () => {
 		expect(holds("CREATE TABLE s.t (id int);\nALTER TABLE s.t RENAME TO t2;\nALTER TABLE s.t2 ADD COLUMN x int;")).toBe(
 			"",
 		)
+	})
+})
+
+describe("what a DROP … CASCADE leaves held", () => {
+	it("holds no DROP … CASCADE past the COMMIT of its transaction", () => {
+		const rated = classifyMigration(
+			`-- atlas:txmode none\n\nBEGIN;\nDROP FUNCTION trg() CASCADE;\nCOMMIT;\nBEGIN;\nLOCK orders;\n${VALIDATE}\nCOMMIT;\n`,
+			{ before: extractSchema(HISTORY, undefined, "postgres"), dialect: "postgres" },
+		)
+		expect(rated.lockWarnings.filter((each) => each.startsWith(`${VALIDATE.slice(0, -1)} (`))).toEqual([
+			`${VALIDATE.slice(0, -1)} (scans users while this file holds orders locked against reads and writes; those locks last to the file's COMMIT; validate in a later file)`,
+		])
 	})
 })

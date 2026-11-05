@@ -12,7 +12,7 @@ import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { withScratchDb } from "../support/pg.ts"
-import { CASES, HISTORY, VALIDATE } from "../support/held-cases.ts"
+import { CASES, HISTORY, MAPPED, VALIDATE } from "../support/held-cases.ts"
 import { heldBy, warningOf } from "../support/pg-locks.ts"
 
 beforeAll(loadPostgresParser)
@@ -31,7 +31,10 @@ describe("a VALIDATE after a statement of its file that holds a strong lock on P
 			await withScratchDb(async (url) => {
 				expect(await heldBy(url, [HISTORY], `${first}\n${VALIDATE}\n`)).toEqual(held)
 			})
-			expect(validateWarnings(first)).toEqual(warningOf({ table: "users", validate: VALIDATE }, held))
+			const map = MAPPED[first]
+			expect(validateWarnings(first)).toEqual(
+				warningOf({ table: "users", validate: VALIDATE }, map?.held ?? held, map?.cascades),
+			)
 		},
 		60_000,
 	)

@@ -8,7 +8,7 @@
  */
 import type { Finding } from "./classify-alter.ts"
 import type { Calls } from "./pg-held-types.ts"
-import { alterLocks, type Held, hold } from "./pg-held.ts"
+import { type Held, holdCommand } from "./pg-held.ts"
 import { type Facts, type Node, tableOf, written } from "./pg-nodes.ts"
 
 /** "a", "a and b", "a, b and c" */
@@ -33,7 +33,7 @@ function called(calls: Calls | undefined): string {
  * What `held` blocks, the table scanned keyed `key`: "it locked against …" when it holds only that;
  * a sequence named with the tables Postgres said call it
  */
-function holding({ calls, locks }: Held, key: string): string {
+function named({ calls, locks }: Held, key: string): string {
 	const scanned = locks.get(key)
 	if (locks.size === 1 && scanned !== undefined) return `it locked against ${scanned ? "reads and writes" : "writes"}`
 	const sorted = [...locks.keys()].toSorted()
@@ -47,6 +47,19 @@ function holding({ calls, locks }: Held, key: string): string {
 	return groups.join(", and ")
 }
 
+/** What the file holds by `held`: what it names, and what depends on each object a DROP … CASCADE dropped */
+function holding(held: Held, key: string): string {
+	const objects = [...held.cascades].toSorted()
+	return [
+		...(held.locks.size > 0 ? [`this file holds ${named(held, key)}`] : []),
+		...(objects.length > 0
+			? [
+					`this file's DROP … CASCADE locks what depends on ${listed(objects)}, which only check on a postgres:// devUrl names`,
+				]
+			: []),
+	].join(", and ")
+}
+
 /**
  * An ALTER's VALIDATE that scans while the open transaction holds a blocking lock, its commands'
  * locks then held, command by command, so an ADD and a VALIDATE in one statement count
@@ -57,15 +70,15 @@ function heldScans(node: Node, { facts, held }: { facts: Facts; held: Held }): F
 		const cmd = each["AlterTableCmd"] as Node
 		const scans = node["objtype"] === "OBJECT_TABLE" && cmd["subtype"] === "AT_ValidateConstraint"
 		const found: Finding[] =
-			scans && held.locks.size > 0
+			scans && (held.locks.size > 0 || held.cascades.size > 0)
 				? [
 						{
 							level: "lock",
-							note: `scans ${table} while this file holds ${holding(held, tableOf(node["relation"], facts.schema).key)}; those locks last to the file's COMMIT; validate in a later file`,
+							note: `scans ${table} while ${holding(held, tableOf(node["relation"], facts.schema).key)}; those locks last to the file's COMMIT; validate in a later file`,
 						},
 					]
 				: []
-		hold(held, alterLocks(node, cmd, facts))
+		holdCommand(node, cmd, { facts, held })
 		return found
 	})
 }

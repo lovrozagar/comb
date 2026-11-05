@@ -13,34 +13,32 @@ import {
 	EXCLUSIVE,
 	EXCLUSIVE_ALL,
 	indexLocks,
-	keyLocks,
 	type Lock,
 	on,
 	partitionLocks,
-	reachLocks,
 	reindexLocks,
 	SHARE,
 	SHARE_ALL,
 	truncateLocks,
 } from "./pg-lock.ts"
+import { cascaded, commandCascaded, dropLocks, RELATIONS, typedTables } from "./pg-drop.ts"
 import type { Calls, Locked } from "./pg-held-types.ts"
-import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
-
-/* the relations a move to another schema, a rename, a DROP and an ALTER TABLE's lock take by their own name */
-const RELATIONS = /^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE|SEQUENCE)$/
+import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf } from "./pg-nodes.ts"
 
 /**
  * The relations the open transaction holds locked, by key, each with whether reads wait too, the
- * relations it made, and the tables that call each sequence it holds, as Postgres said it last
+ * relations it made, the tables that call each sequence it holds, as Postgres said it last, and the
+ * objects a DROP … CASCADE of it dropped, whose dependents' tables no fact names (pg-drop.ts)
  */
-type Held = { calls: Map<string, Calls>; locks: Map<string, boolean>; made: Set<string> }
+type Held = { calls: Map<string, Calls>; cascades: Set<string>; locks: Map<string, boolean>; made: Set<string> }
 
 /** A transaction's start: nothing held, nothing made */
-const heldStart = (): Held => ({ calls: new Map(), locks: new Map(), made: new Set() })
+const heldStart = (): Held => ({ calls: new Map(), cascades: new Set(), locks: new Map(), made: new Set() })
 
 /** `held` at a COMMIT, which releases every lock and shows what the file made to other sessions */
 function clearHeld(held: Held): void {
 	held.calls.clear()
+	held.cascades.clear()
 	held.locks.clear()
 	held.made.clear()
 }
@@ -49,6 +47,7 @@ function clearHeld(held: Held): void {
 function measured(held: Held, locked: Locked): void {
 	held.locks.clear()
 	held.calls.clear()
+	held.cascades.clear()
 	for (const [key, reads] of locked.locks) held.locks.set(key, reads)
 	for (const [key, calls] of locked.calls) held.calls.set(key, calls)
 }
@@ -57,10 +56,6 @@ function measured(held: Held, locked: Locked): void {
 function hold(held: Held, locks: readonly Lock[]): void {
 	for (const [key, reads] of locks) if (!held.made.has(key)) held.locks.set(key, reads || held.locks.get(key) === true)
 }
-
-/** The tables with a column of the type keyed `type` */
-const typedTables = (type: string, facts: Facts): string[] =>
-	[...facts.columnTypes].filter(([, columns]) => typed(columns, type)).map(([table]) => table)
 
 /** The tables the foreign keys among `constraints` reference */
 const referenced = (constraints: unknown): unknown[] =>
@@ -107,39 +102,11 @@ function alterLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	return RELATIONS.test(node["objtype"] as string) ? commandLocks(node, cmd, facts) : []
 }
 
-/** A DROP's objects, each a name's parts */
-const dropped = (node: Node): string[][] =>
-	(node["objects"] as Array<{ List: Node }>).map((each) => names(each.List["items"]))
-
-/** The locks a DROP of the relation keyed `key` takes: its own, its descendants', a partition's parent's, and through a table's keys */
-function relationDrop(key: string, cascade: boolean, facts: Facts): Lock[] {
-	const parents = (facts.parents.get(key) ?? []).filter((each) => each.partition)
-	return [
-		...keyLocks(key, EXCLUSIVE_ALL, facts),
-		...parents.map((each): Lock => [each.parent, true]),
-		...reachLocks(key, { cascade, kind: "table" }, facts),
-	]
-}
-
-/** The locks a DROP takes: a relation's, an index's table, a trigger's, policy's or rule's table, and a CASCADE type's tables */
-function dropLocks(node: Node, facts: Facts): Lock[] {
-	const type = node["removeType"] as string
-	if (RELATIONS.test(type))
-		return dropped(node).flatMap((parts) =>
-			relationDrop(keyOf(parts, facts.schema), node["behavior"] === "DROP_CASCADE", facts),
-		)
-	if (type === "OBJECT_INDEX")
-		return dropped(node).flatMap((parts): Lock[] => {
-			const table = facts.indexes.get(keyOf(parts, facts.schema))?.table
-			return table === undefined ? [] : [[table, true]]
-		})
-	if (/^OBJECT_(?:TRIGGER|POLICY|RULE)$/.test(type))
-		return dropped(node).map((parts): Lock => [keyOf(parts.slice(0, -1), facts.schema), true])
-	if (/^OBJECT_(?:TYPE|DOMAIN)$/.test(type) && node["behavior"] === "DROP_CASCADE")
-		return (node["objects"] as Array<{ TypeName: Node }>).flatMap((each) =>
-			typedTables(typeOf(each.TypeName, facts.schema), facts).map((table): Lock => [table, true]),
-		)
-	return []
+/** `held` after one command of an ALTER: its locks, and the column or constraint a DROP … CASCADE of it drops */
+function holdCommand(node: Node, cmd: Node, { facts, held }: { facts: Facts; held: Held }): void {
+	hold(held, alterLocks(node, cmd, facts))
+	const dropped = commandCascaded(node, cmd, facts.schema)
+	if (dropped !== undefined) held.cascades.add(dropped)
 }
 
 /** The locks a LOCK takes by its mode, on a view's every relation through its query too */
@@ -286,10 +253,11 @@ function holdStatement(type: string, node: Node, { facts, held }: { facts: Facts
 	const made = madeBy(type, node, facts)
 	if (made !== undefined) held.made.add(made)
 	hold(held, STATEMENTS[type]?.(node, facts) ?? [])
+	if (type === "DropStmt") for (const object of cascaded(node, facts.schema)) held.cascades.add(object)
 	/* what the file holds, and what it made, which no other session sees, follow a rename or a move */
 	const to = movedTo(type, node, facts)
 	if (to !== undefined) carry(held, tableOf(node["relation"], facts.schema).key, to)
 	else if (type === "RenameStmt" && node["renameType"] === "OBJECT_SCHEMA") carrySchema(node, { facts, held })
 }
 
-export { alterLocks, clearHeld, type Held, heldStart, hold, holdStatement, type Lock, measured }
+export { clearHeld, type Held, heldStart, holdCommand, holdStatement, type Lock, measured }

@@ -107,6 +107,8 @@ export const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, stri
 	["ALTER SEQUENCE seq RENAME TO seq2;", { seq2: READS }],
 	["ALTER SEQUENCE seq SET SCHEMA s;", { "s.seq": READS }],
 	["DROP SEQUENCE seq_free;", { seq_free: READS }],
+	/* a CASCADE drops ids's default, which calls seq, and locks ids, which the history's text does not show */
+	["DROP SEQUENCE seq CASCADE;", { ids: READS, seq: READS }],
 	["CREATE SEQUENCE seq_new;\nALTER SEQUENCE seq_new RESTART;", {}],
 	/* what blocks nothing */
 	["COMMENT ON TABLE orders IS 'x';", {}],
@@ -115,3 +117,15 @@ export const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, stri
 	["ALTER INDEX orders_user RENAME TO orders_u;", {}],
 	["UPDATE orders SET id = 0;", {}],
 ]
+
+/**
+ * What pg-held.ts's map of a case's file warns of where it is not what Postgres holds: what it names,
+ * and the objects a DROP … CASCADE dropped, whose dependents' tables it cannot name
+ */
+type Mapped = { cascades: readonly string[]; held: Readonly<Record<string, string>> }
+
+// lookup-table: the CASES whose map warns of a DROP … CASCADE, by statement
+export const MAPPED: Readonly<Record<string, Mapped>> = {
+	"DROP DOMAIN posint CASCADE;": { cascades: ["posint"], held: { dm: READS } },
+	"DROP SEQUENCE seq CASCADE;": { cascades: ["seq"], held: { seq: READS } },
+}

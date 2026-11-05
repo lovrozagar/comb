@@ -33,22 +33,32 @@ const heldOf = (out: readonly string[], validate: string, said: "as said" | "bar
 		.map((line) => line.slice(WARNING.length))
 		.map((line) => (said === "bare" ? line.replaceAll(CALLS, "") : line))
 
+/* what the map says of a DROP … CASCADE, whose dependents it cannot name, after what it names */
+const UNNAMED =
+	/(?:^|, and )this file's DROP … CASCADE locks what depends on (.*), which only check on a postgres:\/\/ devUrl names$/
+
+/** What the file holds: each relation named, with what it blocks, and the objects a DROP … CASCADE dropped */
+type Said = { cascades: string[]; held: Record<string, string> }
+
 /** What a warning of `validate`, a VALIDATE on `table`, says its file holds, read so warningOf writes it back */
-function heldIn(lines: readonly string[], { table, validate }: { table: string; validate: string }) {
+function heldIn(lines: readonly string[], { table, validate }: { table: string; validate: string }): Said {
 	const held: Record<string, string> = {}
-	const holding = /while this file holds (.*); those locks/.exec(lines[0] ?? "")?.[1] ?? ""
+	const said = /scans \S+ while (.*); those locks/.exec(lines[0] ?? "")?.[1] ?? ""
+	const unnamed = UNNAMED.exec(said)
+	const cascades = unnamed === null ? [] : String(unnamed[1]).split(/, | and /)
+	const holding = (unnamed === null ? said : said.slice(0, unnamed.index)).replace(/^this file holds /, "")
 	if (holding.startsWith("it locked against ")) held[table] = holding.slice("it locked against ".length)
 	else
 		for (const part of holding === "" ? [] : holding.split(", and ")) {
 			const [, names, blocks] = /^(.*?)(?: locked)? against (reads and writes|writes)$/.exec(part) ?? []
 			for (const name of String(names).split(/, | and /)) held[name] = String(blocks)
 		}
-	expect(warningOf({ table, validate }, held)).toEqual(lines)
-	return held
+	expect(warningOf({ table, validate }, held, cascades)).toEqual(lines)
+	return { cascades, held }
 }
 
 /** What pg-held.ts's map of `two` after `one` holds at `validate`, a VALIDATE on `table`, as apply warns of it */
-function mapped(one: string, two: string, at: { table: string; validate: string }): Record<string, string> {
+function mapped(one: string, two: string, at: { table: string; validate: string }): Said {
 	const { lockWarnings } = classifyMigration(two, {
 		before: extractSchema(one, undefined, "postgres"),
 		dialect: "postgres",
@@ -59,9 +69,13 @@ function mapped(one: string, two: string, at: { table: string; validate: string 
 	)
 }
 
-/** Whether `map` holds each relation `measured` does, as strongly: reads and writes, or writes at least */
-const holdsAll = (map: Readonly<Record<string, string>>, measured: Readonly<Record<string, string>>): boolean =>
-	Object.entries(measured).every(([name, blocks]) => map[name] === blocks || map[name] === "reads and writes")
+/**
+ * Whether `map` holds each relation `measured` does, as strongly: reads and writes, or writes at
+ * least; a DROP … CASCADE, whose dependents the map cannot name, covers any relation the replay measures
+ */
+const holdsAll = ({ cascades, held }: Said, measured: Readonly<Record<string, string>>): boolean =>
+	cascades.length > 0 ||
+	Object.entries(measured).every(([name, blocks]) => held[name] === blocks || held[name] === "reads and writes")
 
 // lookup-table: what the replay measures and pg-held.ts's map cannot, by why; apply warns without it, so run check first
 const UNSEEN = {
@@ -79,7 +93,7 @@ function mapHolds(
 	at: { table: string; validate: string },
 	unseen?: keyof typeof UNSEEN,
 ): void {
-	expect(holdsAll(mapped(one, two, at), heldIn(heldOf(out, at.validate), at)), unseen && UNSEEN[unseen]).toBe(
+	expect(holdsAll(mapped(one, two, at), heldIn(heldOf(out, at.validate), at).held), unseen && UNSEEN[unseen]).toBe(
 		unseen === undefined,
 	)
 }

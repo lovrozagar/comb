@@ -80,6 +80,15 @@ const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> 
 	["ALTER TABLE ev DETACH PARTITION ev_old;", { ev: READS, ev_old: READS, users: WRITES }],
 ]
 
+// lookup-table: the CASES that drop with CASCADE, whose dependents the map names no table of, by the objects it names
+const CASCADED: Readonly<Record<string, readonly string[]>> = {
+	"ALTER TABLE users DROP COLUMN id CASCADE;": ["users.id"],
+	"ALTER TABLE users DROP CONSTRAINT users_pkey CASCADE;": ["users_pkey on users"],
+	"ALTER TABLE users_copy DROP CONSTRAINT users_copy_pkey CASCADE;": ["users_copy_pkey on users_copy"],
+	"DROP TABLE orders CASCADE;": ["orders"],
+	"DROP TABLE users CASCADE;": ["users"],
+}
+
 describe("a VALIDATE after a statement that locks through a foreign key on Postgres 17 (gaps 1–4 of 0005)", () => {
 	it.each(CASES)(
 		"after %s, warns exactly when Postgres holds a blocking lock, naming what it holds",
@@ -87,7 +96,7 @@ describe("a VALIDATE after a statement that locks through a foreign key on Postg
 			await withScratchDb(async (url) => {
 				expect(await heldBy(url, [HISTORY], `${first}\n${VALIDATE}\n`)).toEqual(held)
 			})
-			expect(validateWarnings(first)).toEqual(warningOf({ table: "audit", validate: VALIDATE }, held))
+			expect(validateWarnings(first)).toEqual(warningOf({ table: "audit", validate: VALIDATE }, held, CASCADED[first]))
 		},
 		60_000,
 	)
