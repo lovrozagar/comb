@@ -9,9 +9,10 @@
  * integer, a date-like TEXT, a word, a TEXT holding a comma and twice one TEXT past the cursor's cap,
  * in that order ascending, so a walk resumes past a deleted cursor row both ways, numbers below it and
  * a tie inside the TEXT range after it; ids are out of key order. Each engine's suite runs it on its
- * own driver, and on two shards for the merged list.
+ * own driver, and on two shards for the merged list; `listOptions` reads the table through drizzle's
+ * relational API.
  */
-import { eq } from "drizzle-orm"
+import { defineRelations, eq } from "drizzle-orm"
 import { integer, type SQLiteAsyncDatabase, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
@@ -30,6 +31,8 @@ const metric = sqliteTable("metric", {
 	post_id: text("post_id"),
 	s: integer("s", { mode: "timestamp" }),
 })
+/** The relations a suite builds its drizzle with, so `listOptions` reads `post` through `findMany` */
+export const TEXT_RELATIONS = defineRelations({ post })
 const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["m", "s"] })
 
 /* past the cap a cursor holds (MAX_CURSOR_LENGTH), so its cursor carries it by reference */
@@ -64,13 +67,13 @@ export const TEXT_SERVED = {
 } as const
 
 export type TextKey = "m" | "s"
-export type TextShape = "anchored joined" | "anchored own" | "anchorless" | "merged" | "table"
+export type TextShape = "anchored joined" | "anchored own" | "anchorless" | "listOptions" | "merged" | "table"
 type Db = SQLiteAsyncDatabase<any, any>
 
 type Parsed = ReturnType<typeof schema.parse>
 
-/** The list `shape`, any but the merged one, builds for `parsed` */
-function listOf(shape: Exclude<TextShape, "merged">, parsed: Parsed): ListQueryResult {
+/** The list `shape`, any built on one database, builds for `parsed` */
+function listOf(shape: Exclude<TextShape, "listOptions" | "merged">, parsed: Parsed): ListQueryResult {
 	if (shape === "table") return buildListQuery({ ...SEALED, parsed, table: post })
 	const sortColumns = shape === "anchored joined" ? { m: metric.m, s: metric.s } : { m: post.m, s: post.s }
 	if (shape === "anchorless") return buildDerivedListQuery({ ...SEALED, idColumn: post.id, parsed, sortColumns })
@@ -88,6 +91,14 @@ async function pageOf(
 			.select({ id: post.id, [key]: shape === "anchored joined" ? metric[key] : post[key], ...extras })
 			.from(post)
 			.innerJoin(metric, eq(metric.post_id, post.id))
+	if (shape === "listOptions") {
+		const options = queryHelpers.listOptions(parsed, SEALED)
+		const relational = dbs[0] as unknown as {
+			query: { post: { findMany: (options: never) => Promise<Record<string, unknown>[]> } }
+		}
+		const [items, meta] = queryHelpers.paginate(await relational.query.post.findMany(options as never), options)
+		return [items, meta.nextCursor]
+	}
 	if (shape === "merged") {
 		const list = buildListQuery({ ...SEALED, merged: {}, parsed, table: post })
 		const [items, meta] = paginateMerged(await Promise.all(dbs.map((db) => applyListQuery(select(db), list))), list)
@@ -96,6 +107,15 @@ async function pageOf(
 	const list = listOf(shape, parsed)
 	const [items, meta] = queryHelpers.paginate(await applyListQuery(select(dbs[0]!), list), list)
 	return [items, meta.nextCursor]
+}
+
+/** The rows of the first page the list of `shape` by `key` serves `direction`, as paginate hands them on */
+export async function firstPage(
+	dbs: readonly Db[],
+	{ direction, key, shape }: { direction: "asc" | "desc"; key: TextKey; shape: TextShape },
+): Promise<Record<string, unknown>[]> {
+	const [items] = await pageOf(dbs, { key, shape }, schema.parse({ order: `${key}.${direction}` }))
+	return items
 }
 
 /** `ids`' rows deleted on every shard, from both tables */
