@@ -10,7 +10,7 @@
 import { type DecodedCursor, readKeyset } from "./cursor.ts"
 import { fitCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { carriedTexts, COMB_ID, typedKeys } from "./list-extras.ts"
+import { carriedTexts, COMB_ID, refuseUnheld, typedKeys } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
 import { paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired } from "./page-refusals.ts"
 import type { paginationResponseSchema } from "./schema.ts"
@@ -199,6 +199,8 @@ function paginate<T extends object>(
 	refuseGoneAnchor(items)
 	const hasMore = items.length > pagination.limit
 	const sliced = hasMore ? items.slice(0, pagination.limit) : items
+	/* a key no cursor bound as read places is refused on the page that serves it, wherever its row lands */
+	for (const item of sliced) refuseUnheld(item as Record<string, unknown>, pagination.parsedSort)
 	/* minted from the fat row, under the sort the builder ordered by, so the next request's signature matches */
 	const last = sliced.at(-1)
 	const meta: PaginationResponse = {

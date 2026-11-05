@@ -12,6 +12,8 @@ import {
 	BOOLEAN_SERVED,
 	BOOLEAN_WALKS,
 	type BooleanShape,
+	firstPair,
+	LEADING_SEED,
 	servedBooleans,
 } from "../support/boolean-keys.ts"
 import { startsOrder } from "../support/text-timestamps.ts"
@@ -30,10 +32,8 @@ async function holding(statements: readonly string[]) {
 }
 
 /** One database, or two shards for the merged list */
-const dbsFor = async (shape: BooleanShape) =>
-	shape === "merged"
-		? [await holding(BOOLEAN_SEED(0)), await holding(BOOLEAN_SEED(1))]
-		: [await holding(BOOLEAN_SEED())]
+const dbsFor = async (shape: BooleanShape, seed = BOOLEAN_SEED) =>
+	shape === "merged" ? [await holding(seed(0)), await holding(seed(1))] : [await holding(seed())]
 
 describe("a SQLite boolean holding anything but 0 or 1 pages or is refused by name (AB3-2 of area B)", () => {
 	it.each(["table", "anchored own", "listOptions"] as const)(
@@ -58,6 +58,29 @@ describe("a SQLite boolean holding anything but 0 or 1 pages or is refused by na
 				})
 				expect(startsOrder(ids, BOOLEAN_SERVED[walk.direction]), `${JSON.stringify(walk)} ${ids}`).toBe(true)
 			}
+		},
+	)
+})
+
+/* AB3-5 of area B: a list that binds the key as read refused such a row only when it ended a page */
+describe("a boolean row holding a value but 0 or 1 is refused on the page that serves it (AB3-5 of area B; sibling: AB3-2)", () => {
+	it.each(["anchorless", "anchored joined", "merged"] as const)(
+		"answers the %s list a 500 naming the key on the page such a row leads and a 0 ends",
+		async (shape) => {
+			expect((await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "asc", shape })).error).toMatchObject({
+				cause: expect.stringContaining("b stores"),
+				errorKey: "sort_not_wired",
+				status: 500,
+			})
+		},
+	)
+
+	it.each(["table", "anchored own", "listOptions"] as const)(
+		"serves the %s list's page as it reads the key back",
+		async (shape) => {
+			expect(await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "asc", shape })).toEqual({
+				ids: ["e", "a"],
+			})
 		},
 	)
 })

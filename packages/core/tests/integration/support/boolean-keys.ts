@@ -21,6 +21,8 @@ const metric = sqliteTable("metric", { b: integer("b", { mode: "boolean" }), pos
 /** The relations a suite builds its drizzle with, so `listOptions` reads `post` through `findMany` */
 export const BOOLEAN_RELATIONS = defineRelations({ post })
 const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["b"] })
+/* AB3-5 of area B: two rows a page, so a row holding a value but 0 or 1 can lead a page a 0 ends */
+const pairs = createListQuerySchema({ pagination: { defaultLimit: 2, maxLimit: 2 }, sort: ["b"] })
 
 /* -Infinity < -1 < 0 < 1 < 1.5 < 2, twice (c before d by id) < 2^53 + 1 < Infinity < 'yes' < x'01', SQLite's
    order; ids out of key order */
@@ -38,13 +40,21 @@ const ROWS = [
 	"('k', -9e999)",
 ] as const
 
+/** The statements that seed one database with every one of `rows`, or one shard of two with its half */
+const seedOf =
+	(rows: readonly string[]) =>
+	(shard?: 0 | 1): string[] => [
+		"CREATE TABLE post (id TEXT PRIMARY KEY, b INTEGER)",
+		"CREATE TABLE metric (post_id TEXT, b INTEGER)",
+		`INSERT INTO post VALUES ${(shard === undefined ? rows : rows.filter((_, i) => i % 2 === shard)).join(", ")}`,
+		"INSERT INTO metric SELECT id, b FROM post",
+	]
+
 /** The statements that seed one database with every row, or one shard of two with its half */
-export const BOOLEAN_SEED = (shard?: 0 | 1): string[] => [
-	"CREATE TABLE post (id TEXT PRIMARY KEY, b INTEGER)",
-	"CREATE TABLE metric (post_id TEXT, b INTEGER)",
-	`INSERT INTO post VALUES ${(shard === undefined ? ROWS : ROWS.filter((_, i) => i % 2 === shard)).join(", ")}`,
-	"INSERT INTO metric SELECT id, b FROM post",
-]
+export const BOOLEAN_SEED = seedOf(ROWS)
+
+/** AB3-5 of area B: -1 < 0, so ascending two a page, the -1 leads page 1 and the 0 ends it */
+export const LEADING_SEED = seedOf(["('a', 0)", "('e', -1)"])
 
 /** Every id in SQLite's order of the key */
 export const BOOLEAN_SERVED = {
@@ -101,6 +111,19 @@ async function pageOf(dbs: readonly Db[], shape: BooleanShape, parsed: Parsed): 
 					})
 	const [items, meta] = queryHelpers.paginate(await applyListQuery(select(dbs[0]!), list), list)
 	return [idsOf(items), meta.nextCursor]
+}
+
+/** The ids of the first page, two a page, the list of `shape` serves `direction`; or the error it answered */
+export async function firstPair(
+	dbs: readonly Db[],
+	{ direction, shape }: { direction: "asc" | "desc"; shape: BooleanShape },
+): Promise<{ error?: unknown; ids?: string[] }> {
+	try {
+		const [ids] = await pageOf(dbs, shape, pairs.parse({ order: `b.${direction}` }))
+		return { ids }
+	} catch (error) {
+		return { error }
+	}
 }
 
 /**

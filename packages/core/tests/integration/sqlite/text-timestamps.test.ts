@@ -13,6 +13,8 @@ import {
 	FRACTION_SERVED,
 	firstCursor,
 	firstPage,
+	firstPair,
+	LEADING_SEED,
 	startsOrder,
 	TEXT_RELATIONS,
 	TEXT_SEED,
@@ -135,6 +137,34 @@ describe("a SQLite timestamp holding ±Infinity pages every row once on every li
 				const served = await servedText(await dbsFor(shape, INFINITY_SEED), { ...walk, shape })
 				expect(served, JSON.stringify(walk)).toEqual({ ids: INFINITY_SERVED[walk.direction] })
 			}
+		},
+	)
+})
+
+/* AB3-5 of area B: a list that binds the key as read refused a TEXT row only when it ended a page */
+describe("a TEXT row is refused on the page that serves it, wherever it lands (AB3-5 of area B; sibling: B2-3's refusal)", () => {
+	it.each(["anchorless", "anchored joined", "merged"] as const)(
+		"answers the %s list a 500 naming the key on the page a TEXT row leads and a number ends",
+		async (shape) => {
+			for (const key of ["s", "m"] as const)
+				expect(
+					(await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "desc", key, shape })).error,
+					key,
+				).toMatchObject({
+					cause: expect.stringContaining(`${key} stores TEXT`),
+					errorKey: "sort_not_wired",
+					status: 500,
+				})
+		},
+	)
+
+	it.each(["table", "anchored own", "listOptions"] as const)(
+		"serves the %s list's page as it reads the key back",
+		async (shape) => {
+			for (const key of ["s", "m"] as const)
+				expect(await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "desc", key, shape }), key).toEqual({
+					ids: ["d", "a"],
+				})
 		},
 	)
 })

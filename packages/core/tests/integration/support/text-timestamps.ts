@@ -35,6 +35,8 @@ const metric = sqliteTable("metric", {
 /** The relations a suite builds its drizzle with, so `listOptions` reads `post` through `findMany` */
 export const TEXT_RELATIONS = defineRelations({ post })
 const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["m", "s"] })
+/* AB3-5 of area B: two rows a page, so a TEXT row can lead a page another row ends */
+const pairs = createListQuerySchema({ pagination: { defaultLimit: 2, maxLimit: 2 }, sort: ["m", "s"] })
 
 /* past the cap a cursor holds (MAX_CURSOR_LENGTH), so its cursor carries it by reference */
 const LONG_TEXT = "replace(hex(zeroblob(4500)), '0', 'z')"
@@ -65,6 +67,9 @@ const seedOf =
 
 /** The statements that seed one database with every row, or one shard of two with its half */
 export const TEXT_SEED = seedOf(ROWS)
+
+/** AB3-5 of area B: 1000.5 < 2000 < '1970-…', so descending two a page, the TEXT row leads page 1 and a number ends it */
+export const LEADING_SEED = seedOf(ROWS.slice(0, 3))
 
 /*
  * B2-6 of area B: milliseconds holding a fraction below one, as a raw writer stores a REAL, which the
@@ -167,6 +172,19 @@ export async function firstPage(
 ): Promise<Record<string, unknown>[]> {
 	const [items] = await pageOf(dbs, { key, shape }, schema.parse({ order: `${key}.${direction}` }))
 	return items
+}
+
+/** The ids of the first page, two a page, the list of `shape` by `key` serves `direction`; or the error it answered */
+export async function firstPair(
+	dbs: readonly Db[],
+	{ direction, key, shape }: { direction: "asc" | "desc"; key: TextKey; shape: TextShape },
+): Promise<{ error?: unknown; ids?: unknown[] }> {
+	try {
+		const [items] = await pageOf(dbs, { key, shape }, pairs.parse({ order: `${key}.${direction}` }))
+		return { ids: items.map((row) => row["id"]) }
+	} catch (error) {
+		return { error }
+	}
 }
 
 /** The first page's next cursor of the list `shape` by `key`, `direction`, as readCursor opens it */

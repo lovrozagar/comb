@@ -199,6 +199,21 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
 }
 
 /**
+ * A 500 naming the first of `sort`'s keys whose stored value the row's `_combKeyTexts` marks as none
+ * a list binding it as read places: a SQLite timestamp's TEXT, or a boolean's value but 0 or 1.
+ * paginate asks it of every row it serves, so the refusal never hangs on which row ends a page
+ */
+function refuseUnheld(row: Record<string, unknown>, sort: readonly SortField[]): void {
+	const texts = row["_combKeyTexts"]
+	if (typeof texts !== "string") return
+	const carried = texts.split(",")
+	const text = sort.find((_, i) => carried[i] === TEXT_MARK)
+	if (text !== undefined) throw storesText(text.field)
+	const other = sort.find((_, i) => carried[i] === BOOLEAN_MARK)
+	if (other !== undefined) throw storesOther(other.field)
+}
+
+/**
  * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
@@ -214,10 +229,7 @@ function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Re
 	const held = textKeysOf(row)
 	if (stored === undefined && typeof texts !== "string" && held === undefined) return row
 	const carried = typeof texts === "string" ? texts.split(",") : []
-	const text = sort.find((_, i) => carried[i] === TEXT_MARK)
-	if (text !== undefined) throw storesText(text.field)
-	const other = sort.find((_, i) => carried[i] === BOOLEAN_MARK)
-	if (other !== undefined) throw storesOther(other.field)
+	refuseUnheld(row, sort)
 	const typed = [...sort.map(({ field }) => field), COMB_ID]
 		.map((field, i) => {
 			const own = held?.[i]
@@ -250,4 +262,14 @@ function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]):
 	)
 }
 
-export { carriedTexts, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded }
+export {
+	carriedTexts,
+	COMB_ID,
+	INTEGER_TEXT,
+	type KeyClass,
+	malformed,
+	refuseUnheld,
+	storedClasses,
+	typedKeys,
+	unencoded,
+}
