@@ -379,6 +379,21 @@ describe("README newest upgrade section's step citations", () => {
 		expect(cited.length).toBeGreaterThan(0)
 		expect(cited.filter(([, shares]) => !shares)).toEqual([])
 	})
+
+	/* every lane added steps to the section the same day, each numbered from the end it saw */
+	it("numbers its steps 1 to the last, in order, each once", () => {
+		const numbers = [...section.matchAll(/^(\d+)\. /gm)].map((step) => Number(step[1]))
+		expect(numbers).toEqual(numbers.map((_, index) => index + 1))
+	})
+
+	/* a reader has no review's or lane's ids: outside code, a capitalized token with a number is a product's own name */
+	it("names no review finding, lane or process id outside code", () => {
+		const prose = section.replace(/`[^`]*`/g, "")
+		const tokens = prose.match(
+			/\b(?:[A-Z]{1,4}\d{1,3}[a-z]?(?:-\d+[a-z]?)?|r\d{2}[a-z]?|comb-[0-9a-f]{2})\b|\barea [A-D]\b/g,
+		)
+		expect([...new Set(tokens)].filter((token) => !["D1", "FTS5", "RE2", "SHA256"].includes(token))).toEqual([])
+	})
 })
 
 describe("README table of contents", () => {
