@@ -15,6 +15,7 @@ import {
 	type OpenDb,
 	REAL_TEXT,
 	refusedOnPage,
+	STORED_CLASSES,
 	storedProblems,
 	TEXT_BLOB,
 	TIMESTAMP_BLOB,
@@ -46,8 +47,15 @@ describe("a cursor the list minted is never refused as invalid_cursor (AB4-1 of 
 		expect(await storedProblems(open, kase)).toEqual([])
 	})
 
-	it("answers a TEXT key holding a BLOB the 500 naming it, never a 400", async () => {
-		expect(await storedProblems(open, TEXT_BLOB, { refusing: () => true })).toEqual([])
+	/* AB4-2 of area B: a BLOB is outside what a text column reads back as stored, so a list reading it back carries it */
+	it("pages a TEXT key holding a BLOB, or refuses it by name on a list that binds it as read, never a 400", async () => {
+		expect(await storedProblems(open, TEXT_BLOB)).toEqual([])
+	})
+})
+
+describe("a stored class a key's mode reads apart pages or is refused by name (AB4-2 of area B)", () => {
+	it.each(Object.entries(STORED_CLASSES))("%s", async (_, kase) => {
+		expect(await storedProblems(open, kase)).toEqual([])
 	})
 })
 

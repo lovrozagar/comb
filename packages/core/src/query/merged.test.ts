@@ -35,6 +35,7 @@ const read = <T extends { id: unknown }>(rows: readonly T[], total: number | nul
 	rows.map((row) => ({
 		...row,
 		_combId: row.id,
+		...(sort.length === 0 ? {} : { _combKeyTexts: sort.map(() => "").join(",") }),
 		_combKeyTypes: [...sort.map((field) => stored((row as Record<string, unknown>)[field])), stored(row.id)].join(","),
 		...(total === null ? {} : { _total: total }),
 	}))
@@ -65,7 +66,7 @@ describe("buildListQuery's merged list", () => {
 	it("reads every row to the page's end and one more from each shard, counting them", () => {
 		const options = merged({ limit: "3", page: "4" })
 		expect(options).toMatchObject({ limit: 13, offset: 0 })
-		expect(Object.keys(options.extras).toSorted()).toEqual(["_combId", "_combKeyTypes", "_total"])
+		expect(Object.keys(options.extras).toSorted()).toEqual(["_combId", "_combKeyTexts", "_combKeyTypes", "_total"])
 		expect(merged({ limit: "3" })).toMatchObject({ limit: 4, offset: 0 })
 	})
 
@@ -191,7 +192,7 @@ describe("paginateMerged's count and projection", () => {
 
 /* Q1 of the 0.14.1 review: a shard that resumed before the cursor, as one reading a gone anchor at -Infinity does */
 /** A row of key `k`, with its storage class and its text id's */
-const row = (id: string, k: number) => ({ _combId: id, _combKeyTypes: `${stored(k)},text`, id, k })
+const row = (id: string, k: number) => ({ _combId: id, _combKeyTexts: "", _combKeyTypes: `${stored(k)},text`, id, k })
 
 describe("paginateMerged past a cursor a shard resumed before", () => {
 	const first = paginateMerged(
@@ -243,7 +244,7 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 /* R1 of plan 16's review: a merged list mints no reference, so a cursor that carries one is no cursor of it */
 describe("a merged list given a cursor that carries a reference", () => {
 	it("refuses it as invalid_cursor, though a single database's list under its scope and sort minted it", () => {
-		const long = { _combId: "a", _total: 2, id: "a", k: "x".repeat(9000) }
+		const long = { _combId: "a", _combTextKeys: "[null]", _total: 2, id: "a", k: "x".repeat(9000) }
 		const single = buildListQuery({ ...SEALED, parsed: parse({ limit: "1", order: "k.asc" }), table: t })
 		const [, meta] = paginate([long, { ...long, _combId: "b", id: "b" }], single)
 		const cursor = meta.nextCursor as string

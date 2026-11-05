@@ -76,7 +76,7 @@ describe("TEXT in a SQLite timestamp column pages or is refused by name (B2-3 of
 			for (const walk of WALKS) {
 				const { error, ids } = await servedText(await dbsFor(shape), { ...walk, shape })
 				expect(error, JSON.stringify(walk)).toMatchObject({
-					cause: expect.stringContaining(`${walk.key satisfies TextKey} stores TEXT`),
+					cause: expect.stringContaining(`${walk.key satisfies TextKey} stores a TEXT value`),
 					errorKey: "sort_not_wired",
 					status: 500,
 				})
@@ -151,7 +151,7 @@ describe("a TEXT row is refused on the page that serves it, wherever it lands (A
 					(await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "desc", key, shape })).error,
 					key,
 				).toMatchObject({
-					cause: expect.stringContaining(`${key} stores TEXT`),
+					cause: expect.stringContaining(`${key} stores a TEXT value`),
 					errorKey: "sort_not_wired",
 					status: 500,
 				})

@@ -149,7 +149,8 @@ function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 
 /**
  * The extra that carries each stored value a key the list reads back holds apart from its read, a
- * SQLite timestamp's TEXT or a boolean's value but 0 or 1 (textKeysSQL); none where no key is one
+ * SQLite key's value of a class its mode reads as another, a timestamp's TEXT or a boolean's value but
+ * 0 or 1 among them (textKeysSQL; AB4-2 of area B); none where no key is one
  */
 function textKeysOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	const held = (column: SQLWrapper) => heldApart(column) && !boundAsRead(list, column)

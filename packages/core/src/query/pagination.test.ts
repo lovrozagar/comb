@@ -33,7 +33,8 @@ describe("paginate on a list ordered by a computed sort", () => {
 			parsed: schema.parse({ limit: "2", order: "title.asc" }),
 			table: post,
 		})
-		expect(paginate(rows, byColumn)[1].nextCursor).toEqual(expect.any(String))
+		const read = rows.map((row) => ({ ...row, _combTextKeys: "[null]" }))
+		expect(paginate(read, byColumn)[1].nextCursor).toEqual(expect.any(String))
 	})
 })
 

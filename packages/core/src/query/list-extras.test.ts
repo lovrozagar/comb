@@ -184,7 +184,7 @@ describe("typedKeys, carriedTexts and malformed: _combTextKeys (B2-3 of area B; 
 	const invalid = new Date(Number.NaN)
 
 	it("puts a read-back key's TEXT in place of the Date, and flags it as carried, a comma in it included", () => {
-		const row = { _combId: 1, _combTextKeys: JSON.stringify(["b,text", null]), k: invalid, name: "a" }
+		const row = { _combId: 1, _combTextKeys: JSON.stringify([["text", "b,text"], null]), k: invalid, name: "a" }
 		expect(typedKeys(row, SORT)).toEqual({ ...row, k: "b,text" })
 		expect(carriedTexts(row, SORT)).toEqual(new Set(["k"]))
 		const numbered = { _combId: 1, _combTextKeys: JSON.stringify([null, null]), k: new Date(2000), name: "a" }
@@ -192,26 +192,45 @@ describe("typedKeys, carriedTexts and malformed: _combTextKeys (B2-3 of area B; 
 		expect(carriedTexts(numbered, SORT)).toEqual(new Set())
 	})
 
-	it("answers a 500 naming the key where an as-read list marked a TEXT, under the classes or none", () => {
-		const cause = expect.stringContaining("k stores TEXT")
-		for (const row of [
-			{ _combId: 1, _combKeyTexts: "!,", k: invalid, name: "a" },
-			{ _combId: 1, _combKeyTexts: "!,", _combKeyTypes: "text,text,integer", k: invalid, name: "a" },
-		])
-			expect(() => typedKeys(row, SORT)).toThrow(
-				expect.objectContaining({ cause, errorKey: "sort_not_wired", status: 500 }),
-			)
-	})
-
-	it("takes a JSON array of a TEXT or null a sort key, or none empty, and names any other value or one rendered by hand as its alias", () => {
-		expect(malformed({ _combId: 1, _combTextKeys: '["a,b",null]' }, SORT)).toBeUndefined()
-		/* listOptions selects it empty on a table with no key that holds TEXT */
+	it("takes a JSON array of a class and its text or null a sort key, or none empty, and names any other value or one rendered by hand as its alias", () => {
+		expect(malformed({ _combId: 1, _combTextKeys: '[["text","a,b"],null]' }, SORT)).toBeUndefined()
+		/* listOptions selects it empty on a list whose every key is bound as read or has no set of classes */
 		expect(malformed({ _combId: 1, _combTextKeys: "" }, SORT)).toBeUndefined()
 		const none = { _combId: 1, _combTextKeys: "", k: new Date(2000), name: "a" }
 		expect(typedKeys(none, SORT)).toBe(none)
 		expect(carriedTexts(none, SORT)).toEqual(new Set())
-		for (const texts of ['["a"]', '["a",1]', '{"0":"a","1":null}', "[a,b]", "_combTextKeys", 7])
+		for (const texts of ['["a,b",null]', '["a"]', '["a",1]', '{"0":"a","1":null}', "[a,b]", "_combTextKeys", 7])
 			expect(malformed({ _combId: 1, _combTextKeys: texts }, SORT)).toBe(`_combTextKeys ${JSON.stringify(texts)}`)
+	})
+})
+
+/* AB4-2 of area B: an as-read list marks a value of a class its mode reads as another `!` and the class */
+describe("typedKeys: a stored class an as-read list marks (AB3-2, AB4-2 of area B; sibling: _combTextKeys)", () => {
+	it("answers a 500 naming the key and the class it stores, under the classes or none", () => {
+		for (const stored of ["text", "integer", "real", "blob"]) {
+			const cause = expect.stringContaining(
+				`k stores a ${stored.toUpperCase()} value its column's drizzle mode reads as another`,
+			)
+			for (const row of [
+				{ _combId: 1, _combKeyTexts: `!${stored},`, k: false, name: "a" },
+				{ _combId: 1, _combKeyTexts: `!${stored},`, _combKeyTypes: `${stored},text,integer`, k: false, name: "a" },
+			])
+				expect(() => typedKeys(row, SORT), stored).toThrow(
+					expect.objectContaining({ cause, errorKey: "sort_not_wired", status: 500 }),
+				)
+		}
+	})
+
+	it("names the first key so marked, and takes a mark of no storage class for no refusal", () => {
+		const both = { _combId: 1, _combKeyTexts: "!text,!blob", k: false, name: "a" }
+		expect(() => typedKeys(both, SORT)).toThrow(
+			expect.objectContaining({ cause: expect.stringMatching(/^k stores a TEXT/) }),
+		)
+		const second = { _combId: 1, _combKeyTexts: ",!blob", k: 1, name: "a" }
+		expect(() => typedKeys(second, SORT)).toThrow(
+			expect.objectContaining({ cause: expect.stringMatching(/^name stores a BLOB/) }),
+		)
+		expect(() => typedKeys({ _combId: 1, _combKeyTexts: "text,", k: 1, name: "a" }, SORT)).not.toThrow()
 	})
 })
 
@@ -238,17 +257,6 @@ describe("typedKeys, carriedTexts and malformed: a boolean's stored value (AB3-2
 			expect(typedKeys(held(stored, text), SORT), `${stored} ${text}`).toEqual({ ...held(stored, text), k: value })
 			expect(carriedTexts(held(stored, text), SORT)).toEqual(new Set(["k"]))
 		}
-	})
-
-	it("answers a 500 naming the key where an as-read list marked a value but 0 or 1, under the classes or none", () => {
-		const cause = expect.stringContaining("k stores a value other than 0 or 1")
-		for (const row of [
-			{ _combId: 1, _combKeyTexts: "!b,", k: false, name: "a" },
-			{ _combId: 1, _combKeyTexts: "!b,", _combKeyTypes: "integer,text,integer", k: false, name: "a" },
-		])
-			expect(() => typedKeys(row, SORT)).toThrow(
-				expect.objectContaining({ cause, errorKey: "sort_not_wired", status: 500 }),
-			)
 	})
 
 	it("takes a storage class and its text a key, and names a pair of another shape or class as its alias", () => {

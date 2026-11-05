@@ -1,8 +1,10 @@
 /**
  * SQLite's columns whose drizzle mode reads a value as another than SQLite stored. A non-STRICT
- * table lets a timestamp hold TEXT, as a CURRENT_TIMESTAMP default or a datetime() writer stores it,
- * which drizzle reads as an invalid Date and SQLite orders after every number (B2-3 of area B), and a
- * boolean any value, which drizzle reads as false but for 1 (AB3-2 of area B). A Postgres date-mode
+ * table lets any column hold any storage class: a timestamp TEXT, as a CURRENT_TIMESTAMP default or a
+ * datetime() writer stores it, which drizzle reads as an invalid Date and SQLite orders after every
+ * number (B2-3 of area B), a boolean any value, which drizzle reads as false but for 1 (AB3-2 of area
+ * B), a `numeric()` ±Infinity or a BLOB, a buffer blob TEXT (AB4-2 of area B). Each mode has the classes
+ * it reads back as stored (storedReads), and a list carries any other apart. A Postgres date-mode
  * time carries its text the same way, as a Date keeps milliseconds of its microseconds (carriedText).
  */
 import { Column, is, type SQLWrapper } from "drizzle-orm"
@@ -29,9 +31,9 @@ const holdsText = (column: SQLWrapper | undefined): boolean => inSeconds(column)
 
 /**
  * Whether `value` is the text a list that reads `column` back carried from its row, which the cursor
- * flags (`carried`) and binds as itself, past the column's Date mapper: a SQLite timestamp's TEXT, or a
- * Postgres date-mode time's to_json text, which a Date holds to the millisecond (AB3-4 of area B); a
- * list that binds the key as read carries none
+ * flags (`carried`) and binds as itself, past the column's Date mapper: a Postgres date-mode time's
+ * to_json text, which a Date holds to the millisecond (AB3-4 of area B); a list that binds the key as
+ * read carries none. A SQLite column's stored value is carriedStored's
  */
 const carriedText = (
 	column: SQLWrapper | undefined,
@@ -41,25 +43,51 @@ const carriedText = (
 	carried &&
 	!asRead &&
 	typeof value === "string" &&
-	(holdsText(column) || (!is(column, SQLiteColumn) && is(column, Column) && column.dataType === "object date"))
+	!is(column, SQLiteColumn) &&
+	is(column, Column) &&
+	column.dataType === "object date"
 
+// AB4-2 of area B: what each SQLite drizzle mode reads back as stored, as the storage class typeof() names
 /**
- * Whether `column` is a SQLite boolean: drizzle reads every value but 1 as false, where a non-STRICT
- * table holds any, a raw writer's -1 or 2 among them, which SQLite orders apart (AB3-2 of area B)
+ * The storage classes a SQLite column's mode reads back as SQLite stored them, a REAL alone when
+ * finite (`finite`): a number mode's and a timestamp's integers and REALs, a ±Infinity read as itself,
+ * as null with its class beside it (Q3 of r20) or as an Invalid Date a list reads back by its row or its
+ * class (AB3-1 of area B); a `numeric()`'s integers and finite REALs, as drizzle reads ±Infinity as
+ * "Infinity", which binds as TEXT; a text's TEXT; a buffer or bigint
+ * blob's BLOB. A boolean reads back NULL, 0 and 1 alone (AB3-2 of area B). A JSON mode holds nothing a
+ * cursor carries, and a custom column's read is its own mapper's, so neither has a set
  */
-const inBoolean = (column: SQLWrapper | undefined): boolean =>
-	is(column, SQLiteColumn) && column.columnType === "SQLiteBoolean"
+type StoredReads = "boolean" | readonly ("blob" | "finite" | "integer" | "real" | "text")[]
+
+// lookup-table: each SQLite drizzle columnType and the storage classes it reads back as stored (AB4-2 of area B)
+const READS: Readonly<Record<string, StoredReads>> = {
+	SQLiteBigInt: ["blob"],
+	SQLiteBlobBuffer: ["blob"],
+	SQLiteBoolean: "boolean",
+	SQLiteInteger: ["integer", "real"],
+	SQLiteNumeric: ["integer", "finite"],
+	SQLiteNumericBigInt: ["integer", "finite"],
+	SQLiteNumericNumber: ["integer", "finite"],
+	SQLiteReal: ["integer", "real"],
+	SQLiteText: ["text"],
+	SQLiteTimestamp: ["integer", "real"],
+}
+
+/** What `column`'s mode reads back as stored (StoredReads); undefined for no SQLite column, or one with no set */
+const storedReads = (column: SQLWrapper | undefined): StoredReads | undefined =>
+	is(column, SQLiteColumn) ? READS[column.columnType] : undefined
 
 /**
  * Whether a list that reads `column`'s key back carries its row's stored value apart
- * (`_combTextKeys`), where the column's read loses it: a timestamp's TEXT or a boolean's any value but 0 or 1
+ * (`_combTextKeys`) where the column's mode reads it as another (storedReads), which the cursor binds
+ * as itself: a SQLite column of a mode with a set
  */
-const heldApart = (column: SQLWrapper | undefined): boolean => holdsText(column) || inBoolean(column)
+const heldApart = (column: SQLWrapper | undefined): boolean => storedReads(column) !== undefined
 
 /**
- * Whether `value` is the stored value a list that reads `column` back carried for a SQLite boolean
- * holding a value but 0 or 1, which the cursor flags (`carried`) and binds as itself: a number, a
- * bigint past 2^53, a TEXT or a blob's bytes; a list that binds the key as read carries none
+ * Whether `value` is the stored value a list that reads `column` back carried apart (heldApart), which
+ * the cursor flags (`carried`) and binds as itself: a number, a bigint, a TEXT or a blob's bytes; a
+ * list that binds the key as read carries none
  */
 const carriedStored = (
 	column: SQLWrapper | undefined,
@@ -68,7 +96,7 @@ const carriedStored = (
 ): boolean =>
 	carried &&
 	!asRead &&
-	inBoolean(column) &&
+	heldApart(column) &&
 	(["bigint", "number", "string"].includes(typeof value) || value instanceof Uint8Array)
 
-export { carriedStored, carriedText, heldApart, holdsText, inBoolean, inMilliseconds, inSeconds }
+export { carriedStored, carriedText, heldApart, holdsText, inMilliseconds, inSeconds, type StoredReads, storedReads }

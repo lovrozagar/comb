@@ -1071,8 +1071,8 @@ declare function storedClasses(row: Record<string, unknown>): readonly KeyClass[
 declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
 /**
  * A 500 naming the first of `sort`'s keys whose stored value the row's `_combKeyTexts` marks as none
- * a list binding it as read places: a SQLite timestamp's TEXT, or a boolean's value but 0 or 1; and
- * a Postgres float the session's extra_float_digits prints rounded on any list (AB4-4 of area B).
+ * a list binding it as read places: a SQLite value of a class its mode reads as another, `!` and the
+ * class (a timestamp's TEXT, a boolean's value but 0 or 1, AB4-2 of area B); and a Postgres float the session's extra_float_digits prints rounded on any list (AB4-4 of area B).
  * paginate asks it of every row it serves, so the refusal never hangs on which row ends a page
  */
 declare function refuseUnheld(row: Record<string, unknown>, sort: readonly SortField[]): void;
@@ -1081,9 +1081,9 @@ declare function refuseUnheld(row: Record<string, unknown>, sort: readonly SortF
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
  * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b), a SQLite timestamp holding TEXT the TEXT
- * `_combTextKeys` carries (B2-3 of area B), and a SQLite boolean holding a value but 0 or 1 the value
- * it carries (AB3-2 of area B). A text key that looks like a number stays
+ * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite key holding a value of a class
+ * its mode reads as another the value `_combTextKeys` carries: a timestamp's TEXT (B2-3 of area B), a
+ * boolean's value but 0 or 1 (AB3-2), a text's integer (AB4-2 of area B). A text key that looks like a number stays
  * text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;

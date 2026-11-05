@@ -89,8 +89,9 @@ const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
  * (`asRead`) its stored value too (carriedTime); a key declared as time, a Date or the epoch
  * milliseconds its row selected; any other SQL expression (a derived sort) only what every driver
  * binds: a string, a number, a bigint, a boolean or bytes (bun:sqlite and D1 refuse a Date that libsql
- * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp's
- * TEXT or a boolean's value but 0 or 1 that a list reading it back carried (`carried`), as the row held it (B2-3, AB3-2 of area B)
+ * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite key's value
+ * of a class its mode reads as another, which a list reading it back carried (`carried`), as the row
+ * held it: a timestamp's TEXT, a boolean's value but 0 or 1, a text's integer (B2-3, AB3-2, AB4-2 of area B)
  */
 function fits(
 	column: SQLWrapper,
@@ -146,7 +147,7 @@ const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
  */
 function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
 	if (carriedText(column, value, { asRead: false, carried })) return sql`${value}`
-	/* a boolean's mapper binds any value as 0 or 1; D1 binds no bigint, so one past 2^53 goes as its digits */
+	/* a mode's mapper binds the value as another (a boolean's as 0 or 1); D1 binds no bigint, so one past 2^53 goes as its digits */
 	if (carriedStored(column, value, { asRead: false, carried }))
 		return typeof value === "bigint" && !Number.isSafeInteger(Number(value))
 			? sql`cast(${String(value)} as integer)`

@@ -4,12 +4,12 @@
  */
 import { type SQL, sql } from "drizzle-orm"
 import { numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
-import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
+import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { createCursor } from "../cursor-mint.ts"
 import { DateKey } from "./cursor-fit.ts"
-import { keyTextsSQL } from "./key-texts.ts"
+import { keyTextsSQL, textKeysSQL } from "./key-texts.ts"
 import { finish } from "./list-finish.ts"
 
 const t = sqliteTable("t", { id: integer("id").primaryKey() })
@@ -54,6 +54,7 @@ describe("finish", () => {
 const ev = sqliteTable("ev", {
 	at: integer("at", { mode: "timestamp" }),
 	id: integer("id").primaryKey(),
+	j: text("j", { mode: "json" }),
 	n: integer("n"),
 })
 const side = sqliteTable("side", { at: integer("at", { mode: "timestamp" }) })
@@ -93,16 +94,19 @@ function extrasOf(
 
 describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)", () => {
 	/* AB3 of area B: a merged list carries them too, an INTEGER's as well, so its merge compares every row in seconds */
-	it("carries a SQLite seconds key's stored seconds on a list that binds it as read, merged or not, and none for another key", () => {
+	it("carries a SQLite seconds key's stored seconds on a list that binds it as read, merged or not, another's mark alone", () => {
+		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') and abs("ev"."at") < 9e999 then printf('%!.17g', "ev"."at") when (typeof("ev"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev"."at") end`
+		const MARK = `case when (typeof("ev"."n") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev"."n") end`
 		const anchorless = extrasOf("sqlite", [
 			{ column: ev.at, direction: "asc" },
 			{ column: ev.n, direction: "asc" },
+			{ column: ev.j, direction: "asc" },
 		])
-		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') and abs("ev"."at") < 9e999 then printf('%!.17g', "ev"."at") when typeof("ev"."at") = 'text' then '!' else '' end`
-		expect(anchorless["_combKeyTexts"]).toBe(`${SECONDS} || ',' || ''`)
-		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }])["_combKeyTexts"]).toBeUndefined()
+		expect(anchorless["_combKeyTexts"]).toBe(`${SECONDS} || ',' || ${MARK} || ',' || ''`)
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })["_combKeyTexts"]).toBe(SECONDS)
-		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }], { merged: {} })).not.toHaveProperty("_combKeyTexts")
+		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }], { merged: {} })["_combKeyTexts"]).toBe(MARK)
+		/* AB4-2 of area B: a JSON key has no set of classes, so nothing marks it */
+		expect(extrasOf("sqlite", [{ column: ev.j, direction: "asc" }], { merged: {} })).not.toHaveProperty("_combKeyTexts")
 	})
 
 	it("selects classes and times on an anchored list only for a key its anchor row doesn't supply", () => {
@@ -122,8 +126,11 @@ describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)"
 	})
 })
 
+/** textKeysSQL of `keys`, every one held, rendered on SQLite */
+const held = (keys: Parameters<typeof textKeysSQL>[0]) => new SQLiteDialect().sqlToQuery(textKeysSQL(keys)).sql
+
 describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
-	it("carries a read-back key's TEXT apart, a JSON array never comma-joined, and on an as-read list only its mark", () => {
+	it("carries a read-back key's stored value apart, a JSON array never comma-joined, and on an as-read list only its mark", () => {
 		const table = extrasOf(
 			"sqlite",
 			[
@@ -132,20 +139,28 @@ describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
 			],
 			{ table: ev },
 		)
-		expect(table["_combTextKeys"]).toBe(`json_array(case when typeof("ev"."at") = 'text' then "ev"."at" end, null)`)
+		expect(table["_combTextKeys"]).toBe(
+			held([
+				{ column: ev.at, direction: "asc" },
+				{ column: ev.n, direction: "asc" },
+			]),
+		)
+		expect(table["_combTextKeys"]).toMatch(
+			/^json_array\(case when .* then json_array\('text', "ev"."at"\) .*, case when /,
+		)
 		expect(table).not.toHaveProperty("_combKeyTexts")
 		const ms = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }], { table: evMs })
-		expect(ms["_combTextKeys"]).toBe(`json_array(case when typeof("ev_ms"."at") = 'text' then "ev_ms"."at" end)`)
+		expect(ms["_combTextKeys"]).toBe(held([{ column: evMs.at, direction: "asc" }]))
 		/* bound as read: no text, only the mark a 500 names it by, beside a number's stored milliseconds (B2-6 of area B) */
 		const anchorless = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }])
 		expect(anchorless).not.toHaveProperty("_combTextKeys")
 		expect(anchorless["_combKeyTexts"]).toBe(
-			`case when typeof("ev_ms"."at") in ('integer', 'real') and abs("ev_ms"."at") < 9e999 then printf('%!.17g', "ev_ms"."at") when typeof("ev_ms"."at") = 'text' then '!' else '' end`,
+			`case when typeof("ev_ms"."at") in ('integer', 'real') and abs("ev_ms"."at") < 9e999 then printf('%!.17g', "ev_ms"."at") when (typeof("ev_ms"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev_ms"."at") end`,
 		)
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
 			"_combTextKeys",
 		)
-		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }], { table: ev })).not.toHaveProperty("_combTextKeys")
+		expect(extrasOf("sqlite", [{ column: ev.j, direction: "asc" }], { table: ev })).not.toHaveProperty("_combTextKeys")
 		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv })).not.toHaveProperty(
 			"_combTextKeys",
 		)

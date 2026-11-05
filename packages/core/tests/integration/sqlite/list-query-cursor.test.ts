@@ -182,7 +182,7 @@ describe("pagination.count (Q-M5)", () => {
 	/* Q3 of r17: a count the builder selected and the rows lack is a wiring mistake, never a null count */
 	it("refuses an offset page whose rows lack the count, where it reported null", () => {
 		const built = buildListQuery({ ...SEALED, parsed: schema.parse({ limit: "2" }), table: post })
-		expect(() => queryHelpers.paginate([{ _combId: 1, id: 1 }], built)).toThrow(
+		expect(() => queryHelpers.paginate([{ _combId: 1, _combTextKeys: "", id: 1 }], built)).toThrow(
 			expect.objectContaining({
 				cause: expect.stringMatching(/^the rows carry no _total: /),
 				errorKey: "page_not_wired",

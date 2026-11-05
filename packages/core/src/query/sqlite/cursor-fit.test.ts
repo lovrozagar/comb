@@ -307,11 +307,12 @@ describe("a SQLite numeric() key's cursor value (B2-4 of area B; sibling: libsql
 	})
 })
 
-/* B2-3 of area B: a SQLite timestamp holding TEXT carries that text on a list that reads the key back */
-describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's carried text)", () => {
+/* B2-3, AB4-2 of area B: a SQLite key holding a class its mode reads as another carries it on a list that reads the key back */
+describe("a SQLite key's carried stored value (B2-3, AB4-2 of area B; sibling: AB2's carried text)", () => {
 	const post = sqliteTable("post", {
 		m: integer("m", { mode: "timestamp_ms" }),
 		b: blob("b", { mode: "buffer" }),
+		j: text("j", { mode: "json" }),
 		n: integer("n"),
 		s: integer("s", { mode: "timestamp" }),
 	})
@@ -330,11 +331,13 @@ describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's 
 		expect(refersBack(post.n, post)).toBe(false)
 	})
 
-	it("fits a TEXT the cursor flags as carried on a timestamp it reads back, and no unflagged text, bound as read, or other column", () => {
+	it("fits a TEXT the cursor flags as carried on a key of a mode with a set, and no unflagged text, bound as read, or JSON column", () => {
 		expect(flagged(post.s, "a-text", true)).toBe(true)
 		expect(flagged(post.m, "b,text", true)).toBe(true)
+		expect(flagged(post.b, "a-text", true)).toBe(true)
+		expect(flagged(post.n, "a-text", true)).toBe(true)
 		expect(flagged(post.s, "a-text", false)).toBe(false)
-		expect(flagged(post.b, "a-text", true)).toBe(false)
+		expect(flagged(post.j, "a-text", true)).toBe(false)
 		expect(() =>
 			assertCursorFits([post.s], ["a-text"], { asRead: () => true, carried: () => true, table: post }),
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
@@ -344,6 +347,7 @@ describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's 
 		expect(shown(boundCarried(post.s, "1970-01-01T00:00:01Z", true))).toEqual(["1970-01-01T00:00:01Z"])
 		expect(shown(boundCarried(post.m, "a-text", true))).toEqual(["a-text"])
 		expect(boundCarried(post.s, "a-text", false)).toBe("a-text")
-		expect(boundCarried(post.n, "a-text", true)).toBe("a-text")
+		expect(shown(boundCarried(post.n, "a-text", true))).toEqual(["a-text"])
+		expect(boundCarried(post.j, "a-text", true)).toBe("a-text")
 	})
 })

@@ -1,6 +1,6 @@
 /**
  * The extras a SQLite or Postgres list selects to carry its keys' stored texts: _combKeyTexts, the
- * text a read would round, and _combTextKeys, the TEXT a SQLite timestamp key holds.
+ * text a read would round, and _combTextKeys, a SQLite key's stored value its mode reads as another.
  */
 import { sql } from "drizzle-orm"
 import {
@@ -13,7 +13,7 @@ import {
 	time,
 	timestamp,
 } from "drizzle-orm/pg-core"
-import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
+import { integer, numeric, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { keyTextsSQL, textKeysSQL } from "./key-texts.ts"
 
@@ -91,8 +91,35 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 
 	it("carries SQLite's REAL seconds of a seconds-mode timestamp alone, as a number's digits", () => {
 		expect(render(sqliteKinds.at)).toContain("printf('%!.17g', ")
-		expect(render(sqliteKinds.label)).toBe("''")
+		expect(render(sqliteKinds.label)).not.toContain("printf")
 		expect(render(sql`${sqliteKinds.label}`)).toBe("''")
+	})
+})
+
+/* AB4-2 of area B: a mark is `!` and a storage class's name, which holds no comma */
+describe("keyTextsSQL's mark of a SQLite stored class (AB4-2 of area B; sibling: AB1's carriage)", () => {
+	const marks = sqliteTable("sqlite_marks", {
+		at: integer("at", { mode: "timestamp" }),
+		data: text("data", { mode: "json" }),
+		flag: integer("flag", { mode: "boolean" }),
+		num: numeric("num"),
+		tag: text("tag"),
+	})
+	it("marks a SQLite key of a class its mode reads as another `!` and the class, and an expression nothing", () => {
+		expect(render(marks.tag)).toBe(
+			`case when (typeof("sqlite_marks"."tag") in ('null', 'text')) then '' else '!' || typeof("sqlite_marks"."tag") end`,
+		)
+		expect(render(marks.at)).toContain(`when (typeof("sqlite_marks"."at") in ('null', 'integer', 'real')) then ''`)
+		expect(render(marks.flag)).toContain(
+			`when ("sqlite_marks"."flag" is null or (typeof("sqlite_marks"."flag") in ('integer', 'real') and "sqlite_marks"."flag" in (0, 1))) then ''`,
+		)
+		expect(render(marks.data)).toBe("''")
+	})
+
+	it("marks a numeric()'s ±Infinity, a REAL short of 9e999 alone held", () => {
+		expect(render(marks.num)).toBe(
+			`case when (typeof("sqlite_marks"."num") in ('null', 'integer') or (typeof("sqlite_marks"."num") = 'real' and abs("sqlite_marks"."num") < 9e999)) then '' else '!' || typeof("sqlite_marks"."num") end`,
+		)
 	})
 })
 
@@ -130,26 +157,29 @@ const rendered = (keys: Parameters<typeof textKeysSQL>[0], held?: Parameters<typ
 	new SQLiteDialect().sqlToQuery(textKeysSQL(keys, held)).sql
 
 /* B2-3 of area B: a SQLite timestamp key may hold TEXT, which drizzle reads as an invalid Date */
-describe("textKeysSQL selects each timestamp key's TEXT (B2-3 of area B; sibling: keyTextsSQL)", () => {
+describe("textKeysSQL selects each key's stored value its mode reads as another (B2-3, AB4-2 of area B; sibling: keyTextsSQL)", () => {
 	const post = sqliteTable("post", {
+		j: text("j", { mode: "json" }),
 		m: integer("m", { mode: "timestamp_ms" }),
 		n: integer("n"),
 		s: integer("s", { mode: "timestamp" }),
 	})
-	it("takes a JSON array of each key's TEXT, a null for one that holds none or is no timestamp", () => {
-		expect(
-			rendered([
-				{ column: post.s, direction: "asc" },
-				{ column: post.n, direction: "desc" },
-				{ column: post.m, direction: "asc" },
-			]),
-		).toBe(
-			`json_array(case when typeof("post"."s") = 'text' then "post"."s" end, null, case when typeof("post"."m") = 'text' then "post"."m" end)`,
+	it("takes a JSON array of each key's class and text where its mode reads another, a null for a key with no set", () => {
+		const texts = rendered([
+			{ column: post.s, direction: "asc" },
+			{ column: post.j, direction: "desc" },
+			{ column: post.n, direction: "asc" },
+		])
+		expect(texts).toMatch(
+			/^json_array\(case when \(typeof\("post"."s"\) in \('null', 'integer', 'real'\)\) then null .*, null, case when \(typeof\("post"."n"\) in \('null', 'integer', 'real'\)\) then null /,
+		)
+		expect(texts).toContain(
+			`when typeof("post"."n") = 'text' then json_array('text', "post"."n") else json_array('blob', hex("post"."n")) end)`,
 		)
 	})
 
-	it("takes an empty text where no key may hold one: no timestamp, or every timestamp bound as read", () => {
-		expect(rendered([{ column: post.n, direction: "asc" }])).toBe("''")
+	it("takes an empty text where no key is held apart: none with a set, or every one bound as read", () => {
+		expect(rendered([{ column: post.j, direction: "asc" }])).toBe("''")
 		expect(rendered([])).toBe("''")
 		expect(rendered([{ column: post.s, direction: "asc" }], () => false)).toBe("''")
 	})
