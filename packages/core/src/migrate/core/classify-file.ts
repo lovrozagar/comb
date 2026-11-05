@@ -10,7 +10,7 @@ import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasHeader, outsideTransaction } from "./atlas-header.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { type TargetKind, targetRefusal } from "./classify-target.ts"
-import { normalizeSql } from "./sql-scan.ts"
+import { hashedSql, normalizeSql } from "./sql-scan.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_TABLE = /* @__PURE__ */ new RegExp(
@@ -47,7 +47,8 @@ function ftsCommandFindings(stmt: string): Finding[] {
 
 /** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
 function preview(stmt: string): string {
-	const text = normalizeSql(stmt)
+	/* as written: a word written against a quoted name stays against it */
+	const text = hashedSql(stmt)
 	return text.slice(0, 80) + (text.length > 80 ? "..." : "")
 }
 

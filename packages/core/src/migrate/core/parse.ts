@@ -8,7 +8,7 @@ import { takenOptions } from "./classify-options.ts"
 import { classificationOf } from "./classify-verdict.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
-import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import { hashedSql, splitSqlStatements } from "./sql-scan.ts"
 import type { ParsedMigration } from "../types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -23,7 +23,7 @@ export { splitSqlStatements }
 
 /** The hash a migration is recorded under: its SQL with comments and layout normalized away */
 export function generateMigrationHash(sql: string): string {
-	return createHash("sha256").update(normalizeSql(sql)).digest("hex")
+	return createHash("sha256").update(hashedSql(sql)).digest("hex")
 }
 
 /**
@@ -45,7 +45,7 @@ export function legacyMigrationHash(sql: string): string {
  * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it (SL5 of r22)
  */
 export function foldedMigrationHash(sql: string): string {
-	return createHash("sha256").update(normalizeSql(sql, true)).digest("hex")
+	return createHash("sha256").update(hashedSql(sql, true)).digest("hex")
 }
 
 /** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */

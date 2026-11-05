@@ -213,22 +213,44 @@ function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] 
 /* the whitespace SQLite's tokenizer skips (sqlite3Isspace): any other space, U+00A0 or U+3000, is part of a name (SL5 of r22) */
 const SQLITE_SPACE = /[\t\n\f\r ]+/g
 
+/* a character SQLite reads into a bare word: a letter, digit, _, $, or any above ASCII */
+const WORD_CHAR = /[\w$\u0080-\uffff]/
+
 /**
  * `sql` with comments dropped and SQLite's whitespace collapsed outside strings and identifiers, those
  * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
- * in data or names never. A migration's hash is taken over this form. `foldAll` is the form comb
- * 0.5.0 to 0.20 hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type
- * b, and a column named a b) normalized alike (SL5 of r22).
+ * in data or names never. A migration's hash is taken over this form, so it stays as recorded: a
+ * word written against a quoted name stays against it. `foldAll` is the form comb 0.5.0 to 0.20
+ * hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type b, and a
+ * column named a b) normalized alike (SL5 of r22).
  */
-function normalizeSql(sql: string, foldAll = false): string {
+function hashedSql(sql: string, foldAll = false): string {
+	return collapsed(sql, foldAll, false)
+}
+
+/**
+ * `sql` as hashedSql collapses it, read as SQLite tokenizes it: a quoted name is a token of its own,
+ * so a word written against one is set off by a space, as `ALTER TABLE "users"DROP COLUMN email`
+ * drops the column `ALTER TABLE "users" DROP COLUMN email` does; `"main".t` and `"a"(` stay as written
+ */
+function normalizeSql(sql: string): string {
+	return collapsed(sql, false, true)
+}
+
+/** `sql` with comments one space and whitespace collapsed outside strings and identifiers (see hashedSql), a quoted name set off from a word when `apart` */
+function collapsed(sql: string, foldAll: boolean, apart: boolean): string {
 	const space = foldAll ? /\s+/g : SQLITE_SPACE
 	let out = ""
+	let quoted = false
 	for (const segment of segments(sql)) {
 		const text =
 			segment.kind === "comment" ? " " : segment.kind === "code" ? segment.text.replace(space, " ") : segment.text
-		out += out.endsWith(" ") && text.startsWith(" ") ? text.slice(1) : text
+		const edge = segment.kind === "identifier" ? out.at(-1) : quoted ? text[0] : undefined
+		const sep = apart && edge !== undefined && WORD_CHAR.test(edge) ? " " : ""
+		out += out.endsWith(" ") && text.startsWith(" ") ? text.slice(1) : sep + text
+		quoted = segment.kind === "identifier"
 	}
 	return foldAll ? out.trim() : out.replace(/^ | $/g, "")
 }
 
-export { normalizeSql, segments, splitSqlStatements, type Segment }
+export { hashedSql, normalizeSql, segments, splitSqlStatements, type Segment, WORD_CHAR }

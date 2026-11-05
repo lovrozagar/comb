@@ -25,6 +25,12 @@ describe("codeOf", () => {
 		expect(codeOf("DO $$ DROP TABLE post", "postgres")).toBe("DO DROP TABLE post")
 	})
 
+	it("sets a quoted name off from a word written against it, as the tokenizer does", () => {
+		expect(codeOf('ALTER TABLE "users"DROP COLUMN email', "sqlite")).toBe('ALTER TABLE "users" DROP COLUMN email')
+		expect(codeOf("ALTER TABLE`users`RENAME TO[people]", "sqlite")).toBe("ALTER TABLE `users` RENAME TO [people]")
+		expect(codeOf('SELECT "main".t, t."x", "a"(1)', "sqlite")).toBe('SELECT "main".t, t."x", "a"(1)')
+	})
+
 	it("leaves a function body out, as a string", () => {
 		expect(codeOf("CREATE FUNCTION f() AS $$ DROP TABLE post $$", "postgres")).toBe("CREATE FUNCTION f() AS")
 	})

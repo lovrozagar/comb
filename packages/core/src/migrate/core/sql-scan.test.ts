@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeSql, segments, splitSqlStatements } from "./sql-scan.ts"
+import { hashedSql, normalizeSql, segments, splitSqlStatements } from "./sql-scan.ts"
 import { CORPUS, corpusFile } from "../__fixtures__/trigger-corpus.ts"
 
 const kinds = (sql: string) => segments(sql).map(({ kind, text }) => `${kind}:${text}`)
@@ -192,5 +192,24 @@ describe("normalizeSql", () => {
 		expect(normalizeSql(` ${ascii.replace(" ", " \t\n\f\r ")} `)).toBe(ascii)
 		expect(normalizeSql(unicode)).toBe(unicode)
 		expect(normalizeSql(unicode)).not.toBe(normalizeSql(ascii))
+	})
+
+	it.each([
+		['ALTER TABLE "users"DROP COLUMN email', 'ALTER TABLE "users" DROP COLUMN email'],
+		["INSERT INTO`t`(a)SELECT`a`FROM`s`", "INSERT INTO `t`(a)SELECT `a` FROM `s`"],
+		["PRAGMA[query_only]= ON", "PRAGMA [query_only]= ON"],
+		['SELECT "main".t, t."x", "a"(1), X\'ab\'', 'SELECT "main".t, t."x", "a"(1), X\'ab\''],
+	])("sets a quoted name off from a word written against it, as SQLite tokenizes %j, and nothing else", (sql, read) => {
+		expect(normalizeSql(sql)).toBe(read)
+	})
+})
+
+describe("hashedSql", () => {
+	it("keeps a word written against a quoted name against it, as the recorded hash reads it", () => {
+		expect(hashedSql('ALTER  TABLE "users"DROP -- c\n COLUMN email')).toBe('ALTER TABLE "users"DROP COLUMN email')
+	})
+
+	it("folds every Unicode space under foldAll, the 0.5.0 to 0.20 form (SL5 of r22)", () => {
+		expect(hashedSql(" CREATE TABLE t (a\u2003b) ", true)).toBe("CREATE TABLE t (a b)")
 	})
 })

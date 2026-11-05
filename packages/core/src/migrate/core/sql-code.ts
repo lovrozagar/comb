@@ -4,7 +4,7 @@
  * an action list splits only at its top-level commas.
  */
 import type { Dialect } from "../types.ts"
-import { segments } from "./sql-scan.ts"
+import { segments, WORD_CHAR } from "./sql-scan.ts"
 
 /** One name part: double-quoted, backtick or bracket quoted, or bare */
 const IDENT: string = `(?:"(?:[^"]|"")*"|\`[^\`]*\`|\\[[^\\]]*\\]|[A-Za-z_\\u0080-\\uffff][\\w$\\u0080-\\uffff]*)`
@@ -109,16 +109,22 @@ function bodyText(text: string): string {
 		: text.slice(tag.length)
 }
 
-/** `stmt`'s segments joined: identifiers kept, a DO body read as code itself, comments one space, strings kept or one space */
+/**
+ * `stmt`'s segments joined: identifiers kept, a DO body read as code itself, comments one space, strings kept or one
+ * space. A quoted name is a token of its own, so a word written against it is set off by a space, as `ALTER TABLE
+ * "users"DROP COLUMN email` drops the column `ALTER TABLE "users" DROP COLUMN email` does; `"main".t` and `"a"(` stay
+ */
 function joined(stmt: string, dialect: Dialect, strings: boolean): string {
-	return segments(stmt, dialect)
-		.map(({ kind, text }) => {
-			if (kind === "code" || kind === "identifier" || (strings && kind === "literal")) return text
-			return kind === "body" ? ` ${codeOf(bodyText(text), dialect)} ` : " "
-		})
-		.join("")
-		.replace(/\s+/g, " ")
-		.trim()
+	let out = ""
+	let quoted = false
+	for (const { kind, text } of segments(stmt, dialect)) {
+		const kept = kind === "code" || kind === "identifier" || (strings && kind === "literal")
+		const piece = kept ? text : kind === "body" ? ` ${codeOf(bodyText(text), dialect)} ` : " "
+		const edge = kind === "identifier" ? out.at(-1) : quoted ? piece[0] : undefined
+		out += (edge !== undefined && WORD_CHAR.test(edge) ? " " : "") + piece
+		quoted = kind === "identifier"
+	}
+	return out.replace(/\s+/g, " ").trim()
 }
 
 /**

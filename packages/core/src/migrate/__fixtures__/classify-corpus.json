@@ -1,0 +1,2690 @@
+{
+	"befores": [
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER, b BLOB)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"t",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"n": "INTEGER",
+								"b": "BLOB"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["t", ["id", "n", "b"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE users (id integer PRIMARY KEY, email text)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"users",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"email": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["users", ["id", "email"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"users",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"email": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["users", ["id", "email"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE post (id int PRIMARY KEY, a int)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"post",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"a": "INTEGER"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": false,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["post", ["id", "a"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": ["post_fts"],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT)",
+				"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id')"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"post",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"title": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["post", ["id", "title"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": ["post_fts"],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT)",
+				"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id')",
+				"CREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"post",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"title": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["post", ["id", "title"]]]
+			},
+			"triggers": [
+				{
+					"events": ["insert"],
+					"ftsSync": true,
+					"name": "post_fts_ai",
+					"table": "post"
+				}
+			]
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE post (id INTEGER PRIMARY KEY, email TEXT)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"post",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"email": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["post", ["id", "email"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE src (id integer PRIMARY KEY, body text)",
+				"CREATE VIRTUAL TABLE notes USING fts5(body)"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"src",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"body": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["src", ["id", "body"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": ["notes"],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE VIRTUAL TABLE notes USING fts5(body, content='')"],
+			"tableInfo": {
+				"$map": []
+			},
+			"tables": {
+				"$map": []
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"statements": [],
+			"indexes": [],
+			"tableInfo": {
+				"$map": []
+			},
+			"tables": {
+				"$map": [["post", ["id", "title", "n"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE t (id INTEGER PRIMARY KEY, code TEXT, note varchar(20))"],
+			"tableInfo": {
+				"$map": [
+					[
+						"t",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"code": "TEXT",
+								"note": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["t", ["id", "code", "note"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE g (id INTEGER PRIMARY KEY, a TEXT, up TEXT GENERATED ALWAYS AS (upper(a)) VIRTUAL)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"g",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"a": "TEXT",
+								"up": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": ["up"],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["g", ["id", "a", "up"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE a (id INTEGER PRIMARY KEY, x TEXT)",
+				"CREATE TABLE logged (id INTEGER PRIMARY KEY)",
+				"CREATE TRIGGER log_ai AFTER INSERT ON logged BEGIN DELETE FROM a; END"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"a",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"x": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					],
+					[
+						"logged",
+						{
+							"affinity": {
+								"id": "INTEGER"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [
+					["a", ["id", "x"]],
+					["logged", ["id"]]
+				]
+			},
+			"triggers": [
+				{
+					"events": ["insert"],
+					"ftsSync": false,
+					"name": "log_ai",
+					"table": "logged"
+				}
+			]
+		},
+		{
+			"droppedTables": [],
+			"externalFts": ["post_fts"],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT)",
+				"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id')",
+				"CREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END",
+				"CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"post",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"title": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["post", ["id", "title"]]]
+			},
+			"triggers": [
+				{
+					"events": ["insert"],
+					"ftsSync": true,
+					"name": "post_ai",
+					"table": "post"
+				},
+				{
+					"events": ["update"],
+					"ftsSync": false,
+					"name": "post_audit",
+					"table": "post"
+				}
+			]
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": ["CREATE TABLE q (id INTEGER PRIMARY KEY, \"from\" TEXT, \"where\" TEXT, \"returning\" TEXT)"],
+			"tableInfo": {
+				"$map": [
+					[
+						"q",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"from": "TEXT",
+								"where": "TEXT",
+								"returning": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": [],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [["q", ["id", "from", "where", "returning"]]]
+			},
+			"triggers": []
+		},
+		{
+			"droppedTables": [],
+			"externalFts": [],
+			"foreignKeys": [],
+			"indexes": [],
+			"statements": [
+				"CREATE TABLE a (id INTEGER PRIMARY KEY ON CONFLICT REPLACE, x TEXT)",
+				"CREATE TABLE b (id INTEGER PRIMARY KEY, v TEXT UNIQUE ON CONFLICT REPLACE)",
+				"CREATE TABLE c (id INTEGER PRIMARY KEY, v TEXT, UNIQUE (v) ON CONFLICT REPLACE)"
+			],
+			"tableInfo": {
+				"$map": [
+					[
+						"a",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"x": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": ["id: REPLACE"],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					],
+					[
+						"b",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"v": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": ["v: REPLACE"],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					],
+					[
+						"c",
+						{
+							"affinity": {
+								"id": "INTEGER",
+								"v": "TEXT"
+							},
+							"autoincrement": false,
+							"conflicts": ["v: REPLACE"],
+							"generatedColumns": [],
+							"primaryKey": ["id"],
+							"rowidAlias": true,
+							"strict": false,
+							"withoutRowid": false
+						}
+					]
+				]
+			},
+			"tables": {
+				"$map": [
+					["a", ["id", "x"]],
+					["b", ["id", "v"]],
+					["c", ["id", "v"]]
+				]
+			},
+			"triggers": []
+		}
+	],
+	"cases": [
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "VACUUM"
+		},
+		{
+			"before": 0,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_t` (`id` integer NULL PRIMARY KEY, `n` integer NULL, `b` blob NULL);\nINSERT INTO `new_t` (`id`, `n`, `b`) SELECT `id`, CAST(`n` AS real) AS `n`, `b` AS `b` FROM `t`;\nDROP TABLE `t`;\nALTER TABLE `new_t` RENAME TO `t`;\nPRAGMA foreign_keys = on;\n"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA journal_mode = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.journal_mode=wal"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"main\" . JOURNAL_MODE = DELETE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA journal_mode"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA journal_mode = WAL;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "SELECT journal_mode FROM pragma_journal_mode"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE journal_mode_log (id INTEGER PRIMARY KEY)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA locking_mode = EXCLUSIVE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA locking_mode=normal"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.locking_mode = exclusive"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"locking_mode\" = EXCLUSIVE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA locking_mode(EXCLUSIVE)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "-- comb:allow-unsafe: bulk load\nPRAGMA locking_mode = EXCLUSIVE;\nCREATE TABLE big (x INTEGER);"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA locking_mode = EXCLUSIVE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA locking_mode = EXCLUSIVE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA locking_mode=normal"
+		},
+		{
+			"before": 0,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_t` (`id` integer NULL PRIMARY KEY, `n` integer NULL, `b` blob NULL);\nINSERT INTO `new_t` (`id`, `n`, `b`) SELECT `id`, CAST(`n` AS integer) AS `n`, `b` AS `b` FROM `t`;\nDROP TABLE `t`;\nALTER TABLE `new_t` RENAME TO `t`;\nPRAGMA foreign_keys = on;\n"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA locking_mode=normal"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA main.locking_mode = exclusive"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA main.locking_mode = exclusive"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA \"locking_mode\" = EXCLUSIVE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA \"locking_mode\" = EXCLUSIVE"
+		},
+		{
+			"before": 1,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_users (id integer PRIMARY KEY, email text);\nINSERT INTO new_users (id, email) SELECT id, email FROM users;\nUPDATE new_users SET email = NULL;\nDROP TABLE users;\nALTER TABLE new_users RENAME TO users;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA locking_mode(EXCLUSIVE)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA locking_mode(EXCLUSIVE)"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TRIGGER no_signups BEFORE INSERT ON users BEGIN SELECT RAISE(IGNORE); END;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "-- comb:allow-unsafe: bulk load\nPRAGMA locking_mode = EXCLUSIVE;\nCREATE TABLE big (x INTEGER);"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "-- comb:allow-unsafe: bulk load\nPRAGMA locking_mode = EXCLUSIVE;\nCREATE TABLE big (x INTEGER);"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA locking_mode"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA cache_size"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"journal_mode\" = WAL"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TEMP TABLE users AS SELECT * FROM main.users WHERE coalesce(email, '') NOT LIKE '%@%';\nDROP TABLE users;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA \"journal_mode\" = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA [journal_mode] = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA [journal_mode] = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA `journal_mode` = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA `journal_mode` = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.\"journal_mode\" = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA main.\"journal_mode\" = WAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA journal_mode(WAL)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA journal_mode(WAL)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA synchronous = OFF"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA synchronous = OFF"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"synchronous\" = NORMAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA \"synchronous\" = NORMAL"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.synchronous(0)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA main.synchronous(0)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA [query_only] = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA [query_only] = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = '1'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = '1'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = 01"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = 01"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = \"on\""
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = \"on\""
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = 'on'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = 'on'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only(yes)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only(yes)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = 0"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = 0"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only = 'off'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA query_only = 'off'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA wal_checkpoint"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA wal_checkpoint"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA wal_checkpoint(TRUNCATE)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA wal_checkpoint(TRUNCATE)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA synchronous = OFF;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA synchronous = OFF;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA synchronous"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA query_only"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"temp_store\" = MEMORY"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA hard_heap_limit = 50000000"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA hard_heap_limit = 50000000"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA temp_store_directory = '/var/tmp'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA temp_store_directory = '/var/tmp'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA soft_heap_limit = 50000000"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA soft_heap_limit = 50000000"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"soft_heap_limit\"(1)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA \"soft_heap_limit\"(1)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA main.hard_heap_limit = 0;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA main.hard_heap_limit = 0;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA hard_heap_limit"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA soft_heap_limit"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA temp_store_directory"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys = on"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"defer_foreign_keys\" = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.[defer_foreign_keys] = true"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys = 'on'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 'off'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 'false'"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TEMP FOO x;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 'nope'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = full"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 256"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 2"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = +1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = 'yes'"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = TRUE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA temp.defer_foreign_keys = on"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys = 2"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TRIGGER t AFTER INSERT ON users BEGIN DELETE FROM users; END;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA temp_store = MEMORY"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA temp_store = MEMORY"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA \"cache_size\" = 10"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA \"cache_size\" = 10"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA main.secure_delete = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA main.secure_delete = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA page_size = 8192"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA page_size = 8192"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA optimize(65538)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA optimize(65538)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA writable_schema = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA writable_schema = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA defer_foreign_keys = on"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TEMP TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA table_info(\"post\")"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ATTACH DATABASE 'x' AS y"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER t;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA table_info(\"post\")"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post (body) VALUES ('x');\nCOMMIT;\nBEGIN;\nCREATE UNIQUE INDEX u ON post (body);"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA writable_schema = ON;"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA cache_size = 1000;"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA recursive_triggers = on;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE z (id INTEGER PRIMARY KEY);\nCOMMIT TRANSACTION;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "END;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nBEGIN;"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DETACH DATABASE y"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys = on"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "BEGIN IMMEDIATE;\nCREATE TABLE z (id INTEGER PRIMARY KEY);"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA cache_size = 1000"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "REPLACE INTO post (id) VALUES (1)"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE VIRTUAL TABLE f USING fts5(a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK;"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TRIGGER t AFTER INSERT ON post BEGIN SELECT 1; END"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK TRANSACTION;"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR IGNORE INTO post (id) VALUES (1)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "START TRANSACTION;\nCREATE TABLE z (id INTEGER PRIMARY KEY);"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ANALYZE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "-- comb:allow-unsafe: wrapped by hand\nBEGIN TRANSACTION;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nCOMMIT;"
+		},
+		{
+			"before": 3,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "REINDEX"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "SAVEPOINT s;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK TRANSACTION TO SAVEPOINT s;\nRELEASE s;"
+		},
+		{
+			"before": 4,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS \"post_fts_ad\";\nCREATE TRIGGER IF NOT EXISTS post_fts_ad AFTER DELETE ON post BEGIN\n\tINSERT INTO post_fts(post_fts, rowid, title) VALUES ('delete', old.id, old.title);\nEND;"
+		},
+		{
+			"before": 5,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS post_fts_ai;\nDROP TABLE IF EXISTS post_fts;\nCREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5(title, content='post', content_rowid='id');\nINSERT INTO post_fts(post_fts) VALUES ('rebuild');"
+		},
+		{
+			"before": 4,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS \"t\";\nCREATE TRIGGER IF NOT EXISTS t AFTER DELETE ON post BEGIN\n\tINSERT INTO post(id) VALUES (old.id);\nEND;"
+		},
+		{
+			"before": 4,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS \"t\";\nCREATE TRIGGER IF NOT EXISTS t AFTER DELETE ON post BEGIN\n\tINSERT INTO post_fts(post_fts) VALUES ('delete-all');\nEND;"
+		},
+		{
+			"before": 4,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS \"t\";\nCREATE TRIGGER IF NOT EXISTS t AFTER DELETE ON post BEGIN\n\tDELETE FROM post;\nEND;"
+		},
+		{
+			"before": 6,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE VIRTUAL TABLE note_fts USING fts5(title, content='post', content_rowid='id');\nDROP TRIGGER IF EXISTS \"note_fts_ad\";\nCREATE TRIGGER IF NOT EXISTS note_fts_ad AFTER DELETE ON post BEGIN\n\tINSERT INTO note_fts(note_fts, rowid, title) VALUES ('delete', old.id, old.title);\nEND;"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE INDEX idx_users_email ON users (email);"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE VIEW emails AS SELECT email FROM users;"
+		},
+		{
+			"before": 5,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS post_fts_ai;\nDROP TABLE IF EXISTS post_fts;\nCREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5(title, content_rowid='id');\nINSERT INTO post_fts(post_fts) VALUES ('rebuild');"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE users ADD COLUMN bio TEXT;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS post_fts_ai;\nDROP TABLE IF EXISTS post_fts;\nCREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5(title, content='post', content_rowid='id');\n"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free';"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE tiers (id TEXT);\nINSERT INTO tiers VALUES ('free');"
+		},
+		{
+			"before": 0,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_t` (`id` integer NULL PRIMARY KEY, `n` integer NULL, `b` blob NULL);\nINSERT INTO `new_t` (`id`, `n`, `b`) SELECT `id`, `n` AS `n`, `b` AS `b` FROM `t`;\nDROP TABLE `t`;\nALTER TABLE `new_t` RENAME TO `t`;\nPRAGMA foreign_keys = on;\n"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE IF EXISTS post_fts, post;\nCREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5(title, content='post', content_rowid='id');\nINSERT INTO post_fts(post_fts) VALUES ('rebuild');"
+		},
+		{
+			"options": {},
+			"sql": "CREATE TABLE a (id int);"
+		},
+		{
+			"before": 2,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA writable_schema = ON;\nPRAGMA writable_schema = OFF;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO \"post_fts\" ( \"post_fts\", rowid, title ) VALUES ( 'delete', 1, 'x' );"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) SELECT 'delete-all';"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) VALUES (lower('DELETE-ALL'));"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) VALUES ('rebuild'), ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR IGNORE INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR ABORT INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR ROLLBACK INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR FAIL INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR REPLACE INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "REPLACE INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "WITH x AS (SELECT 1) INSERT INTO post_fts(post_fts) VALUES ('delete-all');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "WITH x AS (SELECT 'delete-all' AS c) INSERT OR IGNORE INTO main.post_fts(post_fts) SELECT c FROM x;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) VALUES ('rebuild');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts, rank) VALUES ('merge', 500);"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts, rank) VALUES ('rank', 'bm25(10.0, 5.0)');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(post_fts) VALUES('optimize');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO post_fts(title) VALUES ('x');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR IGNORE INTO post_fts(post_fts) VALUES ('rebuild');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "WITH x AS (SELECT 1) INSERT INTO post_fts(post_fts) VALUES ('optimize');"
+		},
+		{
+			"before": 7,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE notes;\nCREATE VIRTUAL TABLE notes USING fts5(body, content='src', content_rowid='id');\nINSERT INTO notes(notes) VALUES ('rebuild');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE notes;\nCREATE VIRTUAL TABLE notes USING fts5(body, content='src', content_rowid='id');\nINSERT INTO notes(notes) VALUES ('rebuild');"
+		},
+		{
+			"before": 8,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE notes;\nCREATE VIRTUAL TABLE notes USING fts5(body, content='src', content_rowid='id');\nINSERT INTO notes(notes) VALUES ('rebuild');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA writable_schema = 1;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA ignore_check_constraints = on;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA defer_foreign_keys = on;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA ignore_check_constraints = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA recursive_triggers = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA legacy_alter_table = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA case_sensitive_like = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA writable_schema = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA optimize"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA main.cache_size = 10"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "ANALYZE"
+		},
+		{
+			"options": {},
+			"sql": "DROP TABLE post;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "ANALYZE t"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "ATTACH DATABASE 'x.db' AS x"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE TEMP TABLE tt (a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE TEMPORARY VIEW tv AS SELECT 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE TABLE temp.tt (a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE VIRTUAL TABLE TEMP.f USING fts5 (body)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA \"user_version\" = 2"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA [table_info](t)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA nosuch"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "SELECT load_extension('x')"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "-- comb:allow-unsafe: approved\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nANALYZE;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "PRAGMA ignore_check_constraints = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "PRAGMA recursive_triggers = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "PRAGMA legacy_alter_table = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "PRAGMA case_sensitive_like = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "PRAGMA writable_schema = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "ANALYZE"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "ANALYZE t"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "ATTACH DATABASE 'x.db' AS x"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "DETACH DATABASE x"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "CREATE TEMP TABLE tt (a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local"
+			},
+			"sql": "SELECT load_extension('x')"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA ignore_check_constraints = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "d1"
+			},
+			"sql": "PRAGMA legacy_alter_table = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA foreign_keys = ON"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA defer_foreign_keys = on"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA table_info(\"t\")"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA main.index_list(t)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA user_version = 3"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA page_size"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA integrity_check"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "REINDEX t"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "SAVEPOINT s"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE VIRTUAL TABLE f USING fts5 (body)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE TABLE temporary_notes (a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE TABLE \"temp\".tt (a)"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "CREATE VIEW temp.tv AS SELECT 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA USER_VERSION = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "PRAGMA \"main\".foreign_keys = 1"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "SELECT 'load_extension(x)'"
+		},
+		{
+			"options": {},
+			"sql": "SELECT E'\\''; DROP TABLE post; -- ';"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "SELECT E'\\''; DROP TABLE post; -- ';"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "sqld"
+			},
+			"sql": "DETACH DATABASE x"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE INDEX i ON post (a)"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL, `n` integer NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\nPRAGMA foreign_keys = on;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL, `n` integer NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `n`) SELECT `id`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\nPRAGMA foreign_keys = on;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "PRAGMA foreign_keys = off;\nCREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL, `n` integer NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\nPRAGMA foreign_keys = on;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE `post` DROP COLUMN `title`"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a RENAME TO b"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE \"post\""
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, IFNULL(`title`, '') AS `title`, IFNULL(`n`, (unixepoch() * 1000)) AS `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, CAST(`title` AS text) AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT id, `title`, \"n\" FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (rowid, `id`, `title`, `n`) SELECT rowid, `id`, `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` WHERE `n` > 1;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` JOIN `u` ON 1;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` LEFT JOIN `u` ON 1;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` LIMIT 1;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` GROUP BY `id`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` ORDER BY `id`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post`, `u`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post` UNION SELECT `id`, `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, NULL, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, 'x' AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `old` AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, IFNULL(`title`, 'zz') AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, IFNULL(`n`, '') AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title` AS `n`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, CAST(`n` AS text) AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, IFNULL(`n`, 0) AS `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TABLE `post`;\nCREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title`, `n` FROM `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, (SELECT 1) AS `title`, `n` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"before": 9,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` text NULL, `title` text NOT NULL DEFAULT '', `n` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (`id`));\nINSERT INTO `new_post` (`id`, `title`, `n`) SELECT `id`, `title` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS wipe;\nCREATE TRIGGER wipe AFTER INSERT ON users BEGIN DELETE FROM users; END;\nINSERT INTO users (email) VALUES ('x');"
+		},
+		{
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DROP TRIGGER IF EXISTS wipe;\nCREATE TRIGGER wipe AFTER INSERT ON users BEGIN UPDATE users SET email = NULL; END;\nINSERT INTO users (email) VALUES ('x');"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code INTEGER, note text);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code TEXT UNIQUE ON CONFLICT IGNORE, note text);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT IGNORE, note text);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT REPLACE DEFAULT 'gone', note text);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code TEXT, note text, UNIQUE (code, note) ON CONFLICT REPLACE);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INTEGER PRIMARY KEY, code TEXT, note TEXT) STRICT;\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 10,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_t (id INT PRIMARY KEY, code text NOT NULL DEFAULT '', note TEXT);\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;"
+		},
+		{
+			"before": 11,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_g (id INTEGER PRIMARY KEY, a TEXT, up TEXT GENERATED ALWAYS AS (upper(a)) VIRTUAL);\nINSERT INTO new_g (id, a) SELECT id, a FROM g;\nDROP TABLE g;\nALTER TABLE new_g RENAME TO g;"
+		},
+		{
+			"before": 11,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE new_g (id INTEGER PRIMARY KEY, a TEXT, up TEXT);\nINSERT INTO new_g (id, a) SELECT id, a FROM g;\nDROP TABLE g;\nALTER TABLE new_g RENAME TO g;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DELETE FROM a;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "DELETE FROM a WHERE id = 1;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "UPDATE a SET x = 'y';"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "UPDATE \"a\"SET x = 'y';"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO a (id, x) VALUES (1, 'y') ON CONFLICT (id) DO UPDATE SET x = excluded.x;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "WITH c AS (SELECT 1) DELETE FROM a;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO logged (id) VALUES (1);"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "UPDATE OR REPLACE a SET x = 'y';"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "REPLACE INTO a (id, x) VALUES (1, 'y');"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT OR REPLACE INTO a (id, x) VALUES (1, 'y');"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN slot INTEGER;\nUPDATE OR REPLACE a SET slot = 1;"
+		},
+		{
+			"before": 13,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` integer NULL PRIMARY KEY, `title` text NULL);\nINSERT INTO `new_post` (`id`, `title`) SELECT `id`, `title` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\nCREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO a (id, x) VALUES (1, 'y');"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO a (id) VALUES (1) ON CONFLICT DO NOTHING;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\nUPDATE t SET v = 'y';\nDELETE FROM t;"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN plan TEXT;\nUPDATE a SET plan = 'free';"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN plan TEXT;\nUPDATE a SET plan = 'free';\nUPDATE a SET plan = 'pro';"
+		},
+		{
+			"before": 14,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', \"from\" = 'y';"
+		},
+		{
+			"before": 14,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', [where] = 'y';"
+		},
+		{
+			"before": 14,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', `returning` = 'y';"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN plan TEXT;\nALTER TABLE a ADD COLUMN tier TEXT;\nUPDATE a SET (plan, tier) = ('free', 'low');"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN plan TEXT;\nALTER TABLE a ADD COLUMN tier TEXT;\nUPDATE a SET (plan, x) = ('free', 'y');"
+		},
+		{
+			"before": 12,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "ALTER TABLE a ADD COLUMN plan TEXT;\nUPDATE a SET plan = 'free', 1 = 2;"
+		},
+		{
+			"before": 15,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO a VALUES (1, 'x');"
+		},
+		{
+			"before": 15,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO b (v) VALUES ('x');"
+		},
+		{
+			"before": 15,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "INSERT INTO c (v) VALUES ('x');"
+		},
+		{
+			"before": 15,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE d (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);\nINSERT INTO d VALUES (1);"
+		},
+		{
+			"options": {
+				"d1": true
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"options": {
+				"d1": true,
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"options": {
+				"d1": false
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"target": "d1",
+				"verbose": true
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"options": {
+				"kind": "d1"
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"before": 13,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` integer NULL PRIMARY KEY, `title` text NULL);\nINSERT INTO `new_post` (`id`, `title`) SELECT `id`, `title` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\n"
+		},
+		{
+			"before": 13,
+			"options": {
+				"dialect": "sqlite"
+			},
+			"sql": "CREATE TABLE `new_post` (`id` integer NULL PRIMARY KEY, `title` text NULL);\nINSERT INTO `new_post` (`id`, `title`) SELECT `id`, `title` FROM `post`;\nDROP TABLE `post`;\nALTER TABLE `new_post` RENAME TO `post`;\nCREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;\nCREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;"
+		},
+		{
+			"options": {
+				"dialect": "sqlite",
+				"kind": "local",
+				"schema": "public"
+			},
+			"sql": "CREATE TABLE t (a);"
+		},
+		{
+			"options": {},
+			"sql": "CREATE TABLE t (a);"
+		}
+	]
+}

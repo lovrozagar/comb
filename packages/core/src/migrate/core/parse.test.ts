@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { describe, expect, it } from "vitest"
 import {
 	classifyMigration,
@@ -67,6 +68,12 @@ describe("generateMigrationHash", () => {
 		expect(generateMigrationHash("CREATE TABLE a (id TEXT);")).not.toBe(
 			generateMigrationHash("CREATE TABLE b (id TEXT);"),
 		)
+	})
+
+	it("hashes a word written against a quoted name as written, so a recorded file keeps its hash", () => {
+		const glued = 'ALTER TABLE "users"DROP COLUMN email;'
+		expect(generateMigrationHash(glued)).toBe(createHash("sha256").update(glued).digest("hex"))
+		expect(generateMigrationHash(glued)).not.toBe(generateMigrationHash('ALTER TABLE "users" DROP COLUMN email;'))
 	})
 })
 
