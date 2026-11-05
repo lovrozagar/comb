@@ -84,6 +84,8 @@ Postgres runs on a real server rather than an emulator because the error handler
 
 `bun run test:coverage` runs every vitest project and reports one table over `src/**` and `lint/**`. Every file must reach 100% lines, branches, functions and statements on its own (`perFile` in `vitest.config.ts`); the patterns below are the only exemptions. No `v8`, `c8` or `istanbul` ignore comment is allowed (`comb/no-v8-ignore`).
 
+CI runs it in three shards (`--shard=i/3 --reporter=blob`) with the thresholds off, because a shard sees only a third of the tests. Its `coverage` job then runs `bun run test:coverage --merge-reports` over all three blobs. vitest merges the coverage before it checks the thresholds, so a file whose tests fall in different shards is held to 100% over all of them, as one unsharded run holds it. A red shard means a test failed. A red `coverage` job means a file is under 100%.
+
 `migrate/drivers/bun-sqlite.ts` imports `bun:sqlite`, so `bun run test:bun` measures it: `packages/core/bunfig.toml` turns coverage on for `tests/bun`, leaves out every other file those suites load (vitest measures them), and fails below 100%.
 
 Left out of the report, and why:

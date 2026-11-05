@@ -61,13 +61,18 @@ jobs:
           (cd "$packed" && npm pkg set version="$(npm pkg get version | tr -d '"')-dry-run")
           npm publish "$packed" --dry-run --ignore-scripts --tag dry-run
 
+  # test:coverage runs in three shards and the coverage job below merges them: one job took 20.2 minutes of
+  # test:coverage in run 42044117817, and the same files took 1.23x (run 42056901545) and 1.53x (run 42076507764) as
+  # long on slower runners, so a single job's timeout was a bet on the runner. A shard holds a third of the files, so
+  # 20 minutes is twice the slowest runner's share and still catches a hang; test:bun has its own job below
   test:
-    name: test
+    name: test (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    # test:coverage ran 736 files in 20.2 minutes in run 42044117817 (the job 20m50s to its end), and run 42056901545's
-    # runner was 1.23x slower over the files both ran, so 23 minutes cancelled it with no test failed; 31 minutes is
-    # about 1.5x the 20.2, so the limit still catches a hang; test:bun has its own job below
-    timeout-minutes: 31
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:17
@@ -131,7 +136,40 @@ jobs:
           curl -sSfL -o "$HOME/.cache/comb-test/atlas/1.2.0/atlas" https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.0
           echo "c12b889e3349f0e5610aec32fe327e5a6911a0e472754a0c381c30c7c0630e88  $HOME/.cache/comb-test/atlas/1.2.0/atlas" | sha256sum -c -
           chmod +x "$HOME/.cache/comb-test/atlas/1.2.0/atlas"
-      - run: bun run test:coverage
+      # a shard sees only its own tests, so the thresholds are off here; the coverage job holds every file to the
+      # config's perFile 100% over all three shards' blobs
+      - run: bun run test:coverage --shard=${{ matrix.shard }}/3 --reporter=default --reporter=blob --coverage.thresholds.perFile=false --coverage.thresholds.lines=0 --coverage.thresholds.branches=0 --coverage.thresholds.functions=0 --coverage.thresholds.statements=0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-blob-${{ matrix.shard }}
+          path: packages/core/.vitest-reports/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # the gate on coverage: vitest merges the shards' coverage before it checks vitest.config.ts's thresholds, so a file
+  # whose tests fall in different shards is held to 100% over all of them, as one unsharded run held it
+  coverage:
+    name: coverage
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: coverage-blob-*
+          path: packages/core/.vitest-reports/
+          merge-multiple: true
+      - run: bun run test:coverage --merge-reports
 
   test-bun:
     name: test (bun)

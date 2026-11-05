@@ -135,8 +135,17 @@ function ciGates(): string[] {
 	return pkg.standards.ci
 }
 
-/** The script a `bun run` step runs, through comb's package filter or the root */
-const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)$/.exec(command)?.[1]
+/** The script a `bun run` step runs, through comb's package filter or the root, whatever arguments it passes on */
+const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)(?: .*)?$/.exec(command)?.[1]
+
+/* the coverage job merges the shards' blobs and runs no test of its own */
+const MERGE = "bun run test:coverage --merge-reports"
+
+/** Whether a job runs a suite: a `bun run test…` step other than the coverage merge */
+const runsSuites = (lines: string) =>
+	ciSteps(lines).some(
+		({ command }) => command !== undefined && command !== MERGE && scriptOf(command)?.startsWith("test") === true,
+	)
 
 /* the CI steps no local gate stands for: installs, the commit-message lint lefthook's commit-msg
    hook runs, the release dry run, the Atlas binaries the test jobs fetch, and the Postgres service's
@@ -214,7 +223,49 @@ describe("ci.yml runs the gates standards lists for comb", () => {
 			),
 		).toEqual([{ command: "bun run --filter @lovrozagar/comb test:e2e" }, { name: "x" }])
 		expect(scriptOf("bun run --filter @lovrozagar/comb test:e2e")).toBe("test:e2e")
+		expect(scriptOf("bun run test:coverage --shard=${{ matrix.shard }}/3 --reporter=blob")).toBe("test:coverage")
 		expect(scriptOf("bun install --frozen-lockfile")).toBeUndefined()
+	})
+})
+
+/*
+ * One test:coverage job ran 20.2 minutes on one runner and 1.53x that on another (runs 42044117817, 42076507764), so its
+ * timeout cancelled a run with no test failed. It runs as shards with the thresholds off, each shard's blob uploaded, and
+ * one coverage job merges every blob and holds the config's perFile thresholds over the whole (vitest merges the
+ * coverage before it checks them, and on a 52-file slice the merge read every file as one unsharded run did).
+ */
+describe("ci.yml's sharded coverage", () => {
+	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
+	const job = (name: string) => (jobs.find((each) => each.name === name) as { lines: string }).lines
+
+	it("runs test:coverage in as many shards as the matrix lists, each with the thresholds off and its blob uploaded", () => {
+		const lines = job("test")
+		const shards = /^ {8}shard: \[([\d, ]+)\]$/m.exec(lines)?.[1]?.split(", ").map(Number)
+		expect(shards).toEqual(Array.from({ length: shards?.length ?? 0 }, (_, index) => index + 1))
+		const runs = ciSteps(lines).flatMap(({ command }) =>
+			command?.startsWith("bun run test:coverage") ? [command] : [],
+		)
+		expect(runs).toHaveLength(1)
+		const run = runs[0] as string
+		expect(run).toContain(`--shard=\${{ matrix.shard }}/${shards?.length}`)
+		expect(run).toContain("--reporter=blob")
+		for (const metric of ["lines", "branches", "functions", "statements"])
+			expect(run).toContain(`--coverage.thresholds.${metric}=0`)
+		expect(run).toContain("--coverage.thresholds.perFile=false")
+		expect(lines).toContain("path: packages/core/.vitest-reports/")
+		expect(lines).toContain("include-hidden-files: true")
+		expect(lines).toContain("if-no-files-found: error")
+	})
+
+	it("merges every shard's blob in one job after them, under the config's own thresholds", () => {
+		const lines = job("coverage")
+		expect(lines).toMatch(/^ {4}needs: \[test\]$/m)
+		expect(lines).toContain("pattern: coverage-blob-*")
+		expect(lines).toContain("merge-multiple: true")
+		expect(lines).toContain("path: packages/core/.vitest-reports/")
+		expect(ciSteps(lines).flatMap(({ command }) => (command === undefined ? [] : [command]))).toContain(MERGE)
+		expect(lines).not.toContain("--coverage.thresholds")
+		expect(runsSuites(lines)).toBe(false)
 	})
 })
 
@@ -228,7 +279,7 @@ describe("ci.yml's suite jobs", () => {
 			"COMB_TEST_PG_URL: postgres://comb:comb@localhost:5432/comb?sslmode=disable",
 		]
 		const suites = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8")).filter(
-			(job) => job.runsOn === "ubuntu-latest" && scriptsOf(job.lines).some((script) => script.startsWith("test")),
+			(job) => job.runsOn === "ubuntu-latest" && runsSuites(job.lines),
 		)
 		expect(suites.map((job) => job.name)).toContain("consumers")
 		expect(
@@ -245,7 +296,7 @@ describe("ci.yml's sqld", () => {
 		"~",
 	)
 	it("is fetched by tests/support/sqld.ts's version and archive sha256, cached by version, where test:coverage runs", () => {
-		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage"))
+		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage") && runsSuites(job.lines))
 		expect(coverage.map((job) => job.name)).toEqual(["test"])
 		const lines = (coverage[0] as { lines: string }).lines
 		const step = lines.slice(lines.indexOf(`- name: install sqld ${SQLD_VERSION}`))
@@ -263,7 +314,8 @@ describe("ci.yml's Atlas floor", () => {
 	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
 	const file = ATLAS_FLOOR_PATH.replace(homedir(), "$HOME")
 	it("is fetched by tests/support/atlas-floor.ts's version and sha256 to its path, before test:coverage runs", () => {
-		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage"))
+		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage") && runsSuites(job.lines))
+		expect(coverage.map((job) => job.name)).toEqual(["test"])
 		const lines = (coverage[0] as { lines: string }).lines
 		const name = `- name: install atlas v${ATLAS_FLOOR_VERSION}`
 		expect(lines).toContain(name)

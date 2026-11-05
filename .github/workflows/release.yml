@@ -29,7 +29,8 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    # a run still going at the tag waits here; ci.yml's slowest job is held to 30 minutes, so 60 covers one that started late
+    # a run still going at the tag waits here; ci.yml's longest path is 30 minutes (consumers, or a 20-minute test shard
+    # then the 10-minute coverage merge), so 60 covers one that started late
     timeout-minutes: 60
     permissions:
       actions: read
