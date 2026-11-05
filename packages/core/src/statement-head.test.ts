@@ -85,6 +85,46 @@ describe("statementTable on a schema-qualified table", () => {
 	})
 })
 
+/* AB3-8 of area B: a write's table as the server resolves it, past what the dialect allows after its name */
+describe("statementTable reads the table the dialect writes", () => {
+	it.each([
+		["DELETE FROM org;", undefined, "org"],
+		["delete from app.org;", "app", "org"],
+		['update "org"; ', undefined, "org"],
+	])("reads %s on both dialects as %s.%s, past its ;", (query, schema, table) => {
+		expect(statementTable(query, "postgres")).toEqual({ schema, table })
+		expect(statementTable(query, "sqlite")).toEqual({ schema, table })
+	})
+
+	it.each([
+		["DELETE FROM ONLY (org) WHERE id = 1", undefined, "org"],
+		["delete from only(org)", undefined, "org"],
+		["UPDATE ONLY ( App . Org ) SET a = 1", "app", "org"],
+		['update only ("App"."Org") set a = 1', "App", "Org"],
+		["DELETE FROM org* WHERE id = 1", undefined, "org"],
+		["delete from app.org * where id = 1", "app", "org"],
+		["UPDATE org* SET a = 1", undefined, "org"],
+		["DELETE FROM Org WHERE id = 1", undefined, "org"],
+		["DELETE FROM App.Org WHERE id = 1", "app", "org"],
+		['DELETE FROM "App".Org', "App", "org"],
+		["INSERT INTO ORG (id) VALUES (1)", undefined, "org"],
+		["delete from OrgÉ", undefined, "orgÉ"],
+	])("reads %s on Postgres as %s.%s", (query, schema, table) => {
+		expect(statementTable(query, "postgres")).toEqual({ schema, table })
+	})
+
+	it.each([
+		["DELETE FROM 'org' WHERE id = 1", undefined, "org"],
+		["delete from main.'org'", "main", "org"],
+		["insert into 'o''rg' (id) values (1)", undefined, "o'rg"],
+		["update or abort 'org' set id = 3", undefined, "org"],
+		["replace into 'org' values (4)", undefined, "org"],
+		["delete from Org", undefined, "Org"],
+	])("reads %s on SQLite as %s.%s", (query, schema, table) => {
+		expect(statementTable(query, "sqlite")).toEqual({ schema, table })
+	})
+})
+
 /* U6 of the 0.12 round: which columns an UPDATE sets, read up to its WHERE, FROM or RETURNING */
 describe("updatedColumns", () => {
 	it.each([

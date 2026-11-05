@@ -192,6 +192,25 @@ describe("pgErrorHandler: which side of a foreign key failed, and long table nam
 	})
 })
 
+describe("pgErrorHandler: the parent a referenced delete names", () => {
+	/* AB3-8 of area B: the parent is the table Postgres resolves, past a ; and folded as Postgres folds a bare name */
+	it.each([
+		["DELETE FROM org;", "org"],
+		["DELETE FROM Org WHERE id = $1", "org"],
+		["DELETE FROM App.Org WHERE id = $1", "app.org"],
+		["DELETE FROM ONLY (org) WHERE id = $1", "org"],
+		["DELETE FROM org* WHERE id = $1", "org"],
+	])("names the parent %s deletes as %s", (query, table) => {
+		const driver = nodePg({ code: "23503", detail: 'Key (id)=(1) is still referenced from table "c".', table: "c" })
+		const error = Object.assign(new Error(`Failed query: ${query}`, { cause: driver }), {
+			name: "DrizzleQueryError",
+			query,
+		})
+		const maps: ConstraintMap[] = [{ "app.org": {}, c: {}, org: {} }]
+		expect(thrown(error, maps)).toMatchObject({ errorKey: "foreign_key_violation", table })
+	})
+})
+
 describe("pgErrorHandler: a value the column cannot hold (Q-D11)", () => {
 	it.each(["22003", "22P02", "22007", "22008"])("maps %s to a 400 that names the column, never the value", (code) => {
 		expect(thrown(nodePg({ code, column: "n", message: 'value "99999999999" is out of range' }))).toMatchObject({
