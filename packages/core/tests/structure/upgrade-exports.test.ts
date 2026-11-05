@@ -51,11 +51,37 @@ const API = join(import.meta.dirname, "__snapshots__/api")
 const subpathOf = (file: string): string =>
 	file === "index.d.ts.txt" ? "." : `./${file.replace(/\.d\.ts\.txt$/, "").replaceAll("__", "/")}`
 
-/** Each callable a snapshot declares, a function, a const or a type of function type, and whether it returns a promise */
+/** `type` without its parentheses, and without `| undefined` when that leaves one type */
+function bare(type: ts.TypeNode | undefined): ts.TypeNode | undefined {
+	if (type !== undefined && ts.isParenthesizedTypeNode(type)) return bare(type.type)
+	if (type === undefined || !ts.isUnionTypeNode(type)) return type
+	const defined = type.types.filter((each) => each.kind !== ts.SyntaxKind.UndefinedKeyword)
+	return defined.length === 1 ? bare(defined[0]) : type
+}
+
+/** The members of an interface or an object type alias, by its name */
+function membersOf(node: ts.Node): [string, ts.NodeArray<ts.TypeElement>] | undefined {
+	if (ts.isInterfaceDeclaration(node)) return [node.name.text, node.members]
+	if (ts.isTypeAliasDeclaration(node) && ts.isTypeLiteralNode(node.type)) return [node.name.text, node.type.members]
+	return undefined
+}
+
+/**
+ * Each callable a snapshot declares, and whether it returns a promise: a function, a const or a type
+ * of function type, and, as `Type.member` (D6-4 of the area D round-six review), a method or a
+ * function-typed member of an interface or object type, a member typed by a callable alias among them
+ */
 function callablesOf(text: string): Map<string, boolean> {
 	const found = new Map<string, boolean>()
-	const note = (name: string, type: ts.TypeNode | undefined) =>
-		found.set(name, found.get(name) === true || /^Promise\s*</.test(type?.getText() ?? ""))
+	const mark = (name: string, promise: boolean) => found.set(name, found.get(name) === true || promise)
+	const note = (name: string, type: ts.TypeNode | undefined) => mark(name, /^Promise\s*</.test(type?.getText() ?? ""))
+	const noteMember = (name: string, member: ts.TypeElement): void => {
+		if (ts.isMethodSignature(member)) return void note(name, member.type)
+		const type = ts.isPropertySignature(member) ? bare(member.type) : undefined
+		if (type !== undefined && ts.isFunctionTypeNode(type)) note(name, type.type)
+		const alias = type !== undefined && ts.isTypeReferenceNode(type) ? found.get(type.typeName.getText()) : undefined
+		if (alias !== undefined) mark(name, alias)
+	}
 	const visit = (node: ts.Node): void => {
 		if (ts.isFunctionDeclaration(node) && node.name !== undefined) note(node.name.text, node.type)
 		if ((ts.isVariableDeclaration(node) || ts.isTypeAliasDeclaration(node)) && ts.isIdentifier(node.name)) {
@@ -63,7 +89,16 @@ function callablesOf(text: string): Map<string, boolean> {
 		}
 		ts.forEachChild(node, visit)
 	}
-	visit(ts.createSourceFile("snapshot.d.ts", text, ts.ScriptTarget.Latest, true))
+	/* the members after every alias, which a snapshot may declare after the type that names it */
+	const visitMembers = (node: ts.Node): void => {
+		const [type, members] = membersOf(node) ?? ["", []]
+		for (const member of members)
+			if (member.name !== undefined && ts.isIdentifier(member.name)) noteMember(`${type}.${member.name.text}`, member)
+		ts.forEachChild(node, visitMembers)
+	}
+	const source = ts.createSourceFile("snapshot.d.ts", text, ts.ScriptTarget.Latest, true)
+	visit(source)
+	visitMembers(source)
 	return found
 }
 
@@ -82,17 +117,25 @@ function becamePromises(exports: Exports, version: string): string[] {
 		const now = callablesOf(readFileSync(join(API, file), "utf8"))
 		const then = callablesOf(releasedSnapshot(file, version))
 		const exported = exports[subpathOf(file)] ?? {}
-		return Object.keys(exported).filter((name) => then.get(name) === false && now.get(name) === true)
+		/* a member counts when its type is exported: `CliIo.run` with `CliIo` */
+		return [...then.keys()].filter(
+			(name) =>
+				exported[name.split(".")[0] as string] !== undefined && then.get(name) === false && now.get(name) === true,
+		)
 	})
 	return [...new Set(names)].sort()
 }
 
-/** The backticked names in the section's one "`a`, `b` … return a promise:" clause, up to its colon, sorted */
-function promised(section: string): string[] {
-	const lines = [...section.matchAll(/^ *(`[^:\n]*? returns? a promise[^:\n]*):/gm)]
+/** The section's one paragraph opening "`a`, `b` … return a promise:", and that clause, up to its colon */
+function promiseParagraph(section: string): { clause: string; paragraph: string } {
+	const lines = [...section.matchAll(/^ *(`[^:\n]*? returns? a promise[^:\n]*):.*$/gm)]
 	expect(lines, 'one "… return a promise:" sentence in the section').toHaveLength(1)
-	return [...(lines[0]?.[1] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1] as string).sort()
+	return { clause: lines[0]?.[1] ?? "", paragraph: lines[0]?.[0] ?? "" }
 }
+
+/** The backticked names in the section's one "`a`, `b` … return a promise:" clause, sorted */
+const promised = (section: string): string[] =>
+	[...promiseParagraph(section).clause.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string).sort()
 
 /** The backticked names on the section's one `label:` line, sorted; `none.` names none */
 function listed(section: string, label: string): string[] {
@@ -137,7 +180,15 @@ describe("the newest upgrade section's exports", () => {
 
 	/* D5-1 of the area D round-five review: the async paragraph left out exportDrizzleSchema and named a bare run */
 	it("names, in its async paragraph, exactly the public callables that return a promise since then", () => {
-		const became = becamePromises(RELEASED.exports, RELEASED.version)
+		const became = becamePromises(RELEASED.exports, RELEASED.version).filter((name) => !name.includes("."))
 		expect(released ? [] : promised(section), `became promises since ${RELEASED.version}`).toEqual(became)
+	})
+
+	/* D6-4 of the area D round-six review: a runner an embedder passes, `CliIo.run`, became async too */
+	it("names in that paragraph each member of a public type that returns a promise since then", () => {
+		const became = becamePromises(RELEASED.exports, RELEASED.version).filter((name) => name.includes("."))
+		expect(released ? [] : became).toContain("CliIo.run")
+		const paragraph = released ? "" : promiseParagraph(section).paragraph
+		expect(became.filter((name) => !paragraph.includes(`\`${name}\``))).toEqual([])
 	})
 })
