@@ -16,7 +16,7 @@ import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 import { withScratchDb } from "../support/pg.ts"
 
 let pub = ""

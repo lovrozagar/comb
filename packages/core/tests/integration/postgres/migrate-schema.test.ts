@@ -16,7 +16,7 @@ import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-
 import type { LiveRead } from "../../../src/migrate/core/pg-live-types.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 import { withScratchDb } from "../support/pg.ts"
 import { noLive } from "../../../src/migrate/__fixtures__/live-objects.ts"
 

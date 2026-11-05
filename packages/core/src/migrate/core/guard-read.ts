@@ -4,7 +4,7 @@
  * the tables each leaves under new rowids, a referenced rebuild left unguarded, and a guard that
  * would fire a trigger a later file put on a table it empties.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { renumberedBy } from "./rebuild-rowids.ts"
 import {
 	deferredAt,

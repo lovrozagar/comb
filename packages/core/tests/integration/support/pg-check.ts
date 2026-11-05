@@ -12,7 +12,7 @@ import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 import { withScratchDb } from "./pg.ts"
 
 /** A scratch database held from the file's first test to its last: its URL, inside a test */

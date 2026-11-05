@@ -3,7 +3,7 @@
  * each table's triggers, followed through renames, moves to another schema and drops, and every
  * function, procedure and aggregate a migration defined, under each name it ever had.
  */
-import type { TriggerEvent } from "../types.ts"
+import type { TriggerEvent } from "../migration-types.ts"
 import { moveReads } from "./pg-cascade.ts"
 import { moveDomains } from "./pg-domains.ts"
 import { type Facts, flag, keyOf, names, type Node, num, tableOf } from "./pg-nodes.ts"

@@ -15,7 +15,7 @@ import { splitEnumValues } from "../../../src/migrate/core/pg-enum-split.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { wrapAtlasFile } from "../../../src/migrate/core/pg-objects.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 
 import { withScratchDb } from "../support/pg.ts"
 

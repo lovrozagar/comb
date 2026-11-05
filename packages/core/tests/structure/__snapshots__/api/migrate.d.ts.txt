@@ -8,10 +8,11 @@ export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCir
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
 export { DatabaseMissing } from "./drivers/missing.ts";
 export { TursoMissing } from "./drivers/sqlite.ts";
-export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationSafety, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
+export type { ExtractedSchema, ForeignKey, MigrationClassification, MigrationSafety, ParsedMigration, TableInfo, TriggerEvent, } from "./migration-types.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, LibsqlProviderConfig, MigrationConfig, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 export type { ClassifyOptions } from "./core/classify.ts";
 export type { TargetKind } from "./core/classify-target.ts";
-export type { DatabaseShared, EnvironmentsDatabaseConfig, ForeignKey, SingleDatabaseConfig, TableInfo, TriggerEvent, } from "./types.ts";
+export type { DatabaseShared, EnvironmentsDatabaseConfig, SingleDatabaseConfig } from "./types.ts";
 export type { FtsObject, FtsState } from "./core/fts-migration.ts";
 export type { ProviderDeps } from "./config.ts";
 export type { PgTarget } from "./core/atlas-target.ts";
@@ -133,7 +134,7 @@ import { classifyMigration, type ClassifyOptions, extractDropStatements } from "
 import { type FileRead } from "./pg-split.ts";
 import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
-import type { ParsedMigration } from "../types.ts";
+import type { ParsedMigration } from "../migration-types.ts";
 export { splitSqlStatements };
 /** The hash a migration is recorded under: its SQL with comments and layout normalized away */
 export declare function generateMigrationHash(sql: string): string;
@@ -234,7 +235,8 @@ export declare function dropsQuestion(drops: readonly string[], target: string):
 
 // migrate/drivers/index.d.ts
 export { createD1Provider } from "./d1.ts";
-export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./sqlite.ts";
+export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, getTursoCredentials } from "./sqlite.ts";
+export { getSqliteColumns, getSqliteIndexes, getSqliteTables, introspectSqliteSchema } from "./sqlite-introspect.ts";
 
 // migrate/drivers/missing.d.ts
 /** A reader found no database to open: a read-only connect creates none (S3 of the r18 review) */
@@ -243,7 +245,7 @@ export declare class DatabaseMissing extends Error {
 }
 
 // migrate/drivers/sqlite.d.ts
-import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
+import type { ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
 import { DatabaseMissing } from "./missing.ts";
 export { createBunSqliteProvider } from "./bun-sqlite.ts";
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
@@ -287,10 +289,88 @@ export declare function createTursoProvider(config: TursoProviderConfig, deps?: 
  */
 export declare function libsqlFile(url: string): string | undefined;
 export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
-export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
-export declare function getSqliteTables(conn: Connection): Promise<string[]>;
-export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
-export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
+
+// migrate/migration-types.d.ts
+/**
+ * The types of a migration file as comb reads it: the schema its history leaves, and what its
+ * statements risk. Declarations only.
+ */
+/** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
+export type ForeignKey = {
+    table: string;
+    columns: string[];
+    parent: string;
+    parentColumns: string[];
+    onDelete: "CASCADE" | "NO ACTION" | "RESTRICT" | "SET DEFAULT" | "SET NULL";
+};
+/** What a table rebuild must know of a table to save and restore its rows */
+export type TableInfo = {
+    primaryKey: string[];
+    /** a WITHOUT ROWID table, whose rows are saved by primary key */
+    withoutRowid: boolean;
+    /** its primary key is the rowid: a lone INTEGER column, so writing the key writes the rowid */
+    rowidAlias: boolean;
+    /** columns no INSERT may write */
+    generatedColumns: string[];
+    /** SQLite keeps its next id in sqlite_sequence */
+    autoincrement: boolean;
+    /** each column's type affinity by SQLite's rules: INTEGER, TEXT, BLOB, REAL or NUMERIC */
+    affinity: Record<string, string>;
+    /** each ON CONFLICT resolution other than ABORT the table declares, as `<column or key>: <resolution>` */
+    conflicts: string[];
+    /** a STRICT table, which refuses a value of another type */
+    strict: boolean;
+};
+/** A write that fires a trigger */
+export type TriggerEvent = "delete" | "insert" | "update";
+export type ExtractedSchema = {
+    tables: Map<string, string[]>;
+    indexes: string[];
+    droppedTables: string[];
+    foreignKeys: ForeignKey[];
+    /**
+     * each trigger left, by its table, with the writes that fire it; `ftsSync` when its body only
+     * writes into an external-content FTS5 table (the sync triggers comb writes)
+     */
+    triggers: Array<{
+        events: TriggerEvent[];
+        ftsSync: boolean;
+        name: string;
+        table: string;
+    }>;
+    /** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
+    externalFts: string[];
+    /**
+     * the statements of the history, in order: on Postgres, what its parse tree shows a write runs
+     * (parentage, defaults, rules, operators, casts) is read from them (pg-history.ts)
+     */
+    statements: string[];
+    tableInfo: Map<string, TableInfo>;
+};
+export type MigrationSafety = "safe" | "cautious" | "unsafe";
+export type MigrationClassification = {
+    safety: MigrationSafety;
+    /** statements that lose data or break deployed code by name */
+    unsafeStatements: string[];
+    /** statements that drop or change something no row holds, or a file that is not one transaction */
+    cautiousStatements: string[];
+    /** Postgres statements that block a table while they run, with what to do instead */
+    lockWarnings: string[];
+    /**
+     * the SQLite writes among `unsafeStatements` the classifier could not clear on its own, pending
+     * the proof run's read of what each writes; the proof's findings replace them
+     */
+    pendingStatements: string[];
+};
+export type ParsedMigration = {
+    sql: string;
+    hash: string;
+    filename: string;
+    statements: string[];
+    drops: string[];
+    expected: ExtractedSchema;
+    classification: MigrationClassification;
+};
 
 // migrate/types.d.ts
 /**
@@ -418,82 +498,6 @@ export type MigrationResult = {
     tablesVerified?: number | undefined;
     error?: string | undefined;
 };
-/** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
-export type ForeignKey = {
-    table: string;
-    columns: string[];
-    parent: string;
-    parentColumns: string[];
-    onDelete: "CASCADE" | "NO ACTION" | "RESTRICT" | "SET DEFAULT" | "SET NULL";
-};
-/** What a table rebuild must know of a table to save and restore its rows */
-export type TableInfo = {
-    primaryKey: string[];
-    /** a WITHOUT ROWID table, whose rows are saved by primary key */
-    withoutRowid: boolean;
-    /** its primary key is the rowid: a lone INTEGER column, so writing the key writes the rowid */
-    rowidAlias: boolean;
-    /** columns no INSERT may write */
-    generatedColumns: string[];
-    /** SQLite keeps its next id in sqlite_sequence */
-    autoincrement: boolean;
-    /** each column's type affinity by SQLite's rules: INTEGER, TEXT, BLOB, REAL or NUMERIC */
-    affinity: Record<string, string>;
-    /** each ON CONFLICT resolution other than ABORT the table declares, as `<column or key>: <resolution>` */
-    conflicts: string[];
-    /** a STRICT table, which refuses a value of another type */
-    strict: boolean;
-};
-/** A write that fires a trigger */
-export type TriggerEvent = "delete" | "insert" | "update";
-export type ExtractedSchema = {
-    tables: Map<string, string[]>;
-    indexes: string[];
-    droppedTables: string[];
-    foreignKeys: ForeignKey[];
-    /**
-     * each trigger left, by its table, with the writes that fire it; `ftsSync` when its body only
-     * writes into an external-content FTS5 table (the sync triggers comb writes)
-     */
-    triggers: Array<{
-        events: TriggerEvent[];
-        ftsSync: boolean;
-        name: string;
-        table: string;
-    }>;
-    /** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
-    externalFts: string[];
-    /**
-     * the statements of the history, in order: on Postgres, what its parse tree shows a write runs
-     * (parentage, defaults, rules, operators, casts) is read from them (pg-history.ts)
-     */
-    statements: string[];
-    tableInfo: Map<string, TableInfo>;
-};
-export type MigrationSafety = "safe" | "cautious" | "unsafe";
-export type MigrationClassification = {
-    safety: MigrationSafety;
-    /** statements that lose data or break deployed code by name */
-    unsafeStatements: string[];
-    /** statements that drop or change something no row holds, or a file that is not one transaction */
-    cautiousStatements: string[];
-    /** Postgres statements that block a table while they run, with what to do instead */
-    lockWarnings: string[];
-    /**
-     * the SQLite writes among `unsafeStatements` the classifier could not clear on its own, pending
-     * the proof run's read of what each writes; the proof's findings replace them
-     */
-    pendingStatements: string[];
-};
-export type ParsedMigration = {
-    sql: string;
-    hash: string;
-    filename: string;
-    statements: string[];
-    drops: string[];
-    expected: ExtractedSchema;
-    classification: MigrationClassification;
-};
 export type CircuitBreakerState = {
     totalProcessed: number;
     failures: number;
@@ -518,7 +522,8 @@ export type CircuitBreakerState = {
  * runs outside one, and one it refuses outside a block is refused in a file that does, but within
  * the file's own BEGIN.
  */
-import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
+import type { ExtractedSchema, MigrationClassification } from "../migration-types.ts";
+import type { Dialect } from "../types.ts";
 import type { TargetKind } from "./classify-target.ts";
 import { type Read } from "./classify-verdict.ts";
 import { type PgRead } from "./pg-split.ts";
@@ -749,7 +754,7 @@ declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
 export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };
 
 // migrate/core/atlas-env.d.ts
-import type { ExtractedSchema } from "../types.ts";
+import type { ExtractedSchema } from "../migration-types.ts";
 import type { FtsState } from "./fts-migration.ts";
 /**
  * Idempotent. Input without the pragma pair passes through unchanged. With `before`, the schema
@@ -852,7 +857,8 @@ export { atlasFile, type FileRead, fileRead, historyTrees, type PgRead, pgRead, 
 
 // migrate/core/schema.d.ts
 import { type FileRead } from "./pg-split.ts";
-import type { Dialect, ExtractedSchema } from "../types.ts";
+import type { ExtractedSchema } from "../migration-types.ts";
+import type { Dialect } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
  * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
@@ -924,6 +930,13 @@ export declare function connectD1(config: D1ProviderConfig, exec: Run, wrangler:
 /** A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect */
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
+// migrate/drivers/sqlite-introspect.d.ts
+import type { Connection } from "../types.ts";
+export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
+export declare function getSqliteTables(conn: Connection): Promise<string[]>;
+export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
+export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
+
 // migrate/drivers/bun-sqlite.d.ts
 import type { LocalDb } from "./local-db.ts";
 import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
@@ -939,7 +952,7 @@ export { bunLocal };
  * statement, with the statements that make it so, the ones that lock a table, and the ones whose
  * effect waits on data
  */
-import type { MigrationClassification } from "../types.ts";
+import type { MigrationClassification } from "../migration-types.ts";
 import type { Finding } from "./classify-alter.ts";
 import { type ReadStatement } from "./classify-file.ts";
 import type { TargetKind } from "./classify-target.ts";

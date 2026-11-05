@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { classifyMigration, extractDropStatements } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 

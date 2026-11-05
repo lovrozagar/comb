@@ -4,7 +4,7 @@
  * Atlas and comb write that must keep their ratings.
  */
 import { describe, expect, it } from "vitest"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 

@@ -4,7 +4,7 @@
  * replace a row instead of failing, and STRICT. A rebuild whose new table changes any of these
  * can change or lose what its copy lands, even when it copies every column.
  */
-import type { TableInfo } from "../types.ts"
+import type { TableInfo } from "../migration-types.ts"
 
 /** A column type's affinity: INT anywhere is INTEGER; CHAR, CLOB or TEXT is TEXT; BLOB or none is BLOB; REAL, FLOA or DOUB is REAL; anything else NUMERIC */
 function affinityOf(declaredType: string): string {

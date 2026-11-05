@@ -17,7 +17,8 @@
  * What a recognized statement writes, shadows or fires is the engine's to read: SQLite's in the
  * proof run, Postgres's parser in pg-tree.ts.
  */
-import type { Dialect, ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { nameKey, type Naming, pragmaOf, QNAME, unquote } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"

@@ -3,7 +3,7 @@
  * lists their parts, and each name keyed as nameKey keys it; and the facts the history's trees
  * leave (pg-history.ts).
  */
-import type { TriggerEvent } from "../types.ts"
+import type { TriggerEvent } from "../migration-types.ts"
 import type { ForeignKey, PrimaryKey } from "./pg-foreign.ts"
 
 type Node = Record<string, unknown>

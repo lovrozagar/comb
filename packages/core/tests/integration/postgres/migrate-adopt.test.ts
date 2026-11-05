@@ -16,7 +16,7 @@ import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../../../src
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 import { withScratchDb } from "../support/pg.ts"
 import { UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 

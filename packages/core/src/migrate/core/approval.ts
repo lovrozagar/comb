@@ -5,7 +5,8 @@
  * `-- comb:allow-unsafe: <reason>` line. atlas.sum records that line with the rest of the file's
  * bytes; comb's own hash leaves comments out, so it holds the SQL approved, not the approval.
  */
-import type { Dialect, MigrationClassification } from "../types.ts"
+import type { MigrationClassification } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 import { extractDropStatements } from "./classify.ts"
 import { segments } from "../../sql-lexer.ts"
 import { dropsQuestion } from "./utils.ts"

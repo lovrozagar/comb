@@ -7,7 +7,7 @@
  */
 import type { Connection } from "../types.ts"
 import type { Pending } from "./plan-apply.ts"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
 import { codeOf } from "../../sql-lexer.ts"

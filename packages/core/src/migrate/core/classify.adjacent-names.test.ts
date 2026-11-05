@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 import { segments } from "../../sql-lexer.ts"

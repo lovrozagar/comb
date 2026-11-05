@@ -3,7 +3,7 @@
  * table-level), and its shape (primary key, rowid alias, generated columns, AUTOINCREMENT,
  * WITHOUT ROWID, STRICT, each column's affinity and the conflict resolutions it declares).
  */
-import type { ForeignKey, TableInfo } from "../types.ts"
+import type { ForeignKey, TableInfo } from "../migration-types.ts"
 import { IDENT, lastPart, nameKey, type Naming, QNAME, splitTopLevel } from "./sql-code.ts"
 import { conflictsOf, definitionAffinity, isStrict } from "./sqlite-affinity.ts"
 

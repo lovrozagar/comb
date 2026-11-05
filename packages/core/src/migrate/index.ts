@@ -50,6 +50,15 @@ export {
 export { DatabaseMissing } from "./drivers/missing.ts"
 export { TursoMissing } from "./drivers/sqlite.ts"
 export type {
+	ExtractedSchema,
+	ForeignKey,
+	MigrationClassification,
+	MigrationSafety,
+	ParsedMigration,
+	TableInfo,
+	TriggerEvent,
+} from "./migration-types.ts"
+export type {
 	BunSqliteProviderConfig,
 	CircuitBreakerState,
 	Connection,
@@ -59,12 +68,8 @@ export type {
 	DatabaseConfig,
 	Dialect,
 	EnvironmentConfig,
-	ExtractedSchema,
 	LibsqlProviderConfig,
-	MigrationClassification,
 	MigrationConfig,
-	MigrationSafety,
-	ParsedMigration,
 	PostgresProviderConfig,
 	ProviderConfig,
 	QueryResult,
@@ -74,14 +79,7 @@ export type {
 } from "./types.ts"
 export type { ClassifyOptions } from "./core/classify.ts"
 export type { TargetKind } from "./core/classify-target.ts"
-export type {
-	DatabaseShared,
-	EnvironmentsDatabaseConfig,
-	ForeignKey,
-	SingleDatabaseConfig,
-	TableInfo,
-	TriggerEvent,
-} from "./types.ts"
+export type { DatabaseShared, EnvironmentsDatabaseConfig, SingleDatabaseConfig } from "./types.ts"
 export type { FtsObject, FtsState } from "./core/fts-migration.ts"
 export type { ProviderDeps } from "./config.ts"
 export type { PgTarget } from "./core/atlas-target.ts"

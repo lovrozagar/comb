@@ -10,7 +10,7 @@
  */
 import { randomUUID } from "node:crypto"
 import type { LocalDb, ScratchDb } from "../drivers/local-db.ts"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { preview } from "./classify-file.ts"
 import { readGuards } from "./guard-read.ts"
 import { refuseOutside } from "./proof-outside.ts"

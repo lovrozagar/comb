@@ -18,7 +18,7 @@
  *
  * The parser is an optional peer, loaded once by `loadPostgresParser()` (pg-parser.ts).
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"

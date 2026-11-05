@@ -8,7 +8,7 @@
  * That table records names only, so comb records each applied file's hash in its own table, and
  * refuses a file applied, then edited, as it does on its other engines.
  */
-import type { ParsedMigration } from "../types.ts"
+import type { ParsedMigration } from "../migration-types.ts"
 import type { Approval } from "./approval.ts"
 import { absentDatabase } from "../drivers/absent.ts"
 import { executeAll } from "../drivers/d1.ts"

@@ -3,7 +3,7 @@
  * rebuild guard applied to what it writes.
  */
 import { randomUUID } from "node:crypto"
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import type { FtsState } from "./fts-migration.ts"
 import { guardRebuilds } from "./rebuild-guard.ts"
 

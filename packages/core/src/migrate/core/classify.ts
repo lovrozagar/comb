@@ -14,7 +14,8 @@
  * runs outside one, and one it refuses outside a block is refused in a file that does, but within
  * the file's own BEGIN.
  */
-import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
+import type { ExtractedSchema, MigrationClassification } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { ftsCommandFindings, refuseHeader, reindexedOf } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"

@@ -10,7 +10,7 @@ import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { replayPending } from "../../../src/migrate/core/pg-check-replay.ts"
 import { type Connect, loadPostgres } from "../../../src/migrate/core/pg-live-objects.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 
 const { devUrl, dir, url } = JSON.parse(process.argv[2] as string) as { devUrl: string; dir: string; url: string }
 

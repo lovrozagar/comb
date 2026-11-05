@@ -4,7 +4,7 @@
  * in Atlas's copy, rewritten to `INSERT INTO new_T (rowid, …) SELECT rowid, …`, as far as D1's
  * cap on a SELECT's columns lets them fit.
  */
-import type { ExtractedSchema, TableInfo } from "../types.ts"
+import type { ExtractedSchema, TableInfo } from "../migration-types.ts"
 import { asciiFold, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 
 /**

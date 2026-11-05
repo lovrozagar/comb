@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration, extractDropStatements } from "../../../src/migrate/core/classify.ts"
 import { extractSchema } from "../../../src/migrate/core/parse.ts"
-import type { MigrationSafety } from "../../../src/migrate/types.ts"
+import type { MigrationSafety } from "../../../src/migrate/migration-types.ts"
 import { requireAtlas } from "../support/atlas.ts"
 
 /* a run without Atlas would pass with its suites skipped, and a verify stamp would vouch for it:

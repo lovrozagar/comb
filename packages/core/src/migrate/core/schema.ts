@@ -10,7 +10,8 @@ import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
 import { definitionAffinity } from "./sqlite-affinity.ts"
-import type { Dialect, ExtractedSchema, TriggerEvent } from "../types.ts"
+import type { ExtractedSchema, TriggerEvent } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 
 type SchemaSoFar = ExtractedSchema
 

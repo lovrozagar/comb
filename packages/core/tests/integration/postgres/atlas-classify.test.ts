@@ -10,7 +10,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
-import type { MigrationSafety } from "../../../src/migrate/types.ts"
+import type { MigrationSafety } from "../../../src/migrate/migration-types.ts"
 
 import { withScratchDb } from "../support/pg.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"

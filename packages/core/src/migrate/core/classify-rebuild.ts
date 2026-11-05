@@ -5,7 +5,8 @@
  * the drop took with the table (S2 of the 0.14.1 review). Anything else loses rows, values or
  * the writes a trigger made.
  */
-import type { Dialect, ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { NO_TRANSACTION, type Rebuilds } from "./rebuild-copy.ts"
 import { extractSchema } from "./schema.ts"

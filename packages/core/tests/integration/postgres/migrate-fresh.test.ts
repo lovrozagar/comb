@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 import { withScratchDb } from "../support/pg.ts"
 
 let dir = ""

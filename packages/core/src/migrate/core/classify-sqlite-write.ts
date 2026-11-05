@@ -8,7 +8,7 @@
  * the row it meets. A REPLACE on a table that was there before the file is unsafe outright (M41). Every other write, and any it cannot read, is unsafe, pending the
  * proof run's read: planApply's proof replaces those entries with the engine's own findings.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { asciiFold, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"

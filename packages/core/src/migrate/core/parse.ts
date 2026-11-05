@@ -9,7 +9,7 @@ import { classificationOf } from "./classify-verdict.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
 import { hashedSql, splitSqlStatements } from "./sql-scan.ts"
-import type { ParsedMigration } from "../types.ts"
+import type { ParsedMigration } from "../migration-types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SQL STATEMENT SPLITTING — see sql-scan.ts

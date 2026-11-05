@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TableInfo } from "../types.ts"
+import type { TableInfo } from "../migration-types.ts"
 import { affinityOf, conflictsOf, definitionAffinity, definitionDrift, isStrict } from "./sqlite-affinity.ts"
 
 describe("affinityOf", () => {

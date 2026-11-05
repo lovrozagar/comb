@@ -11,7 +11,7 @@
  * history holds another schema's 0.12 row (atlas-foreign.ts, M78): Atlas would count that row as
  * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
  */
-import type { ParsedMigration } from "../types.ts"
+import type { ParsedMigration } from "../migration-types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
 import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"

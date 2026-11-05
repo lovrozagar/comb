@@ -7,7 +7,7 @@ import { writeSync } from "node:fs"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import type { ParsedMigration } from "../../../src/migrate/migration-types.ts"
 
 const { devUrl, dir, url } = JSON.parse(process.argv[2] as string) as { devUrl: string; dir: string; url: string }
 

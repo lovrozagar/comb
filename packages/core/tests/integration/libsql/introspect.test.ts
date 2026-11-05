@@ -4,7 +4,11 @@
  * whatever its name happens to end in.
  */
 import { describe, expect, it } from "vitest"
-import { getSqliteIndexes, getSqliteTables, introspectSqliteSchema } from "../../../src/migrate/drivers/sqlite.ts"
+import {
+	getSqliteIndexes,
+	getSqliteTables,
+	introspectSqliteSchema,
+} from "../../../src/migrate/drivers/sqlite-introspect.ts"
 import { libsqlConnection } from "../support/libsql.ts"
 
 const SCHEMA = `

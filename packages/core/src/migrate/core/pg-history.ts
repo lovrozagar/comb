@@ -10,7 +10,7 @@
  * function, procedure and aggregate a migration defined, under each name it ever had: a dropped
  * overload leaves others of its name, so a name once defined stays defined.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"

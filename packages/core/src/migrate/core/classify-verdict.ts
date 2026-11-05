@@ -4,7 +4,7 @@
  * statement, with the statements that make it so, the ones that lock a table, and the ones whose
  * effect waits on data
  */
-import type { MigrationClassification } from "../types.ts"
+import type { MigrationClassification } from "../migration-types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseOpenBlock, refuseUnrunnable } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"

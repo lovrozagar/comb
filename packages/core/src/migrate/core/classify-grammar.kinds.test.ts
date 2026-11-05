@@ -4,7 +4,8 @@
  * lands here with its rating chosen, never by falling through to safe.
  */
 import { describe, expect, it } from "vitest"
-import type { Dialect, MigrationSafety } from "../types.ts"
+import type { MigrationSafety } from "../migration-types.ts"
+import type { Dialect } from "../types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 

@@ -27,7 +27,7 @@
  * A trigger on a reached table fires on both the emptying and the refill. That nets out only for
  * an FTS trigger, which deletes and re-adds the same entry, so any other trigger there is refused.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import type { FtsState } from "./fts-migration.ts"
 import { extractSchema } from "./schema.ts"
 import { NO_TRANSACTION, readCopy } from "./rebuild-copy.ts"

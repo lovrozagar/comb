@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import type { ParsedMigration } from "../types.ts"
+import type { ParsedMigration } from "../migration-types.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import { extractSchema, parseRead } from "./parse.ts"
 import { pgRead } from "./pg-split.ts"

@@ -6,7 +6,7 @@
  * operator or cast runs, and the tables a file stops filling fresh once an existing table becomes
  * a child of one.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { type Facts, tableOf } from "./pg-history.ts"

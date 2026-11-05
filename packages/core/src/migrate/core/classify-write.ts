@@ -6,7 +6,7 @@
  * and columns are followed from its parse tree (pg-ddl.ts). The writes themselves are read from the
  * engine: SQLite's in the proof run, Postgres's parse tree in pg-tree.ts.
  */
-import type { ExtractedSchema } from "../types.ts"
+import type { ExtractedSchema } from "../migration-types.ts"
 import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel } from "./sql-code.ts"
 
 /**
