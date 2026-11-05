@@ -127,6 +127,18 @@ const fieldErrors = (
 				]
 		: [checked.error]
 
+/**
+ * Why `field`'s own search_path cannot stand: comb migrates `schema` alone, and Atlas keeps a URL's
+ * own search_path, so both URLs must name that schema or none (M39; the devUrl's, PA7 of r22b)
+ */
+function scopeErrors(field: "devUrl" | "url", url: LibpqUrl | undefined, schema: string): string[] {
+	const scope = url?.params.get("search_path")
+	if (scope === undefined) return []
+	const fix = `comb migrates one: set schema to it, and drop search_path from the ${field}`
+	if (scope.includes(",")) return [`the ${field}'s search_path names more than one schema (${scope}); ${fix}`]
+	return scope === schema ? [] : [`the ${field}'s search_path names ${scope}, but schema is ${schema}; ${fix}`]
+}
+
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
 function pgUrlProblems(
 	target: PgTarget,
@@ -142,13 +154,7 @@ function pgUrlProblems(
 	}
 	const named = schemaProblem(target.schema)
 	if (named !== undefined) errors.push(named)
-	const scope = url.url?.params.get("search_path")
-	if (scope !== undefined) {
-		const fix = "comb migrates one: set schema to it, and drop search_path from the url"
-		if (scope.includes(",")) errors.push(`the url's search_path names more than one schema (${scope}); ${fix}`)
-		else if (scope !== target.schema)
-			errors.push(`the url's search_path names ${scope}, but schema is ${target.schema}; ${fix}`)
-	}
+	errors.push(...scopeErrors("url", url.url, target.schema), ...scopeErrors("devUrl", dev.url, target.schema))
 	const timeout = lockTimeoutMs(target.lockTimeout)
 	if (typeof timeout === "string") errors.push(timeout)
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
@@ -189,7 +195,7 @@ const SHARED_REVISIONS = "atlas_schema_revisions"
  * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
  */
 function revisionsSchema(target: PgTarget): string {
-	/* a search_path the url names is the schema itself, or pgUrlProblems refused it (M39) */
+	/* a search_path either URL names is the schema itself, or pgUrlProblems refused it (M39, PA7) */
 	const scope = target.schema
 	if (scope === "public") return SHARED_REVISIONS
 	const own = `${SHARED_REVISIONS}_${scope}`

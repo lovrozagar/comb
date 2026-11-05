@@ -353,28 +353,35 @@ describe("revisionsSchema", () => {
 	})
 })
 
-/* M39 of the 0.13 review: comb migrates one schema, so the URL's own search_path must be that one */
-describe("pgUrlProblems: a search_path in the url", () => {
+/* M39 of the 0.13 review, PA7 of r22b: comb migrates one schema, so a URL's own search_path must be that one */
+describe("pgUrlProblems: a search_path in a url", () => {
 	const base = "postgres://app@db.example.com/app"
-	it.each([
-		[
-			"public,extensions",
-			"public",
-			"the url's search_path names more than one schema (public,extensions); comb migrates one: set schema to it, and drop search_path from the url",
-		],
-		[
-			"tenant_b",
-			"tenant_a",
-			"the url's search_path names tenant_b, but schema is tenant_a; comb migrates one: set schema to it, and drop search_path from the url",
-		],
-	])("refuses search_path=%s with schema %s, naming both", (path, schema, error) => {
-		expect(pgUrlProblems(target({ schema, url: `${base}?search_path=${encodeURIComponent(path)}` })).errors).toEqual([
-			error,
-		])
+	const dev = "postgres://app@db.example.com/dev"
+	const scopedTo = (field: "devUrl" | "url", path: string, schema: string) =>
+		target(
+			field === "url"
+				? { schema, url: `${base}?search_path=${encodeURIComponent(path)}` }
+				: { devUrl: `${dev}?search_path=${encodeURIComponent(path)}`, schema },
+		)
+	it.each(["url", "devUrl"] as const)(
+		"refuses the %s's search_path naming another schema or more than one, by field name",
+		(field) => {
+			const fix = `comb migrates one: set schema to it, and drop search_path from the ${field}`
+			expect(pgUrlProblems(scopedTo(field, "public,extensions", "public")).errors).toEqual([
+				`the ${field}'s search_path names more than one schema (public,extensions); ${fix}`,
+			])
+			expect(pgUrlProblems(scopedTo(field, "tenant_b", "tenant_a")).errors).toEqual([
+				`the ${field}'s search_path names tenant_b, but schema is tenant_a; ${fix}`,
+			])
+		},
+	)
+
+	it.each(["url", "devUrl"] as const)("takes a %s search_path that names the configured schema", (field) => {
+		expect(pgUrlProblems(scopedTo(field, "tenant_a", "tenant_a")).errors).toEqual([])
 	})
 
-	it("takes a search_path that names the configured schema", () => {
-		expect(pgUrlProblems(target({ schema: "tenant_a", url: `${base}?search_path=tenant_a` })).errors).toEqual([])
+	it("checks the devUrl's search_path only when the call needs the dev database", () => {
+		expect(pgUrlProblems(scopedTo("devUrl", "public", "tenant_a"), { dev: false, url: true }).errors).toEqual([])
 	})
 })
 
