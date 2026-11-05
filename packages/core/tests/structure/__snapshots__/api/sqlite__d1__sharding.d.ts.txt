@@ -612,19 +612,7 @@ type ListQueryInput<TSortField extends string = string> = {
 };
 type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null;
 type ComputedSortResolver = (direction: SortDirection) => SQL;
-type ListQueryCapabilities = {
-    computedFilterFields: Record<string, FieldType>;
-    computedSortFields: Set<string>;
-    filterFields: Record<string, FieldType>;
-    pagination: {
-        defaultLimit: number;
-        maxLimit: number;
-    };
-    relationFilterFields: Record<string, FieldType>;
-    searchFields: Set<string>;
-    sortFields: Set<string>;
-};
-export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
+export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
 
 // query/sqlite/search.d.ts
 /**
@@ -829,14 +817,6 @@ type DecodedCursor = {
 type OpenedCursor = DecodedCursor & {
     read?: Array<Date | null> | undefined;
 };
-type PaginationMeta = {
-    /** Rows the filter matches across all pages; null when the response cannot know */
-    count: number | null;
-    hasMore: boolean;
-    limit: number;
-    nextCursor: string | null;
-    page: number | null;
-};
 /** PostgreSQL semantics: nulls sort last ascending and first descending. */
 declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
 /** Canonical form of a sort — what a cursor is bound to. */
@@ -880,7 +860,7 @@ declare function readKeyset(cursor: string, parsedSort: readonly SortField[], op
  * cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, readKeyset, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, readKeyset, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";

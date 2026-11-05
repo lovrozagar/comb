@@ -15,7 +15,7 @@ export {
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
-export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts"
+export type { CursorOptions, CursorValue, DecodedCursor } from "./cursor.ts"
 export { type ListExtra, type ListRow, paginate } from "./pagination.ts"
 export { createCursor } from "./cursor-mint.ts"
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
@@ -94,7 +94,6 @@ export type {
 	FilterCondition,
 	FilterGroup,
 	FilterOperator,
-	ListQueryCapabilities,
 	ListQueryInput,
 	ParsedFields,
 	SortDirection,

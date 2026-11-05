@@ -83,19 +83,6 @@ type ListQueryInput<TSortField extends string = string> = {
 type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null
 type ComputedSortResolver = (direction: SortDirection) => SQL
 
-type ListQueryCapabilities = {
-	computedFilterFields: Record<string, FieldType>
-	computedSortFields: Set<string>
-	filterFields: Record<string, FieldType>
-	pagination: {
-		defaultLimit: number
-		maxLimit: number
-	}
-	relationFilterFields: Record<string, FieldType>
-	searchFields: Set<string>
-	sortFields: Set<string>
-}
-
 export type {
 	ComputedFilterResolver,
 	ComputedSortResolver,
@@ -105,7 +92,6 @@ export type {
 	FilterCondition,
 	FilterGroup,
 	FilterOperator,
-	ListQueryCapabilities,
 	ListQueryInput,
 	ParsedFields,
 	SortDirection,

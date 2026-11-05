@@ -68,15 +68,6 @@ type DecodedCursor = {
 /* a cursor as the keyset binds it, and per key the Date its row read where the value is another, null else; none when no key has one */
 type OpenedCursor = DecodedCursor & { read?: Array<Date | null> | undefined }
 
-type PaginationMeta = {
-	/** Rows the filter matches across all pages; null when the response cannot know */
-	count: number | null
-	hasMore: boolean
-	limit: number
-	nextCursor: string | null
-	page: number | null
-}
-
 /** PostgreSQL semantics: nulls sort last ascending and first descending. */
 function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls {
 	return nulls ?? (direction === "asc" ? "last" : "first")
@@ -293,5 +284,4 @@ export {
 	type CursorValue,
 	type DecodedCursor,
 	openCursor,
-	type PaginationMeta,
 }
