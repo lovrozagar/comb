@@ -9,7 +9,7 @@
  */
 import { type SQL, sql } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
-import { searchText } from "./search.ts"
+import { searchText } from "./search-text.ts"
 
 /** The statements of one refold: the read, and the writes its rows call for */
 type Refold = {

@@ -3,10 +3,10 @@
  * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
  */
 import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts"
+import { parseFilterNumber } from "./filter-typed.ts"
 import {
 	FILTER_LIMITS,
 	OPERATORS_BY_TYPE,
-	parseFilterNumber,
 	type FilterField,
 	type FilterFieldSpec,
 	type FilterLimits,

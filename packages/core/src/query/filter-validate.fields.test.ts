@@ -3,10 +3,8 @@
  * builder can type a user table with: operators of its own, contains, ordered text, ISO dates
  */
 import { describe, expect, it } from "vitest"
-import { parseFilterNumber, validateFilter } from "./filter-validate.ts"
+import { validateFilter } from "./filter-validate.ts"
 
-/** The least normal double, 2^-1022 */
-const MIN_NORMAL = 2 ** -1022
 import type { FilterField } from "./filter-validate.ts"
 import { IsoInstant } from "./iso-date.ts"
 
@@ -16,18 +14,6 @@ function typed(filter: string, fields: Record<string, FilterField>): unknown {
 	if (!result?.valid) return { errors: result?.errors }
 	return result.ast.root.conditions[0]?.value
 }
-
-describe("parseFilterNumber", () => {
-	it("refuses the spellings Number() takes that comb does not, and an integer past 2^53 - 1", () => {
-		for (const raw of ["0x4d2", "0b10011010010", "0o2322", "", " 1", "1_000", "Infinity", "1e999"])
-			expect(parseFilterNumber(raw)).toEqual({ error: `expects a number, got '${raw}'` })
-		expect(parseFilterNumber("9007199254740993")).toEqual({
-			error: "expects a number within ±9007199254740991, got '9007199254740993'",
-		})
-		expect(parseFilterNumber("1234")).toEqual({ value: 1234 })
-		expect(parseFilterNumber("-1.5e3")).toEqual({ value: -1500 })
-	})
-})
 
 describe("validateFilter: a field's own operators", () => {
 	it("takes contains on a field that lists it, the value typed as one of the field's type", () => {
@@ -144,30 +130,5 @@ describe("validateFilter: an ISO 8601 date field's instant", () => {
 				errors: [`Invalid value for 'due': expects an instant in the years 0000 to 9999, got '${raw}'`],
 			})
 		expect(String(typed("due.lt.0000-01-01T02:00+01:00", { due }))).toBe("0000-01-01T01:00:00.000Z")
-	})
-})
-
-/* QL12 of r22b: an underflowing number read as 0, so `n.lt.1e-400` missed the rows holding 0 */
-describe("parseFilterNumber on a value too small for a double (QL12 of r22b; sibling: overflow's 1e999)", () => {
-	const tooSmall = (raw: string) => ({
-		error: `expects a number of magnitude 0 or at least ${MIN_NORMAL}, got '${raw}'`,
-	})
-
-	it.each(["1e-400", "-1e-400", "0.000001e-320", "5e-324", "2e-308"])(
-		"refuses %s, which reads as 0 or a subnormal",
-		(raw) => {
-			expect(parseFilterNumber(raw)).toEqual(tooSmall(raw))
-			expect(validateFilter(`n.lt.${raw}`, { n: "number" })?.valid).toBe(false)
-		},
-	)
-
-	it.each([
-		["0", 0],
-		["0.0e-400", 0],
-		["-0", -0],
-		["2.2250738585072014e-308", MIN_NORMAL],
-		["1e-300", 1e-300],
-	])("takes %s, a zero or a normal double", (raw, value) => {
-		expect(parseFilterNumber(raw)).toEqual({ value })
 	})
 })

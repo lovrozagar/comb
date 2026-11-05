@@ -5,7 +5,8 @@
 import { eq, type SQL, sql } from "drizzle-orm"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
-import { buildFtsMatch, buildFtsWhere, likeSearch, searchText } from "../../../src/query/sqlite/search.ts"
+import { buildFtsMatch, buildFtsWhere, likeSearch } from "../../../src/query/sqlite/search.ts"
+import { searchText } from "../../../src/query/sqlite/search-text.ts"
 import { DEFAULT_TOKENIZER } from "../../../src/codegen/generators/fts-sql.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 

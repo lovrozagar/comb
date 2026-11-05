@@ -462,6 +462,15 @@ type SessionOf<D extends D1DatabaseLike> = D extends {
 export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
 
 // query/pagination.d.ts
+/**
+ * How a built list pages what it fetched (Q6, C3, C19, C2 of the 0.14.1 review). Each builder
+ * (`buildListQuery`, its `merged` list included, `buildDerivedListQuery`, `queryHelpers.listOptions`)
+ * hands over a `pagination` descriptor: the page it read, whether a cursor can resume it, how a
+ * long key is carried, and how many rows it asked for. `paginate` reads it, so nothing about the
+ * list is told twice. The cursor secret is never a value of it: the descriptor seals and opens
+ * cursors through closures over the options its builder was given, so logging or serializing a
+ * built query shows no part of the secret.
+ */
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -528,31 +537,10 @@ declare function paginationOf<TMerged extends boolean = false>(options: CursorOp
 /** The count an offset page's row carries, in any encoding isCount takes, which refuseUnwired holds every such row to */
 declare const totalOf: (row: object) => number;
 /**
- * Rows that lack an extra their builder selected were read without the built query's extras, and
- * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
- * it yet (Q3 of r17)
- */
-declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-declare function refuseGoneAnchor(items: readonly object[]): void;
-/**
  * Last mutation of item shape. Query stays fat; the returned object is the
  * public subset. No-op (minus `_total`) when parsedFields is null.
  */
 declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/**
- * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
- * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
- */
-declare function paginationIn<TMerged extends boolean>(built: {
-    pagination: ListPagination & {
-        merged: TMerged;
-    };
-} | undefined, merged: TMerged): ListPagination & {
-    merged: TMerged;
-};
-/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
-declare function refuseOverRead(count: number, pagination: ListPagination): void;
 /**
  * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
  * the next cursor, sealed under the builder's options; none for a list no cursor can resume
@@ -562,7 +550,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
         merged: false;
     };
 }): readonly [Array<ListRow<T>>, PaginationResponse];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, totalOf, };
 
 // query/types.d.ts
 /**
@@ -709,16 +697,6 @@ declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearc
  */
 type LikeSearchResolver = (q: string) => SQL | null;
 /**
- * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: the
- * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Greek final
- * sigma ς as σ (so a letter folds the same wherever it stands), combining marks removed but those
- * that make a Cyrillic letter (й, ї, ё), the Latin letters with no decomposition spelled in ASCII
- * (ß ss, æ ae, œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h), then composed again (NFC),
- * so й and Hangul syllables stay whole. Write the column with it, so the reader and the writer
- * are one function.
- */
-declare function searchText(...parts: Array<string | null | undefined>): string;
-/**
  * Factory for search on a `_search` column that searchText wrote, or any other SQL expression. Each
  * whitespace-separated term is folded by searchText and trimmed, and kept only when it holds a letter
  * or digit, as FTS keeps its terms: a mark alone folds to nothing or a space, and would match every
@@ -728,7 +706,7 @@ declare function searchText(...parts: Array<string | null | undefined>): string;
  * term is required. A query whose terms all fold away matches no row, as FTS answers it.
  */
 declare function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver;
-export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, searchText, type SpellfixDb, type SpellfixSearch, };
+export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, type SpellfixDb, type SpellfixSearch, };
 
 // query/sqlite/types.d.ts
 /**
@@ -1384,7 +1362,8 @@ export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField,
  * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
  */
 import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts";
-import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, validateFilter } from "./filter-validate.ts";
+import { parseFilterNumber } from "./filter-typed.ts";
+import { FILTER_LIMITS, OPERATORS_BY_TYPE, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, validateFilter } from "./filter-validate.ts";
 import type { SortField } from "./types.ts";
 /**
  * Parse PostgREST-style `order` string into SortField array.
@@ -1463,23 +1442,12 @@ type LimitsGiven<T> = {
  */
 declare function limitsOver<T extends Record<string, number>>(owner: string, defaults: T, given: LimitsGiven<T> | undefined): T;
 /**
- * A number field's value: finite (1e999 reads as Infinity, which no column holds), 0 or normal
- * (1e-400 reads as 0, which would match the rows holding 0), and within
- * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
- * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
- */
-declare function parseFilterNumber(raw: string): {
-    value: number;
-} | {
-    error: string;
-};
-/**
  * Parse `filterString` and check it against `allowedFields`: known fields, operators their type
  * or spec allows, values of their type, within `limits`. Null when there is no filter. A spec
  * that lists an operator its type cannot take, or a format on no date, throws a TypeError.
  */
 declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FilterField>, limits?: LimitsGiven<FilterLimits> | undefined): FilterValidationResult | null;
-export { FILTER_LIMITS, limitsOver, OPERATORS_BY_TYPE, parseFilterNumber, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type LimitsGiven, type FilterValidationResult, };
+export { FILTER_LIMITS, limitsOver, OPERATORS_BY_TYPE, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type LimitsGiven, type FilterValidationResult, };
 
 // query/filter-parse.d.ts
 /**
@@ -1501,3 +1469,31 @@ declare const FILTER_OPERATORS: readonly [FilterOperator, ...FilterOperator[]];
  */
 declare function parseFilter(input: string | null | undefined): FilterAST | null;
 export { FILTER_OPERATORS, parseFilter };
+
+// query/filter-typed.d.ts
+import type { FieldType, FilterCondition, FilterOperator } from "./types.ts";
+/** A value typed as its field declares, or why it cannot be */
+type Typed = {
+    value: unknown;
+} | {
+    error: string;
+};
+/**
+ * A number field's value: finite (1e999 reads as Infinity, which no column holds), 0 or normal
+ * (1e-400 reads as 0, which would match the rows holding 0), and within
+ * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
+ * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
+ */
+declare function parseFilterNumber(raw: string): {
+    value: number;
+} | {
+    error: string;
+};
+declare function typedValue(field: CheckedField, { operator, value }: FilterCondition): Typed;
+/** A field of the map with its operators resolved */
+type CheckedField = {
+    format: "iso" | undefined;
+    operators: readonly FilterOperator[];
+    type: FieldType;
+};
+export { parseFilterNumber, typedValue, type CheckedField };

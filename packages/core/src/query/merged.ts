@@ -10,6 +10,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { effectiveNulls, refuseRoundedId } from "./cursor.ts"
 import { typedKeys } from "./list-extras.ts"
+import { paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired } from "./page-refusals.ts"
 import { roundedKey } from "./rounded-key.ts"
 import {
 	applySelect,
@@ -17,10 +18,6 @@ import {
 	type ListPagination,
 	type ListRow,
 	type PaginationResponse,
-	paginationIn,
-	refuseGoneAnchor,
-	refuseOverRead,
-	refuseUnwired,
 	totalOf,
 } from "./pagination.ts"
 import type { SortField } from "./types.ts"

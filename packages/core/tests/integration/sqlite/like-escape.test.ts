@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { parseFilter } from "../../../src/query/filter.ts"
 import { globPattern, likePattern } from "../../../src/query/like.ts"
 import { conditionToSQL } from "../../../src/query/sqlite/executor.ts"
-import { likeSearch, searchText } from "../../../src/query/sqlite/search.ts"
+import { likeSearch } from "../../../src/query/sqlite/search.ts"
+import { searchText } from "../../../src/query/sqlite/search-text.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
 const item = sqliteTable("item", {

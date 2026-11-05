@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/libsql"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
 import { refoldStatements } from "./refold.ts"
-import { searchText } from "./search.ts"
+import { searchText } from "./search-text.ts"
 
 const post = sqliteTable("post", { _search: text("_search"), body: text("body"), id: text("id"), title: text("title") })
 
