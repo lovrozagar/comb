@@ -50,13 +50,18 @@ const ident = (name: string) => sql.raw(quoteIdent(name))
 const termless = (query: string | null): SQL | null => (query === null || query.trim() === "" ? null : sql`0`)
 
 /**
- * `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS
- * syntax spells. `folded` when the FTS table indexes a searchText column: each term is folded so
+ * `<fts table> MATCH ?`, every term required as a prefix; null for an empty query, no row for one
+ * only FTS syntax spells
  */
 function buildFtsMatch(
 	ftsTableName: string,
 	query: string | null,
-	{ folded = false }: { folded?: boolean | undefined } = {},
+	{
+		folded = false,
+	}: {
+		/** true when the FTS table indexes a searchText column: each term is folded as the column was; default false */
+		folded?: boolean | undefined
+	} = {},
 ): SQL | null {
 	const terms = ftsTerms(query, folded)
 	return terms.length === 0 ? termless(query) : sql`${ident(ftsTableName)} MATCH ${matchQuery(terms, "AND")}`
@@ -67,12 +72,15 @@ function buildFtsMatch(
  * rowid or its integer key)
  */
 export type FtsSource = {
+	// U16
 	/**
 	 * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
-	 * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
+	 * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it
 	 */
 	folded?: boolean | undefined
+	/** the FTS5 table's name */
 	ftsTable: string
+	/** the table it indexes */
 	table: SQLiteTable
 }
 
@@ -95,25 +103,43 @@ function buildFtsWhere(source: FtsSource, query: string | null): SQL | null {
 }
 
 /** `highlight()` of one FTS column, its marker tags bound */
-function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: { end: string; start: string }): SQL {
+function buildFtsHighlight(
+	ftsTableName: string,
+	columnIndex: number,
+	tags: {
+		/** the text after each match */
+		end: string
+		/** the text before each match */
+		start: string
+	},
+): SQL {
 	return sql`highlight(${ident(ftsTableName)}, ${columnIndex}, ${tags.start}, ${tags.end})`
 }
 
-export type SpellfixRow = { word: string }
+/** A row of a spellfix1 vocabulary query */
+export type SpellfixRow = {
+	/** a word the vocabulary offers */
+	word: string
+}
 
+/** The database `buildFtsWhereWithSpellfix` asks for corrections: a drizzle SQLite database */
 type SpellfixDb = {
+	/** runs a query and resolves to its rows */
 	all: (query: SQL) => Promise<Array<SpellfixRow>>
 	/** the client drizzle's wrapper holds (d1, libsql, bun:sqlite), which keys the spellfix1 probe */
 	$client?: unknown
 }
 
+/** An FTS search whose terms are widened by a spellfix1 vocabulary's corrections */
 type SpellfixSearch = FtsSource & {
 	/** editdist3 bound below which a word counts as a correction (default 300) */
 	maxEditDistance?: number | undefined
 	/** corrections taken per term (default 3) */
 	maxCorrections?: number | undefined
-	/** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
+	// Q4 of r20, Q3 of r21
+	/** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed; a D1 client is known without it */
 	spellfix?: boolean | undefined
+	/** the spellfix1 vocabulary table's name */
 	spellfixTable: string
 }
 
@@ -195,20 +221,18 @@ async function buildFtsWhereWithSpellfix(
 	return inMatches(search, groups.join(" AND "))
 }
 
-/**
- * Resolver that converts a raw search string into a LIKE WHERE clause.
- * Returns null when input is empty — callers can skip the clause entirely.
- */
+/** A search: the `q` text in, its WHERE clause out; null when it searches nothing */
 type LikeSearchResolver = (q: string) => SQL | null
 
+// U21, QE2 of r22b
 /**
- * Factory for search on a `_search` column that searchText wrote, or any other SQL expression. Each
+ * The search of a `_search` column that searchText wrote, or any other SQL expression. Each
  * whitespace-separated term is folded by searchText and trimmed, and kept only when it holds a letter
  * or digit, as FTS keeps its terms: a mark alone folds to nothing or a space, and would match every
  * row. Each term is found with `instr` in the expression's `lower()`, so no LIKE pattern is built and
- * none meets D1's 50-byte pattern cap (U21), and any expression is matched by ASCII case as LIKE
- * matched it (QE2 of r22b); only a searchText column matches its accents and other folds. Every
- * term is required. A query whose terms all fold away matches no row, as FTS answers it.
+ * none meets D1's 50-byte pattern cap, and any expression is matched ignoring ASCII case; only a
+ * searchText column matches its accents and other folds. Every term is required. A query whose terms
+ * all fold away matches no row, as FTS answers it.
  */
 function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver {
 	return (q) => {

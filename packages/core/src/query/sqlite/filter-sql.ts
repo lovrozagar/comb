@@ -15,12 +15,18 @@ import { COLUMN_KINDS, type ColumnKind, lowerOn } from "./condition.ts"
  * A mapped column: its name and what it stores, which decides how a value binds as on a drizzle
  * column (`"date-s"` for a date in whole seconds, `"as-is"` for its values bound as validated)
  */
-type MappedColumn = { column: string; kind: ColumnKind }
+type MappedColumn = {
+	/** the column's SQL name, quoted as an identifier under the table alias */
+	column: string
+	/** what the column stores */
+	kind: ColumnKind
+}
 
+/** How `buildFilterSQL` and `buildConditionSQL` reach the columns of a raw SQL query */
 type FilterSQLConfig = {
-	/** Column map: API field name -> `{ column, kind }`, its SQL column and condition.ts's ColumnKind */
+	/** each filter field's column, by its name in the API; a filter on a field it lacks is a 500 */
 	columnMap: Record<string, MappedColumn>
-	/** Table alias used in query (e.g. "pc" for productCollection) */
+	/** the alias the query reads the table under, such as "pc" for productCollection */
 	tableAlias: string
 }
 
@@ -50,9 +56,11 @@ function requireConditionSQL(condition: FilterCondition, config: FilterSQLConfig
 	})
 }
 
+// Q5 of r17
 /**
- * One condition as SQL on its mapped column, lowered as filterToSQL lowers it (Q5 of r17); null
- * when the field is unmapped or the column cannot take its operator or value
+ * One condition as SQL on its mapped column, lowered as filterToSQL lowers it; null when the field
+ * is unmapped or the column cannot take its operator or value. A mapping that is no
+ * `{ column, kind }` with a known kind throws a TypeError
  */
 function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
 	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined

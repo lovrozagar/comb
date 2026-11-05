@@ -10,14 +10,21 @@ import { and, eq, gt, isNotNull, isNull, lt, or, type SQL, type SQLWrapper, sql 
 import { effectiveNulls } from "../cursor.ts"
 import type { SortDirection, SortNulls } from "../types.ts"
 
+/** One key of a list's order */
 type SortKey = {
+	/** the column or expression sorted on */
 	column: SQLWrapper
+	/** its direction */
 	direction: SortDirection
+	/** where its nulls sort; left out, last ascending and first descending */
 	nulls?: SortNulls | undefined
 }
 
+/** The unique column that breaks ties after every sort key, so the order is total */
 type Tiebreak = {
+	/** the column; unique and never null, or a page repeats or skips rows */
 	column: SQLWrapper
+	/** its direction */
 	direction: SortDirection
 }
 
@@ -103,9 +110,13 @@ function after(key: SortKey, value: unknown): SQL | null {
 
 /** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
 type KeysetPosition = {
+	/** the row's tiebreak value */
 	id: unknown
+	/** the list's sort keys, in order */
 	keys: readonly SortKey[]
+	/** the list's tiebreak */
 	tiebreak: Tiebreak
+	/** the row's value for each key, in the keys' order; null for a NULL */
 	values: readonly unknown[]
 }
 
@@ -144,11 +155,11 @@ function afterFrom(position: KeysetPosition, start: number): SQL {
 const unsafeBounds = (values: readonly unknown[]): SQL[] =>
 	values.flatMap((value) => (value instanceof AnchorBound && value.ends ? [isNull(value.value)] : []))
 
+// U26
 /**
- * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
- * comparison because each key carries its own direction and null placement. A bound that `ends`
- * is NULL once its anchor is gone: every row passes then, each carrying anchorGone's flag, so the
- * page answers invalid_cursor rather than end the list unseen (U26).
+ * The WHERE clause of the rows after `position` in the list's order: every key, then the tiebreak,
+ * each in its own direction and null placement, so it agrees with `orderSQL` and the page after
+ * repeats and skips no row
  */
 function keysetSQL(position: KeysetPosition): SQL {
 	const unsafe = unsafeBounds(position.values)

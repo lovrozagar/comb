@@ -13,7 +13,9 @@ import { searchText } from "./search-text.ts"
 
 /** The statements of one refold: the read, and the writes its rows call for */
 type Refold = {
+	/** reads every row's rowid, stored fold and sources */
 	select: SQL
+	/** one UPDATE per row `select` read whose stored fold differs from its sources' fold; none for a row already folded */
 	updates(rows: ReadonlyArray<Record<string, unknown>>): SQL[]
 }
 

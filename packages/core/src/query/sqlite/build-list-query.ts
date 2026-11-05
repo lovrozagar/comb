@@ -107,11 +107,27 @@ function refuseUnmergeable(sort: readonly SortField[], idColumn: SQLiteColumn | 
 		throw new CombError({ cause, errorKey: combErrorKeys.SORT_NOT_WIRED, status: "internal_server_error" })
 }
 
+/**
+ * A table's list query from a parsed request: its WHERE (base, filter, search and cursor), ORDER BY
+ * with the `id` tiebreak, LIMIT, OFFSET and the extras `paginate` reads. A sort, filter or `q` the
+ * schema accepted that the options cannot run is a 500, as is a cursor on a table with no `id` column
+ */
 function buildListQuery<TTable extends SQLiteTable>(
-	opts: BuildListQueryOpts<TTable> & { merged: NonNullable<BuildListQueryOpts<TTable>["merged"]> },
+	opts: BuildListQueryOpts<TTable> & {
+		/** the shards' list, which `paginateMerged` pages */
+		merged: NonNullable<BuildListQueryOpts<TTable>["merged"]>
+	},
 ): MergedListQueryResult
+/**
+ * A table's list query from a parsed request: its WHERE (base, filter, search and cursor), ORDER BY
+ * with the `id` tiebreak, LIMIT, OFFSET and the extras `paginate` reads. A sort, filter or `q` the
+ * schema accepted that the options cannot run is a 500, as is a cursor on a table with no `id` column
+ */
 function buildListQuery<TTable extends SQLiteTable>(
-	opts: BuildListQueryOpts<TTable> & { merged?: undefined },
+	opts: BuildListQueryOpts<TTable> & {
+		/** absent: one database's list, which `paginate` pages */
+		merged?: undefined
+	},
 ): ListQueryResult
 function buildListQuery<TTable extends SQLiteTable>(
 	opts: BuildListQueryOpts<TTable>,
@@ -179,14 +195,31 @@ function refuseOtherTiebreak(idColumn: SQLWrapper, tiebreak: string | undefined)
 	)
 }
 
+/**
+ * A list query over rows no one table holds, sorted by the expressions `sortColumns` names and
+ * broken by `idColumn` or `anchor`'s, filtered and searched by the SQL your code lowered. A sort
+ * field with no expression is a 500; an idColumn other than the list schema's tiebreak, or a merged
+ * list given `anchor`, throws a TypeError
+ */
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField> & {
+		/** absent: a merged list reads no key back by reference, so it takes `idColumn` */
 		anchor?: never | undefined
+		/** the shards' list, which `paginateMerged` pages */
 		merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>
 	},
 ): MergedListQueryResult
+/**
+ * A list query over rows no one table holds, sorted by the expressions `sortColumns` names and
+ * broken by `idColumn` or `anchor`'s, filtered and searched by the SQL your code lowered. A sort
+ * field with no expression is a 500; an idColumn other than the list schema's tiebreak, or a merged
+ * list given `anchor`, throws a TypeError
+ */
 function buildDerivedListQuery<TSortField extends string>(
-	opts: BuildDerivedListQueryOpts<TSortField> & { merged?: undefined },
+	opts: BuildDerivedListQueryOpts<TSortField> & {
+		/** absent: one database's list, which `paginate` pages */
+		merged?: undefined
+	},
 ): ListQueryResult
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField>,

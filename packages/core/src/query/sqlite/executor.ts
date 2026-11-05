@@ -18,8 +18,11 @@ const COMPUTED_PREFIX = "@"
  * query schema), so they bind as the field declares.
  */
 type FilterToSQLConfig = {
+	/** the resolver of each `@`-prefixed field, by its name with the `@` */
 	computedFilters?: Record<string, ComputedFilterResolver> | undefined
+	/** the table whose columns a plain field names, by property name */
 	mainTable: SQLiteTable
+	/** the many-to-many relation each `relation.column` field reaches, by the relation's name */
 	relations?: Record<string, RelationConfig> | undefined
 }
 
@@ -123,6 +126,11 @@ function groupToSQL(group: FilterGroup, config: FilterToSQLConfig): SQL {
 	return (group.logic === "and" ? and(...conditions) : or(...conditions)) as SQL
 }
 
+/**
+ * A validated filter as one WHERE clause on `config.mainTable`; null for no filter. A relation field
+ * matches where some related row does, and its negations (`ne`, `nin`, `is.null`, `is.notnull`)
+ * where none does. A condition no column, relation or resolver can run is a 500 `filter_not_wired`
+ */
 function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | null {
 	return ast ? groupToSQL(ast.root, config) : null
 }

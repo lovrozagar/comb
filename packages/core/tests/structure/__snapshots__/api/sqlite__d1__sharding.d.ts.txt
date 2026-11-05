@@ -26,39 +26,48 @@ declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<re
 export { paginateMerged };
 
 // query/sqlite/build-list-query-types.d.ts
-/** The options the SQLite list builders take, and the query they build (build-list-query.ts). Declarations only. */
+/** The options the SQLite list builders take, and the query they build. Declarations only. */
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ListPagination } from "../pagination.ts";
 import type { ComputedFilterResolver, ComputedSortResolver, ListQueryInput } from "../types.ts";
 import type { LikeSearchResolver } from "./search.ts";
 import type { RelationConfig } from "./types.ts";
+/** What `buildListQuery` builds a table's list from */
 type BuildListQueryOpts<TTable extends SQLiteTable> = {
-    /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
+    /** a WHERE clause ANDed with the filter, search and cursor, for joins, access rules or soft deletes; a function is called with drizzle's `sql` */
     baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL) | undefined;
+    /** the resolver of each `@`-prefixed filter field, by its name with the `@`; a filter on one without a resolver is a 500 */
     computedFilters?: Record<string, ComputedFilterResolver> | undefined;
+    /** the resolver of each `@`-prefixed sort field, by its name with the `@`; a sort on one without a resolver is a 500 */
     computedSorts?: Record<string, ComputedSortResolver> | undefined;
     /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
     cursorScope: string;
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
     cursorSecret: string;
-    /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
+    /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL, as on `CursorOptions` */
     nonFinite?: "exact" | undefined;
     /**
-     * A list whose rows sit on several D1 shards: every shard reads it with this one query, and
-     * paginateMerged merges what they read (K5 of r17). A page by number reads every row to its end
-     * from each shard, past `maxRowsPerShard` (1001) a 400 `page_too_deep`
+     * Present for a list whose rows sit on several D1 shards: every shard reads it with this one
+     * query, and `paginateMerged` merges what they read. A page by number reads every row to its end
+     * from each shard. It sorts by columns only, and the table needs an `id` column to break ties across shards
      */
     merged?: {
+        /** the most rows a shard reads for one page by number, a whole number from 1; default 1001, and a deeper page is a 400 `page_too_deep` */
         maxRowsPerShard?: number | undefined;
     } | undefined;
+    /** the list schema's output; a filter or order it did not check is a 500 */
     parsed: ListQueryInput;
+    /** the many-to-many relation each `relation.column` filter field reaches, by the relation's name */
     relations?: Record<string, RelationConfig> | undefined;
-    /** LIKE-based search resolver — use `likeSearch(column)` factory */
+    /** the search the `q` param runs, such as `likeSearch(column)`; a `q` without one is a 500 */
     search?: LikeSearchResolver | undefined;
+    /** the table the list reads; each sort and filter field is one of its columns by property name, and its `id` column breaks ties */
     table: TTable;
 };
+/** What `buildDerivedListQuery` builds a list from whose rows are no one table's: a join, a union or a view */
 type BuildDerivedListQueryOpts<TSortField extends string = string> = {
+    /** a WHERE clause ANDed with the filter, search and cursor; a function is called with drizzle's `sql` */
     baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL) | undefined;
     /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
     cursorScope: string;
@@ -66,79 +75,102 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     cursorSecret: string;
     /**
      * the database the list reads, needed only where its id and keys hold no column: a column says it
-     * wherever it sits, and a list of SQL expressions alone (a union, say) cannot (Q1 of r21)
+     * wherever it sits, and a list of SQL expressions alone (a union, say) cannot
      */
     dialect?: "postgres" | "sqlite" | undefined;
+    /** the request's filter as SQL, lowered by your code; null or absent filters nothing */
     filterWhere?: SQL | null | undefined;
     /**
-     * Present when the rows come from several shards, which paginateMerged merges, as on
-     * buildListQuery: each shard reads its window, an offset page its count. A merged derived list
-     * carries no sort key by reference, and its rows carry each sort field under its name (Q12 of r18).
+     * Present when the rows come from several shards, which `paginateMerged` merges, as on
+     * `buildListQuery`: each shard reads its window, an offset page its count. A merged derived list
+     * carries no sort key by reference, so it takes `idColumn`, and its rows carry each sort field under its name
      */
     merged?: {
+        /** the most rows a shard reads for one page by number, a whole number from 1; default 1001, and a deeper page is a 400 `page_too_deep` */
         maxRowsPerShard?: number | undefined;
     } | undefined;
+    /** the list schema's output; its sort fields are the keys of `sortColumns` */
     parsed: ListQueryInput<TSortField>;
+    /** the request's search as SQL, built by your code; null or absent searches nothing */
     searchWhere?: SQL | null | undefined;
-    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
+    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date. A sort on a field with none is a 500 */
     sortColumns: Record<TSortField, SQLWrapper | {
+        /** the expression, yielding epoch milliseconds */
         sql: SQLWrapper;
+        /** "date": the cursor carries the key as a Date */
         type: "date";
     }>;
 } & ({
     /**
      * the one table the rows are, by its id column: a sort key too long for a cursor is
-     * carried by reference and read back from it, as on a table's own list (C3)
+     * carried by reference and read back from it, as on a table's own list
      */
     anchor: {
+        /** the table's id column, which the order breaks ties on */
         idColumn: SQLiteColumn;
+        /** the table each row is one of */
         table: SQLiteTable;
     };
+    /** absent: `anchor` names the id */
     idColumn?: never | undefined;
 } | {
+    /** absent: the rows are no one table's */
     anchor?: never | undefined;
     /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
     idColumn: SQLWrapper;
 });
 /**
  * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
- * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them (Q2)
+ * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them
  */
 type ListExtras = Partial<{
-    /** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers invalid_cursor (U26) */
+    /** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers with a 400 invalid_cursor */
     _combAnchorGone: SQL.Aliased<number>;
     /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
     _combId: SQL.Aliased<unknown>;
-    /** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression (Q2 of r19, Q2 of r21) */
+    /** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression */
     _combKeyTypes: SQL.Aliased<string>;
-    /** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds (QL2 of r22b) */
+    /** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds */
     _combKeyTexts: SQL.Aliased<string>;
-    /** each SQLite timestamp key's TEXT where the list reads it back and the row holds TEXT, a JSON array with null for any other key, never comma-joined (B2-3 of area B) */
+    /** each SQLite timestamp key's TEXT where the list reads it back and the row holds TEXT, a JSON array with null for any other key */
     _combTextKeys: SQL.Aliased<string>;
-    /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
+    /** an offset page's count of every row the filter matches; a cursor page selects none */
     _total: SQL.Aliased<number>;
 }>;
+/** A built list query: apply it with `applyListQuery`, then page its rows with `paginate` */
 type ListQueryResult = {
-    /** select these beside the row's own columns (ListExtras) */
+    /** select these beside the row's own columns */
     extras: ListExtras;
+    /** the rows to read: one more than the page, so `paginate` can tell a next page exists */
     limit: number;
-    /** How `paginate` pages the rows this query reads (pagination.ts) */
+    /** How `paginate` pages the rows this query reads */
     pagination: ListPagination & {
+        /** false: `paginate` pages it */
         merged: false;
     };
+    /** the page as the request asked for it */
     meta: {
+        /** the page size */
         limit: number;
+        /** the page number; 1 on a cursor page */
         page: number;
+        /** how the page is read: past a cursor, or by number */
         type: "cursor" | "offset";
     };
+    /** the rows to skip: 0 on a cursor page, which the WHERE clause seeks past */
     offset: number;
+    /** the ORDER BY: each sort key with its null placement stated, then the tiebreak */
     orderBy: SQL[];
+    /** the trimmed search text; null when the request searches nothing */
     search: string | null;
+    /** the base, filter, search and cursor clauses ANDed; undefined when there are none */
     where: SQL | undefined;
 };
-/** A merged list's query, which every shard reads and paginateMerged alone pages (K8 of r17) */
+/** A merged list's query, which every shard reads and `paginateMerged` alone pages; each shard reads from its first row, so `offset` is 0 */
 type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
+    /** How `paginateMerged` pages the rows every shard reads */
     pagination: ListPagination & {
+        /** true: `paginateMerged` pages it, and `paginate` refuses it */
         merged: true;
     };
 };
@@ -679,10 +711,11 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
  */
 declare function sanitizeFtsTerm(term: string): string;
 /**
- * `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS
- * syntax spells. `folded` when the FTS table indexes a searchText column: each term is folded so
+ * `<fts table> MATCH ?`, every term required as a prefix; null for an empty query, no row for one
+ * only FTS syntax spells
  */
-declare function buildFtsMatch(ftsTableName: string, query: string | null, { folded }?: {
+declare function buildFtsMatch(ftsTableName: string, query: string | null, { folded, }?: {
+    /** true when the FTS table indexes a searchText column: each term is folded as the column was; default false */
     folded?: boolean | undefined;
 }): SQL | null;
 /**
@@ -692,10 +725,12 @@ declare function buildFtsMatch(ftsTableName: string, query: string | null, { fol
 export type FtsSource = {
     /**
      * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
-     * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
+     * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it
      */
     folded?: boolean | undefined;
+    /** the FTS5 table's name */
     ftsTable: string;
+    /** the table it indexes */
     table: SQLiteTable;
 };
 /**
@@ -705,24 +740,32 @@ export type FtsSource = {
 declare function buildFtsWhere(source: FtsSource, query: string | null): SQL | null;
 /** `highlight()` of one FTS column, its marker tags bound */
 declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: {
+    /** the text after each match */
     end: string;
+    /** the text before each match */
     start: string;
 }): SQL;
+/** A row of a spellfix1 vocabulary query */
 export type SpellfixRow = {
+    /** a word the vocabulary offers */
     word: string;
 };
+/** The database `buildFtsWhereWithSpellfix` asks for corrections: a drizzle SQLite database */
 type SpellfixDb = {
+    /** runs a query and resolves to its rows */
     all: (query: SQL) => Promise<Array<SpellfixRow>>;
     /** the client drizzle's wrapper holds (d1, libsql, bun:sqlite), which keys the spellfix1 probe */
     $client?: unknown;
 };
+/** An FTS search whose terms are widened by a spellfix1 vocabulary's corrections */
 type SpellfixSearch = FtsSource & {
     /** editdist3 bound below which a word counts as a correction (default 300) */
     maxEditDistance?: number | undefined;
     /** corrections taken per term (default 3) */
     maxCorrections?: number | undefined;
-    /** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
+    /** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed; a D1 client is known without it */
     spellfix?: boolean | undefined;
+    /** the spellfix1 vocabulary table's name */
     spellfixTable: string;
 };
 /**
@@ -730,19 +773,16 @@ type SpellfixSearch = FtsSource & {
  * corrections: every term is required, each matched by itself or any of its corrections.
  */
 declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearch, query: string | null): Promise<SQL | null>;
-/**
- * Resolver that converts a raw search string into a LIKE WHERE clause.
- * Returns null when input is empty — callers can skip the clause entirely.
- */
+/** A search: the `q` text in, its WHERE clause out; null when it searches nothing */
 type LikeSearchResolver = (q: string) => SQL | null;
 /**
- * Factory for search on a `_search` column that searchText wrote, or any other SQL expression. Each
+ * The search of a `_search` column that searchText wrote, or any other SQL expression. Each
  * whitespace-separated term is folded by searchText and trimmed, and kept only when it holds a letter
  * or digit, as FTS keeps its terms: a mark alone folds to nothing or a space, and would match every
  * row. Each term is found with `instr` in the expression's `lower()`, so no LIKE pattern is built and
- * none meets D1's 50-byte pattern cap (U21), and any expression is matched by ASCII case as LIKE
- * matched it (QE2 of r22b); only a searchText column matches its accents and other folds. Every
- * term is required. A query whose terms all fold away matches no row, as FTS answers it.
+ * none meets D1's 50-byte pattern cap, and any expression is matched ignoring ASCII case; only a
+ * searchText column matches its accents and other folds. Every term is required. A query whose terms
+ * all fold away matches no row, as FTS answers it.
  */
 declare function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver;
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, type SpellfixDb, type SpellfixSearch, };
@@ -758,11 +798,17 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
  * `through.throughTargetKey` references `target.targetKey`. Every key is a column's property name.
  */
 type RelationConfig = {
+    /** the main table's key the join table references; default its single primary key, and a filter on a table with none or several is a 500 */
     sourceKey?: string | undefined;
+    /** the table the filtered column is on */
     target: SQLiteTable;
+    /** the target's key the join table references */
     targetKey: string;
+    /** the join table */
     through: SQLiteTable;
+    /** the join table's column holding the main table's key */
     throughSourceKey: string;
+    /** the join table's column holding the target's key */
     throughTargetKey: string;
 };
 export type { RelationConfig };

@@ -76,30 +76,7 @@
 				"comb/no-silent-catch": "error",
 				"comb/no-v8-ignore": "error",
 				"comb/optional-undefined": "error",
-				"comb/public-jsdoc": [
-					"error",
-					{
-						"entries": [
-							".",
-							"./cli",
-							"./codegen",
-							"./codegen/generators",
-							"./meta",
-							"./migrate",
-							"./pg/columns",
-							"./pg/error-handler",
-							"./sqlite/columns",
-							"./sqlite/constraint-handler",
-							"./sqlite/constraints",
-							"./sqlite/d1/bookmark",
-							"./sqlite/d1/error-handler",
-							"./sqlite/d1/session",
-							"./sqlite/patterns",
-							"./states",
-							"./types"
-						]
-					}
-				],
+				"comb/public-jsdoc": "error",
 				"comb/raw-sql-allowlist": "error"
 			}
 		},
