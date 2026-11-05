@@ -64,9 +64,10 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    # test:coverage ran 14m40s in run 41333028493 (13m03s in 41328141693), the job 15m07s to its end;
-    # 23 minutes is about 1.5x, so the limit still catches a hang; test:bun has its own job below
-    timeout-minutes: 23
+    # test:coverage ran 736 files in 20.2 minutes in run 42044117817 (the job 20m50s to its end), and run 42056901545's
+    # runner was 1.23x slower over the files both ran, so 23 minutes cancelled it with no test failed; 31 minutes is
+    # about 1.5x the 20.2, so the limit still catches a hang; test:bun has its own job below
+    timeout-minutes: 31
     services:
       postgres:
         image: postgres:17
