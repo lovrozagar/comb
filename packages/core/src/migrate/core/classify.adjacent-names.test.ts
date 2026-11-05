@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 import type { ExtractedSchema } from "../types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
-import { segments } from "./sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
 
 type Options = Parameters<typeof classifyMigration>[1]
 type Case = { before?: number; options: Options; sql: string }

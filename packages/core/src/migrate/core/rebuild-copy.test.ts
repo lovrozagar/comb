@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { readCopy, rebuildsOf } from "./rebuild-copy.ts"
-import { codeOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
 
 const CREATE =
 	"CREATE TABLE `new_t` (`id` text NULL, `a` text NOT NULL DEFAULT 'x, y', `b` integer NOT NULL DEFAULT (1 + 2), PRIMARY KEY (`id`))"

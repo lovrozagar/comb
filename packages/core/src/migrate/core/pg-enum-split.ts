@@ -6,7 +6,8 @@
  * transaction.
  */
 import { nextVersion } from "./atlas-dir.ts"
-import { codeOf, QNAME } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { QNAME } from "./sql-code.ts"
 import { withDirectivesFirst } from "./pg-objects.ts"
 import { atlasFile, pgStatements } from "./pg-split.ts"
 import { atlasHeader } from "./atlas-header.ts"

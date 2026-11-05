@@ -4,7 +4,7 @@
  */
 import type { LocalDb } from "../drivers/local-db.ts"
 import { preview } from "./classify-file.ts"
-import { codeOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
 
 /**
  * Refuses `sql` when SQLite reads it as more than one statement (SL2 of r22): comb applies each

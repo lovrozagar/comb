@@ -1,6 +1,6 @@
 /**
- * The destructive-change gate. Each statement's code (sql-code.ts) is read per action, so a drop
- * after an `ADD` in one `ALTER TABLE` counts, and a name may be quoted or schema-qualified.
+ * The destructive-change gate. Each statement's code (codeOf in sql-lexer.ts) is read per action,
+ * so a drop after an `ADD` in one `ALTER TABLE` counts, and a name may be quoted or schema-qualified.
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
@@ -33,7 +33,8 @@ import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
 import { outsideTransaction } from "./atlas-header.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
-import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { type PgRead, pgRead } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 import { takenOptions } from "./classify-options.ts"

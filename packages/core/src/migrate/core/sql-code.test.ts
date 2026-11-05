@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { codeOf, lastPart, namesIn, splitTopLevel, sqliteNames, topLevel, unquote } from "./sql-code.ts"
+import { lastPart, namesIn, splitTopLevel, sqliteNames, topLevel, unquote } from "./sql-code.ts"
 
 describe("unquote and lastPart", () => {
 	it.each([
@@ -12,27 +12,6 @@ describe("unquote and lastPart", () => {
 	])("reads %s as %s, table %s", (name, joined, last) => {
 		expect(unquote(name)).toBe(joined)
 		expect(lastPart(name)).toBe(last)
-	})
-})
-
-describe("codeOf", () => {
-	it("keeps identifiers, blanks strings and comments, and collapses whitespace", () => {
-		expect(codeOf("DROP  TABLE \"post\" -- gone\n; SELECT 'x'", "postgres")).toBe('DROP TABLE "post" ; SELECT')
-	})
-
-	it("unwraps a DO body into the code it runs, an unterminated one too", () => {
-		expect(codeOf("DO $d$ BEGIN DROP TABLE post; END $d$", "postgres")).toBe("DO BEGIN DROP TABLE post; END")
-		expect(codeOf("DO $$ DROP TABLE post", "postgres")).toBe("DO DROP TABLE post")
-	})
-
-	it("sets a quoted name off from a word written against it, as the tokenizer does", () => {
-		expect(codeOf('ALTER TABLE "users"DROP COLUMN email', "sqlite")).toBe('ALTER TABLE "users" DROP COLUMN email')
-		expect(codeOf("ALTER TABLE`users`RENAME TO[people]", "sqlite")).toBe("ALTER TABLE `users` RENAME TO [people]")
-		expect(codeOf('SELECT "main".t, t."x", "a"(1)', "sqlite")).toBe('SELECT "main".t, t."x", "a"(1)')
-	})
-
-	it("leaves a function body out, as a string", () => {
-		expect(codeOf("CREATE FUNCTION f() AS $$ DROP TABLE post $$", "postgres")).toBe("CREATE FUNCTION f() AS")
 	})
 })
 

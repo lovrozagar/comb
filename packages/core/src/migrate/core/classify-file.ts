@@ -11,7 +11,8 @@ import { atlasHeader, outsideTransaction } from "./atlas-header.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { blockAfter, nodeOf } from "./pg-outside-transaction.ts"
-import { hashedSql, normalizeSql, segments } from "./sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
+import { hashedSql, normalizeSql } from "./sql-scan.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_TABLE = /* @__PURE__ */ new RegExp(

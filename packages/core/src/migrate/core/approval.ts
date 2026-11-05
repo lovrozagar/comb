@@ -7,7 +7,7 @@
  */
 import type { Dialect, MigrationClassification } from "../types.ts"
 import { extractDropStatements } from "./classify.ts"
-import { segments } from "./sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
 import { dropsQuestion } from "./utils.ts"
 
 /** The parts of a parsed migration the decision reads */

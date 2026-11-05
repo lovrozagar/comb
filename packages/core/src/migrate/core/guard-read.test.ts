@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readGuards } from "./guard-read.ts"
 import { guardRebuilds } from "./rebuild-guard.ts"
 import { extractSchema } from "./schema.ts"
-import { codeOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 const BEFORE = extractSchema(`CREATE TABLE u (id integer PRIMARY KEY, name text);

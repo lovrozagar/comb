@@ -10,7 +10,8 @@ import type { Pending } from "./plan-apply.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
-import { asciiFold, codeOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { asciiFold } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 /* SQLite matches a table or trigger name without regard to case, and the catalog keeps each as written */

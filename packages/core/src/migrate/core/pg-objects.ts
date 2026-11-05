@@ -22,7 +22,8 @@ import { affected, isView, same } from "./pg-dependents.ts"
 import { viewReplay } from "./pg-atlas-replay.ts"
 import { extrasAfter, followExtra } from "./pg-extras.ts"
 import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
-import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 import { pgStatements } from "./pg-split.ts"
 import { atlasHeader } from "./atlas-header.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -104,9 +105,8 @@ function defined(code: string, sql: string): PgObject | undefined {
 	if (view !== undefined)
 		return { extras: [], key: lastPart(view), kind: materialized ? "materialized view" : "view", name: view, sql }
 	const [, policy, on] = CREATE_POLICY.exec(code) ?? []
-	if (policy !== undefined && on !== undefined) {
+	if (policy !== undefined && on !== undefined)
 		return { extras: [], key: `${lastPart(policy)} on ${lastPart(on)}`, kind: "policy", name: policy, on, sql }
-	}
 	const [, kind, name] = CREATE_NAMED.exec(code) ?? []
 	if (kind === undefined || name === undefined) return undefined
 	return { extras: [], key: lastPart(name), kind: kind.toLowerCase() as PgObjectKind, name, sql }

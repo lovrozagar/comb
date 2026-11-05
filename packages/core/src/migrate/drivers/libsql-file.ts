@@ -11,7 +11,7 @@ import { pastStop } from "../core/cleanup.ts"
 import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
 import { openFileDatabase } from "./file-open.ts"
-import { segments } from "../core/sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
 
 /** The surface of libsql's Database comb calls: `prepare` only on a scratch (libsql-local.ts), never on a target */

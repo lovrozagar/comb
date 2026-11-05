@@ -7,7 +7,8 @@
  */
 import { IDENT, lastPart, nameKey, QNAME, topLevel } from "./sql-code.ts"
 import { affinityOf, definitionAffinity } from "./sqlite-affinity.ts"
-import { normalizeSql, segments } from "./sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
+import { normalizeSql } from "./sql-scan.ts"
 
 const NO_TRANSACTION: string = "a rebuild needs the file's transaction, which -- atlas:txmode none gives up"
 

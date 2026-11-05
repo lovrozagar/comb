@@ -17,7 +17,8 @@ import { refuseOutside } from "./proof-outside.ts"
 import { refuseFolded } from "./proof-split.ts"
 import { extractSchema } from "./schema.ts"
 import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
-import { asciiFold, codeOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { asciiFold } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 /**

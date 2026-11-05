@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { sqlFiles } from "./atlas-dir.ts"
 import { wranglerOrder } from "./plan-apply.ts"
-import { segments } from "./sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
 
 /**
  * The migration files of the D1 directory `dir`, in wrangler's order, with their text; refused

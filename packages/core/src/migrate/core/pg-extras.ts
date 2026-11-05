@@ -7,7 +7,8 @@
  * object, and writes it again after the object is created again. Any other statement that names
  * an object comb owns is refused, since comb could not keep it.
  */
-import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 
 /** An object comb owns, as far as its statements go: its kind and key, and what was said about it */
 type Owned = { extras: string[]; key: string; kind: string; name: string }

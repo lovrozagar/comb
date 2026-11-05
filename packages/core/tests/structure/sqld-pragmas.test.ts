@@ -10,7 +10,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { refuseUnrunnable } from "../../src/migrate/core/classify-file.ts"
-import { codeOf } from "../../src/migrate/core/sql-code.ts"
+import { codeOf } from "../../src/sql-lexer.ts"
 import { requireSqld, type Sqld, SQLD_PATH, SQLD_VERSION, startSqld } from "../support/sqld.ts"
 
 /** Whether comb refuses `stmt` on a sqld target as sqld's */

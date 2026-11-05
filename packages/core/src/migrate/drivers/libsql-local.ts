@@ -4,7 +4,7 @@
  * vector indexes, not on the runtime's newer one, which runs syntax libsql refuses and refuses
  * libsql's own. libsql's Database is the one the @libsql/client comb resolves loads (libsql-file.ts).
  */
-import { segments } from "../core/sql-scan.ts"
+import { segments } from "../../sql-lexer.ts"
 import { bound, libsqlDatabase } from "./libsql-file.ts"
 import type { LocalDb } from "./local-db.ts"
 

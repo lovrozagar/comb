@@ -16,7 +16,8 @@
  *   compiles checks against. Only the seeded tables get rows.
  */
 import type { LiveObject } from "./proof-copy.ts"
-import { asciiFold, codeOf, IDENT, sqliteNames } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { asciiFold, IDENT, sqliteNames } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 // lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again

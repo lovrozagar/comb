@@ -3,7 +3,8 @@
  * keys and shape, the indexes, the dropped tables, the triggers and the routines. The classifier
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
-import { codeOf, dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
 import { type FileRead, fileRead, recordRead } from "./pg-split.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"

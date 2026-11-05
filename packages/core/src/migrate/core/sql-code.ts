@@ -4,7 +4,7 @@
  * an action list splits only at its top-level commas.
  */
 import type { Dialect } from "../types.ts"
-import { segments, WORD_CHAR } from "./sql-scan.ts"
+import { bodyText, joined, segments } from "../../sql-lexer.ts"
 
 /** One name part: double-quoted, backtick or bracket quoted, or bare */
 const IDENT: string = `(?:"(?:[^"]|"")*"|\`[^\`]*\`|\\[[^\\]]*\\]|[A-Za-z_\\u0080-\\uffff][\\w$\\u0080-\\uffff]*)`
@@ -12,7 +12,6 @@ const IDENT: string = `(?:"(?:[^"]|"")*"|\`[^\`]*\`|\\[[^\\]]*\\]|[A-Za-z_\\u008
 const QNAME: string = `${IDENT}(?:\\s*\\.\\s*${IDENT})*`
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const PARTS = /* @__PURE__ */ new RegExp(IDENT, "g")
-const DOLLAR_TAG = /^\$[^$]*\$/
 
 /** One name part without its quotes, a doubled `""` read as one `"` */
 function unquotePart(part: string): string {
@@ -101,41 +100,6 @@ function pragmaOf(code: string): Pragma | undefined {
 const qualifiedKey = (name: string): string =>
 	[...name.matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")).join(".")
 
-/** A dollar-quoted body without its tags */
-function bodyText(text: string): string {
-	const tag = DOLLAR_TAG.exec(text)?.[0] as string
-	return text.endsWith(tag) && text.length >= 2 * tag.length
-		? text.slice(tag.length, -tag.length)
-		: text.slice(tag.length)
-}
-
-/**
- * `stmt`'s segments joined: identifiers kept, a DO body read as code itself, comments one space, strings kept or one
- * space. A quoted name is a token of its own, so a word written against it is set off by a space, as `ALTER TABLE
- * "users"DROP COLUMN email` drops the column `ALTER TABLE "users" DROP COLUMN email` does; `"main".t` and `"a"(` stay
- */
-function joined(stmt: string, dialect: Dialect, strings: boolean): string {
-	let out = ""
-	let quoted = false
-	for (const { kind, text } of segments(stmt, dialect)) {
-		const kept = kind === "code" || kind === "identifier" || (strings && kind === "literal")
-		const piece = kept ? text : kind === "body" ? ` ${codeOf(bodyText(text), dialect)} ` : " "
-		const edge = kind === "identifier" ? out.at(-1) : quoted ? piece[0] : undefined
-		out += (edge !== undefined && WORD_CHAR.test(edge) ? " " : "") + piece
-		quoted = kind === "identifier"
-	}
-	return out.replace(/\s+/g, " ").trim()
-}
-
-/**
- * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
- * space, whitespace collapsed; a SQLite pragma keeps a quoted value, its operand (S2 of r20)
- */
-function codeOf(stmt: string, dialect: Dialect): string {
-	const code = joined(stmt, dialect, false)
-	return dialect === "sqlite" && /^PRAGMA\b/i.test(code) ? joined(stmt, dialect, true) : code
-}
-
 /**
  * Every name SQLite code can spell, as SQLite resolves one: each bare word and each quoted name unquoted, and each
  * word of a string, which SQLite reads as a name where one stands (`FROM 'post'`) and a module as its option's
@@ -205,8 +169,6 @@ function topLevel(code: string): string {
 
 export {
 	asciiFold,
-	bodyText,
-	codeOf,
 	dialectOf,
 	IDENT,
 	lastPart,

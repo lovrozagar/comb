@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { targetRefusal } from "./classify-target.ts"
-import { codeOf, pragmaOf } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { pragmaOf } from "./sql-code.ts"
 
 /** targetRefusal of `sql` as the gate reads it */
 const refusal = (sql: string, kind: "d1" | "local" | "sqld") => {

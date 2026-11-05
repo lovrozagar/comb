@@ -6,7 +6,8 @@
  * the statements out of the history and the target, follows the flags per table, and writes the
  * delta after Atlas's statements.
  */
-import { codeOf, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf } from "../../sql-lexer.ts"
+import { lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 import { parsePostgres } from "./pg-parser.ts"
 import { pgStatements } from "./pg-split.ts"
 
