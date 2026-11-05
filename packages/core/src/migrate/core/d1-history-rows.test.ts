@@ -30,6 +30,7 @@ async function target(): Promise<D1Target & { db: ReturnType<typeof fakeD1>["db"
 		migrationsDir: dir,
 		name: "CORE",
 		wrangler: wranglerBin(),
+		held: async () => false,
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 }

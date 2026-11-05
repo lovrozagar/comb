@@ -4,11 +4,12 @@
  */
 import * as z from "zod"
 import { hold } from "../core/cleanup.ts"
+import { findWranglerConfig, localHeld, wranglerReader } from "../core/d1-binding.ts"
 import { projectBin } from "../core/optional-peer.ts"
 import { WRANGLER } from "../core/peer-needs.ts"
 import { type ProjectBin, type Run, run, runPeer } from "../core/process.ts"
 import { segments } from "../../sql-lexer.ts"
-import { LOCAL_BUSY, LOCAL_LOCK_MS, LOCKER } from "./d1-lock.ts"
+import { LOCAL_LOCK_MS, LOCKER, lockedOut } from "./d1-lock.ts"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult } from "../types.ts"
 
 /* wrangler JSON output schema for query results, built on use: each command parses it once */
@@ -37,8 +38,11 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 	return { columns, rows: results.map((row) => columns.map((col) => row[col])) }
 }
 
-/** wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22) */
-type Wrangler = { exec: Run; wrangler: ProjectBin }
+/**
+ * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22), and
+ * whether another process holds the local database's write lock now (d1-lock.ts lockedOut)
+ */
+type Wrangler = { exec: Run; held: () => Promise<boolean>; wrangler: ProjectBin }
 
 /** Whether `ms` ran out (true), or a signal stopped comb first (its name), after which nothing new starts */
 function waitOut(ms: number): Promise<true | NodeJS.Signals> {
@@ -60,15 +64,18 @@ function waitOut(ms: number): Promise<true | NodeJS.Signals> {
  * start can outlast the whole window, so the window starts at the lock, not the start): wrangler sends each --command as
  * one request, and miniflare runs each request in one transaction (transactionSync), so the request a held
  * lock failed made no change, and running it again runs it once. Even a read takes the write lock there, and
- * a command cannot set busy_timeout (SQLITE_AUTH), so the wait is comb's. A remote command runs once.
+ * a command cannot set busy_timeout (SQLITE_AUTH), so the wait is comb's. Whether a run met the lock is
+ * workerd's SQLITE_BUSY in its output or, since a run can end before workerd's line is forwarded, SQLite's own
+ * answer for the file (d1-lock.ts lockedOut). A remote command runs once.
  */
-async function runWrangler({ exec, wrangler }: Wrangler, args: string[]): Promise<string> {
+async function runWrangler({ exec, held, wrangler }: Wrangler, args: string[]): Promise<string> {
 	let deadline: number | undefined
 	for (let delay = 100; ; delay *= 2) {
-		const { code, stderr, stdout } = await runPeer(exec, wrangler)(args)
+		const ran = await runPeer(exec, wrangler)(args)
+		const { code, stderr, stdout } = ran
 		if (code === 0) return stdout
 		const failed = `wrangler failed (exit ${code})`
-		if (!args.includes("--local") || !LOCAL_BUSY.test(`${stderr}\n${stdout}`))
+		if (!args.includes("--local") || !(await lockedOut(ran, held)))
 			throw new Error(`${failed}: ${stderr.trim() || stdout.trim()}`)
 		deadline ??= Date.now() + LOCAL_LOCK_MS
 		const left = deadline - Date.now()
@@ -196,11 +203,11 @@ function createD1Connection(databaseName: string, flags: readonly string[], spaw
  */
 async function executeAll(
 	exec: Run,
-	{ flags, name, wrangler }: { flags: readonly string[]; name: string; wrangler: ProjectBin },
+	{ flags, held, name, wrangler }: Omit<Wrangler, "exec"> & { flags: readonly string[]; name: string },
 	statements: readonly string[],
 ): Promise<Array<Array<Record<string, unknown>>>> {
 	const args = ["d1", "execute", name, ...flags, "--json", `--command=${statements.join(";\n")}`]
-	const stdout = await runWrangler({ exec, wrangler }, args)
+	const stdout = await runWrangler({ exec, held, wrangler }, args)
 	const results = readAllResults(stdout)
 	if (results.length !== statements.length)
 		throw new Error(`wrangler answered ${results.length} results for ${statements.length} statements`)
@@ -214,15 +221,26 @@ export { executeAll, wranglerFlags }
  * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
  * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
  */
-export function connectD1(config: D1ProviderConfig, exec: Run, wrangler: ProjectBin): Connection {
-	return createD1Connection(config.databaseName, wranglerFlags(config), { exec, wrangler })
+export function connectD1(config: D1ProviderConfig, spawn: Wrangler): Connection {
+	return createD1Connection(config.databaseName, wranglerFlags(config), spawn)
 }
 
-/** A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect */
+/**
+ * A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect;
+ * its local file is the one the config names, or else the one wrangler finds in the working folder
+ */
 export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
 	return {
 		connect(): Promise<Connection> {
-			return Promise.resolve().then(() => connectD1(config, exec, projectBin(WRANGLER, process.cwd())))
+			return Promise.resolve().then(() => {
+				const wrangler = projectBin(WRANGLER, process.cwd())
+				const held = localHeld(() => wranglerReader(wrangler), {
+					name: config.databaseName,
+					wranglerConfig: config.wranglerConfig ?? findWranglerConfig(process.cwd()),
+					wranglerEnv: config.wranglerEnv,
+				})
+				return connectD1(config, { exec, held, wrangler })
+			})
 		},
 		dialect: "sqlite",
 	}

@@ -6,6 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { pastStop, scratchDir } from "../core/cleanup.ts"
 
 /** What comb does with a private database */
@@ -34,8 +35,8 @@ type NodeStatement = { all(...params: unknown[]): unknown[]; run(...params: unkn
 /** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on (SL3 of r22) */
 export type ScratchEngine = "libsql" | "runtime"
 
-/** How a database file, or `:memory:`, opens on an engine */
-type Open = (file: string) => LocalDb
+/** How a database file, or `:memory:`, opens on an engine; with `create` false, only a file that is there, read-write */
+export type Open = (file: string, create?: boolean) => LocalDb
 
 /** The engine's opener; under Node, node:sqlite, a built-in from 22.13 on, so an older Node is refused by its floor */
 async function opener(engine: ScratchEngine): Promise<Open> {
@@ -53,8 +54,9 @@ async function opener(engine: ScratchEngine): Promise<Open> {
 	const { DatabaseSync } = (await import("node:sqlite")) as unknown as {
 		DatabaseSync: new (file: string) => { close(): void; exec(sql: string): void; prepare(sql: string): NodeStatement }
 	}
-	return (file) => {
-		const db = new DatabaseSync(file)
+	return (file, create) => {
+		/* SQLite's URI form is how node:sqlite opens without creating: mode=rw */
+		const db = new DatabaseSync(create === false ? `${pathToFileURL(file).href}?mode=rw` : file)
 		return {
 			all: (sql, params = []) => db.prepare(sql).all(...params) as Array<Record<string, unknown>>,
 			close: () => db.close(),
@@ -69,6 +71,33 @@ async function opener(engine: ScratchEngine): Promise<Open> {
 export async function openMemory(): Promise<LocalDb> {
 	await pastStop()
 	return (await opener("runtime"))(":memory:")
+}
+
+/** SQLite's result code for a lock another connection holds */
+const SQLITE_BUSY = 5
+
+/**
+ * Whether another connection holds the write lock of the database file `file` now, as SQLite answers a try at it:
+ * BEGIN IMMEDIATE with no busy wait, rolled back at once, so nothing is written, on the file opened read-write and
+ * never created. The answer is SQLite's code, node:sqlite's errcode or bun:sqlite's errno, never its text; a file
+ * that is not there, or that SQLite cannot open, holds no lock comb can see.
+ */
+export async function writeLocked(file: string): Promise<boolean> {
+	const open = await opener("runtime")
+	let db: LocalDb | undefined
+	try {
+		db = open(file, false)
+		db.exec("PRAGMA busy_timeout = 0")
+		db.exec("BEGIN IMMEDIATE")
+		db.exec("ROLLBACK")
+		return false
+	} catch (error) {
+		// reason: the probe's own failure is its answer: SQLite's busy code is the lock, and any other (no file, no database) holds none
+		const { errcode, errno } = error as { errcode?: unknown; errno?: unknown }
+		return [errcode, errno].includes(SQLITE_BUSY)
+	} finally {
+		db?.close()
+	}
 }
 
 const SCRATCH = "comb-scratch-"

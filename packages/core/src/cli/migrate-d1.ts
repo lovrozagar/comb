@@ -6,10 +6,9 @@
  */
 import path from "node:path"
 import { approveMigration } from "../migrate/core/approval.ts"
-import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
+import { type D1Target, findWranglerConfig, localHeld, wranglerReader } from "../migrate/core/d1-binding.ts"
 import { adoptHashesD1, applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
 import { Refused } from "../migrate/core/refused.ts"
-import { importBin } from "../migrate/core/optional-peer.ts"
 import { type ProjectBin, run as runProcess } from "../migrate/core/process.ts"
 import { connectD1, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
@@ -21,12 +20,6 @@ type D1Mode = "apply" | "baseline" | "check" | "status"
 
 /** One D1 command: what it was asked, and where it reports */
 type D1Request = { args: ParsedArgs; db: string; io: CliContext; mode: D1Mode }
-
-/** The config reader of `bin`'s wrangler, the one the command checked and spawns (K1 of r22) */
-async function wranglerReader(bin: ProjectBin): Promise<ReadConfig> {
-	const wrangler = await importBin<{ unstable_readConfig: ReadConfig }>(bin)
-	return (args) => wrangler.unstable_readConfig(args)
-}
 
 /** The D1 database comb.migrate.config.ts resolved, or the binding named on the command line */
 function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { config: D1ProviderConfig; dir: string } {
@@ -47,7 +40,7 @@ function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { co
 }
 
 /** Run `request.mode` on the D1 database `resolved` names, or `request.db` when the project has no migrate config */
-export { d1Config, wranglerReader }
+export { d1Config }
 
 export async function migrateD1(
 	request: D1Request,
@@ -62,18 +55,18 @@ export async function migrateD1(
 	/* the provider's databaseName, the D1 database its connection reaches whatever the environment is called (K4 of r17) */
 	const name = config.databaseName
 	const exec = io.run ?? runProcess
-	const conn = connectD1(config, exec, wrangler)
+	const read = await wranglerReader(wrangler)
+	const ref = { name, wranglerConfig: config.wranglerConfig as string, wranglerEnv: config.wranglerEnv }
+	const held = localHeld(async () => read, ref)
 	const target: D1Target = {
-		conn,
+		...ref,
+		conn: connectD1(config, { exec, held, wrangler }),
 		exec,
 		flags: wranglerFlags(config),
+		held,
 		migrationsDir: dir,
-		name,
 		wrangler,
-		wranglerConfig: config.wranglerConfig as string,
-		wranglerEnv: config.wranglerEnv,
 	}
-	const read = await wranglerReader(wrangler)
 	const label = resolved?.label ?? name
 	if (mode === "status") return statusD1(target, read, io.out)
 	if (mode === "baseline" && args.options["hashes"] === true) {

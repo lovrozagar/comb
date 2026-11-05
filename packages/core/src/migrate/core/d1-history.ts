@@ -12,6 +12,7 @@ import type { ParsedMigration } from "../migration-types.ts"
 import type { Approval } from "./approval.ts"
 import { absentDatabase } from "../drivers/absent.ts"
 import { executeAll } from "../drivers/d1.ts"
+import { lockedOut } from "../drivers/d1-lock.ts"
 import { assertLocalExists, type D1Target, localMissing, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { d1Files, refuseSwallowing } from "./d1-files.ts"
 import { applyFailure, wranglerError } from "./d1-wrangler-error.ts"
@@ -129,7 +130,7 @@ async function appliedAfter(
 /** Refuse a failed run, or one whose table gained (`added`) other than the `names` checked, naming a file never checked (SD4 of r22) */
 function refuseUnlike(
 	ran: { code: number; stderr: string; stdout: string },
-	{ added, local, names, table }: { added: string[]; local: boolean; names: string[]; table: string },
+	{ added, locked, names, table }: { added: string[]; locked: boolean; names: string[]; table: string },
 ): void {
 	const unchecked = added.filter((name) => !names.includes(name))
 	const rest = names.filter((name) => !added.includes(name))
@@ -138,7 +139,7 @@ function refuseUnlike(
 			? ""
 			: `; wrangler also applied ${unchecked.join(", ")}, which comb never checked and holds no hash for: check each against git, then run comb migrate baseline <db> --hashes`
 	const now = { applied: added, pending: rest }
-	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${applyFailure(ran, local)}${also}`, now)
+	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${applyFailure(ran, locked)}${also}`, now)
 	if (unchecked.length > 0 || rest.length > 0) {
 		throw new Refused(
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; wrangler said: ${wranglerError(ran)}${also}`,
@@ -193,13 +194,14 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	for (const name of names) options.print(`Apply: ${name}`)
 	const apply = ["d1", "migrations", "apply", target.name, ...target.flags]
 	const ran = await runPeer(target.exec, target.wrangler)(apply, { input: "" })
+	/* asked before anything else runs, while the lock that failed the apply is most likely still held */
+	const locked = ran.code !== 0 && target.flags.includes("--local") && (await lockedOut(ran, target.held))
 	const after = await appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
 	const moved = await moveIntents(
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
 	)
-	const local = target.flags.includes("--local")
-	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), local, names, table })
+	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), locked, names, table })
 	if (moved !== undefined) {
 		throw new Refused(
 			`wrangler applied ${names.join(", ")}, then recording their hashes failed: ${moved}; comb migrate status reads them as recorded, and the next apply or baseline records them`,

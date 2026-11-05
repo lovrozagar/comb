@@ -5,7 +5,7 @@
 import { BUSY_TIMEOUT } from "../core/apply.ts"
 import { pastStop } from "../core/cleanup.ts"
 import { openFileDatabase } from "./file-open.ts"
-import type { LocalDb } from "./local-db.ts"
+import type { Open } from "./local-db.ts"
 import type {
 	BunSqliteProviderConfig,
 	Connection,
@@ -101,11 +101,13 @@ function once<T>(db: BunLocal, sql: string, use: (stmt: ReturnType<BunLocal["pre
 	}
 }
 
-/** How bun:sqlite opens a private database file, or `:memory:` (local-db.ts) */
-async function bunLocal(): Promise<(file: string) => LocalDb> {
-	const { Database } = (await import(BUN_SQLITE)) as { Database: new (path: string) => BunLocal }
-	return (file) => {
-		const db = new Database(file)
+/** How bun:sqlite opens a private database file, or `:memory:`; with `create` false, only a file that is there (local-db.ts) */
+async function bunLocal(): Promise<Open> {
+	const { Database } = (await import(BUN_SQLITE)) as {
+		Database: new (path: string, options?: { create: boolean; readwrite: boolean }) => BunLocal
+	}
+	return (file, create) => {
+		const db = create === false ? new Database(file, { create: false, readwrite: true }) : new Database(file)
 		return {
 			/* each statement finalized at once: one left open (an EXPLAIN DROP TABLE among them) keeps its table locked */
 			all: (sql, params = []) =>

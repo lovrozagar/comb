@@ -1,7 +1,12 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { deliver, stubKill } from "../../../tests/support/signals.ts"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
+import { localD1Path } from "../core/d1-binding.ts"
 import type { D1ProviderConfig, ResolvedDatabaseConfig } from "../types.ts"
 import { createD1Provider, executeAll } from "./d1.ts"
 import { asCalled, wranglerBin } from "../../cli/__fixtures__/d1.ts"
@@ -53,14 +58,17 @@ describe("executeAll", () => {
 	it("runs every statement in one wrangler call, and refuses an answer that leaves one out", async () => {
 		const two = fakeRun(() => json([{ results: [{ n: 1 }] }, { results: [] }]))
 		expect(
-			await executeAll(two, { flags: ["--local"], name: "core", wrangler: wranglerBin() }, [
+			await executeAll(two, { flags: ["--local"], held: async () => false, name: "core", wrangler: wranglerBin() }, [
 				"SELECT 1 AS n",
 				"CREATE TABLE t (x)",
 			]),
 		).toEqual([[{ n: 1 }], []])
 		const one = fakeRun(() => json([{ results: [] }]))
 		await expect(
-			executeAll(one, { flags: [], name: "core", wrangler: wranglerBin() }, ["SELECT 1", "SELECT 2"]),
+			executeAll(one, { flags: [], held: async () => false, name: "core", wrangler: wranglerBin() }, [
+				"SELECT 1",
+				"SELECT 2",
+			]),
 		).rejects.toThrow("wrangler answered 1 results for 2 statements")
 	})
 })
@@ -367,6 +375,46 @@ describe("createD1Provider: a local database another process has locked", () => 
 		const failed = (await connect(slowly(run), LOCAL)).execute("x").then(unexpected, (error: unknown) => error as Error)
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect([run.calls.length > 1, (await failed).message]).toEqual([true, LOCKED])
+	})
+})
+
+/* CI on 84332342: wrangler's answer names only an internal error, and a run can end before workerd's line is forwarded */
+/** A local config whose wrangler config binds `core`, and its database file, made */
+function project(): { config: D1ProviderConfig; file: string } {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-d1-held-"))
+	const wranglerConfig = path.join(dir, "wrangler.json")
+	const d1 = { binding: "DB", database_id: "id-core", database_name: "core" }
+	fs.writeFileSync(wranglerConfig, JSON.stringify({ d1_databases: [d1], name: "w" }))
+	const file = localD1Path(dir, d1)
+	fs.mkdirSync(path.dirname(file), { recursive: true })
+	new DatabaseSync(file).close()
+	return { config: { ...LOCAL, wranglerConfig }, file }
+}
+
+/* on real timers: the file is found through the real wrangler's config reader, which fake timers stall */
+describe("createD1Provider: a local lock wrangler's output does not name", () => {
+	const LOST: RunResult = { code: 1, stderr: "", stdout: '{"error":{"text":"internal error; reference = r1"}}' }
+
+	it("waits out a lock SQLite reports on the file the config binds", async () => {
+		const { config, file } = project()
+		const holder = new DatabaseSync(file)
+		holder.exec("BEGIN IMMEDIATE")
+		const run = fakeRun(() => {
+			if (run.calls.length === 1) return LOST
+			holder.exec("ROLLBACK")
+			holder.close()
+			return json([{ results: [{ n: 1 }] }])
+		})
+		const rows = await (await connect(run, config)).execute("SELECT 1 AS n")
+		expect([rows, run.calls.length]).toEqual([{ columns: ["n"], rows: [[1]] }, 2])
+	})
+
+	it("runs once, and throws wrangler's error, when the file is not locked", async () => {
+		const run = answering(LOST, json([]))
+		await expect((await connect(run, project().config)).execute("x")).rejects.toThrow(
+			`wrangler failed (exit 1): ${LOST.stdout}`,
+		)
+		expect(run.calls.length).toBe(1)
 	})
 })
 

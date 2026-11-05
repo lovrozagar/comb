@@ -6,7 +6,9 @@
 import { createHash, createHmac } from "node:crypto"
 import { existsSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
+import { writeLocked } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
+import { importBin } from "./optional-peer.ts"
 import type { ProjectBin, Run } from "./process.ts"
 import { D1_MIGRATIONS_TABLE } from "./d1-history-tables.ts"
 
@@ -34,6 +36,8 @@ type D1Target = {
 	exec: Run
 	/** --local or --remote, then --config and --env */
 	flags: readonly string[]
+	/** whether another process holds the local database's write lock now, asked once a --local run failed (d1-lock.ts lockedOut) */
+	held: () => Promise<boolean>
 	migrationsDir: string
 	/** the binding's name or database_name, as every wrangler command takes it */
 	name: string
@@ -75,7 +79,7 @@ function resolveBinding(read: ReadConfig, target: D1Target): string {
  * `target`'s wrangler config as `read` reads it; one it fails on is named with the reason as its
  * cause, as comb's other config loaders name theirs (D2-8 of the area D round-two review)
  */
-function readNamed(read: ReadConfig, target: D1Target): WranglerConfig {
+function readNamed(read: ReadConfig, target: BindingRef): WranglerConfig {
 	try {
 		return read({ config: target.wranglerConfig, env: target.wranglerEnv })
 	} catch (error) {
@@ -84,8 +88,17 @@ function readNamed(read: ReadConfig, target: D1Target): WranglerConfig {
 	}
 }
 
+/** What names a binding: its name, and the wrangler config and environment it is read from */
+type BindingRef = Pick<D1Target, "name" | "wranglerConfig" | "wranglerEnv">
+
+/** The config reader of `bin`'s wrangler, the one the command checked and spawns (K1 of r22) */
+async function wranglerReader(bin: ProjectBin): Promise<ReadConfig> {
+	const wrangler = await importBin<{ unstable_readConfig: ReadConfig }>(bin)
+	return (args) => wrangler.unstable_readConfig(args)
+}
+
 /** The binding `target` names in its wrangler config, and where comb says it read it */
-function bindingOf(read: ReadConfig, target: D1Target): { d1: WranglerD1; where: string } {
+function bindingOf(read: ReadConfig, target: BindingRef): { d1: WranglerD1; where: string } {
 	const config = readNamed(read, target)
 	const where = `${target.wranglerConfig}${target.wranglerEnv === undefined ? "" : ` (env ${target.wranglerEnv})`}`
 	const d1 = config.d1_databases.find((db) => db.database_name === target.name || db.binding === target.name)
@@ -108,6 +121,22 @@ function localD1Path(configDir: string, d1: WranglerD1): string {
 	const named = createHmac("sha256", key).update(name).digest().subarray(0, 16)
 	const id = Buffer.concat([named, createHmac("sha256", key).update(named).digest().subarray(0, 16)]).toString("hex")
 	return join(configDir, ".wrangler", "state", "v3", "d1", D1_OBJECT, `${id}.sqlite`)
+}
+
+/**
+ * Whether another process holds the write lock of the local database `ref` binds now, as SQLite answers a try at
+ * it (local-db.ts writeLocked), asked once a --local run failed (d1-lock.ts lockedOut); with no wrangler config
+ * there is no file to ask, and no lock comb can see
+ */
+function localHeld(
+	read: () => Promise<ReadConfig>,
+	ref: Omit<BindingRef, "wranglerConfig"> & { wranglerConfig: string | undefined },
+): () => Promise<boolean> {
+	return async () => {
+		const { wranglerConfig } = ref
+		if (wranglerConfig === undefined) return false
+		return writeLocked(localD1Path(dirname(wranglerConfig), bindingOf(await read(), { ...ref, wranglerConfig }).d1))
+	}
 }
 
 /** Whether `target` is a local database wrangler keeps nowhere yet: its first `d1 execute --local` would create one */
@@ -135,9 +164,11 @@ export {
 	type D1Target,
 	findWranglerConfig,
 	localD1Path,
+	localHeld,
 	localMissing,
 	type ReadConfig,
 	resolveBinding,
+	wranglerReader,
 	type WranglerConfig,
 	type WranglerD1,
 }

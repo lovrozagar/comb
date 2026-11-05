@@ -146,3 +146,39 @@ describe("openScratch's sweep", () => {
 		}
 	})
 })
+
+/* CI on 84332342: a --local run that met a lock can end before workerd's line saying so is forwarded */
+describe("writeLocked", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-write-locked-"))
+	it("says true while another connection holds the file's write lock, and false once it lets go", async () => {
+		const { DatabaseSync } = await import("node:sqlite")
+		const file = path.join(dir, "held.sqlite")
+		const holder = new DatabaseSync(file)
+		holder.exec("CREATE TABLE t (a); BEGIN IMMEDIATE")
+		const during = await local.writeLocked(file)
+		holder.exec("ROLLBACK")
+		const after = await local.writeLocked(file)
+		holder.close()
+		expect([during, after]).toEqual([true, false])
+	})
+
+	it("leaves a file it found unlocked as it was, its bytes and mtime", async () => {
+		const { DatabaseSync } = await import("node:sqlite")
+		const file = path.join(dir, "free.sqlite")
+		const db = new DatabaseSync(file)
+		db.exec("CREATE TABLE t (a); INSERT INTO t VALUES (1)")
+		db.close()
+		/* set back to the epoch, so a write in the same millisecond as the probe would still move it */
+		fs.utimesSync(file, 0, 0)
+		const before = { bytes: fs.readFileSync(file), mtime: fs.statSync(file).mtimeMs }
+		expect(await local.writeLocked(file)).toBe(false)
+		expect({ bytes: fs.readFileSync(file), mtime: fs.statSync(file).mtimeMs }).toEqual(before)
+		expect(fs.readdirSync(dir).filter((name) => name.startsWith("free"))).toEqual(["free.sqlite"])
+	})
+
+	it("says false, and creates nothing, for a file that is not there or one SQLite cannot open", async () => {
+		const missing = path.join(dir, "missing.sqlite")
+		expect([await local.writeLocked(missing), await local.writeLocked(dir)]).toEqual([false, false])
+		expect(fs.existsSync(missing)).toBe(false)
+	})
+})

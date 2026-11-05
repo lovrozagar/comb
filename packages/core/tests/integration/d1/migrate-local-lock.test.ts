@@ -22,6 +22,8 @@ afterEach(() => {
 
 const INIT = { "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" }
 const ENTRY = { binding: "CORE", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" }
+const APPLY_LOCKED =
+	"wrangler d1 migrations apply failed: the local D1 database was locked by another process (wrangler dev, a wrangler command or a second comb migrate) while wrangler applied: let it finish and rerun"
 const LOCKED =
 	"wrangler failed (exit 1): the local D1 database stayed locked by another process (wrangler dev, a wrangler command or a second comb migrate) for 5 s: let it finish and rerun"
 
@@ -67,6 +69,17 @@ function lockedUntilBusy(dir: string, run: Run, takes: (args: readonly string[])
 	return { run: locked, seen }
 }
 
+/**
+ * `run` with workerd's log taken out of every run the lock failed: workerd prints its SQLITE_BUSY apart from wrangler's
+ * answer, which is only an internal error, and a run can end before that line is forwarded (CI on 84332342)
+ */
+const lostBusyLine =
+	(run: Run): Run =>
+	async (cmd, args, options) => {
+		const ran = await run(cmd, args, options)
+		return LOCAL_BUSY.test(ran.stderr) ? { ...ran, stderr: "" } : ran
+	}
+
 /** The --command of a wrangler run sending apply's hash intents, the batch before wrangler applies the file */
 const intent = (args: readonly string[]) =>
 	args.find(
@@ -88,9 +101,53 @@ describe("comb migrate on D1 --local while another process holds the file's lock
 		const status = d1Io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(1)
 		const said = status.errors.join("\n")
-		expect([said.includes(LOCKED), /workerd|stack:/.test(said)]).toEqual([true, false])
+		expect([said.includes(LOCKED), /workerd|stack:/.test(said)], said).toEqual([true, false])
+	}, 120_000)
+})
+
+/* CI on 84332342: workerd's SQLITE_BUSY line reaches wrangler's output apart from its answer, and can come too late */
+describe("comb migrate on D1 --local when workerd's busy line misses wrangler's output", () => {
+	it("refuses, naming the lock, when wrangler's output lost workerd's busy line", async () => {
+		const dir = await applied()
+		lock(dir)
+		const status = d1Io(dir)
+		expect(await runCli(["migrate", "status", "core", "--local"], { ...status, run: lostBusyLine(status.run) })).toBe(1)
+		expect(status.errors, status.errors.join("\n")).toEqual([LOCKED])
 	}, 120_000)
 
+	it("reports wrangler's own error, not the lock, when wrangler fails on a file nothing holds", async () => {
+		const dir = await applied()
+		const status = d1Io(dir)
+		const failure = "✘ [ERROR] Couldn't find a D1 DB with the name or binding 'core'"
+		let calls = 0
+		const run: Run = async (cmd, args, options) =>
+			args.includes("execute") && calls++ === 0
+				? { code: 1, stderr: "", stdout: failure }
+				: status.run(cmd, args, options)
+		expect(await runCli(["migrate", "status", "core", "--local"], { ...status, run })).toBe(1)
+		expect([status.errors, calls]).toEqual([[`wrangler failed (exit 1): ${failure}`], 1])
+	}, 120_000)
+
+	it("names the lock an apply met when wrangler's output lost workerd's busy line", async () => {
+		const dir = await applied()
+		writeMigrations(dir, { "20260102000000_tag.sql": "CREATE TABLE tag (id TEXT PRIMARY KEY);" })
+		const apply = d1Io(dir)
+		/* the lock is taken as wrangler applies, and let go once comb reads back what it recorded */
+		let release: (() => void) | undefined
+		const run = lostBusyLine(async (cmd, args, options) => {
+			if (release !== undefined) {
+				release()
+				release = undefined
+			}
+			if (args.includes("migrations") && args.includes("apply")) release = lock(dir)
+			return apply.run(cmd, args, options)
+		})
+		expect(await runCli(["migrate", "apply", "core", "--local"], { ...apply, run })).toBe(1)
+		expect(apply.errors.join("\n")).toContain(APPLY_LOCKED)
+	}, 180_000)
+})
+
+describe("comb migrate on D1 --local while another process holds the intents' lock", () => {
 	it("runs the intent batch the lock failed again, and records the file once", async () => {
 		const dir = await applied()
 		writeMigrations(dir, { "20260102000000_tag.sql": "CREATE TABLE tag (id TEXT PRIMARY KEY);" })

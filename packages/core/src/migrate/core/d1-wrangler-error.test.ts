@@ -17,12 +17,11 @@ describe("wranglerError", () => {
 })
 
 describe("applyFailure", () => {
-	it("names another process's lock on a local target, from either stream, and wrangler's error otherwise", () => {
+	it("names another process's lock when the apply locked out, and wrangler's error otherwise", () => {
 		expect([
-			applyFailure({ stderr: BUSY, stdout: "" }, true),
-			applyFailure({ stderr: "", stdout: BUSY }, true),
+			applyFailure({ stderr: "", stdout: "internal error" }, true),
 			applyFailure({ stderr: BUSY, stdout: "" }, false),
-			applyFailure({ stderr: "✘ [ERROR] Authentication error", stdout: "" }, true),
-		]).toEqual([LOCKED, LOCKED, "✘ [ERROR] internal error; reference = x1", "✘ [ERROR] Authentication error"])
+			applyFailure({ stderr: "✘ [ERROR] Authentication error", stdout: "" }, false),
+		]).toEqual([LOCKED, "✘ [ERROR] internal error; reference = x1", "✘ [ERROR] Authentication error"])
 	})
 })

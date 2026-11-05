@@ -60,6 +60,7 @@ async function target(binding: Record<string, string>) {
 		migrationsDir: migrations,
 		name: "CORE",
 		wrangler: wranglerBin(),
+		held: async () => false,
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 	return { apply: () => applyD1(d1, { approve, print: () => undefined, read }), d1, read, run }
@@ -327,6 +328,33 @@ describe("applyD1 when another process holds the local database's lock", () => {
 			["1_init.sql"],
 			1,
 		])
+	})
+})
+
+/* CI on 84332342: workerd's busy line can miss wrangler's output, so the lock is SQLite's answer for the file */
+describe("applyD1 on a local lock wrangler's output does not name", () => {
+	it.each([
+		[
+			true,
+			"the local D1 database was locked by another process (wrangler dev, a wrangler command or a second comb migrate) while wrangler applied: let it finish and rerun",
+		],
+		[false, "✘ [ERROR] internal error; reference = x1"],
+	])("with the file held %s, refuses naming %s", async (held, why) => {
+		const { d1, read, run } = await target({})
+		const lost: D1Target = {
+			...d1,
+			exec: asWrangler(async (cmd, args, options) =>
+				args[1] === "migrations"
+					? { code: 1, stderr: "✘ [ERROR] internal error; reference = x1", stdout: "" }
+					: run(cmd, args, options),
+			),
+			held: async () => held,
+		}
+		const failed = await applyD1(lost, { approve, print: () => undefined, read }).then(
+			() => undefined,
+			(error: unknown) => error as Error,
+		)
+		expect(failed?.message).toBe(`wrangler d1 migrations apply failed: ${why}`)
 	})
 })
 

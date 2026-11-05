@@ -1156,16 +1156,24 @@ export { hashedSql, normalizeSql, splitSqlStatements };
 // migrate/drivers/d1.d.ts
 import { type ProjectBin, type Run } from "../core/process.ts";
 import type { Connection, ConnectionProvider, D1ProviderConfig } from "../types.ts";
+/**
+ * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22), and
+ * whether another process holds the local database's write lock now (d1-lock.ts lockedOut)
+ */
+type Wrangler = {
+    exec: Run;
+    held: () => Promise<boolean>;
+    wrangler: ProjectBin;
+};
 /** What every wrangler command on the database takes: --local or --remote, then its config and environment */
 declare function wranglerFlags(config: D1ProviderConfig): string[];
 /**
  * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
  * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
  */
-declare function executeAll(exec: Run, { flags, name, wrangler }: {
+declare function executeAll(exec: Run, { flags, held, name, wrangler }: Omit<Wrangler, "exec"> & {
     flags: readonly string[];
     name: string;
-    wrangler: ProjectBin;
 }, statements: readonly string[]): Promise<Array<Array<Record<string, unknown>>>>;
 export { executeAll, wranglerFlags };
 /**
@@ -1173,8 +1181,11 @@ export { executeAll, wranglerFlags };
  * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
  * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
  */
-export declare function connectD1(config: D1ProviderConfig, exec: Run, wrangler: ProjectBin): Connection;
-/** A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect */
+export declare function connectD1(config: D1ProviderConfig, spawn: Wrangler): Connection;
+/**
+ * A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect;
+ * its local file is the one the config names, or else the one wrangler finds in the working folder
+ */
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
 // migrate/drivers/sqlite-introspect.d.ts
@@ -1193,7 +1204,7 @@ export declare function getSqliteColumns(conn: Connection, table: string): Promi
 export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
 
 // migrate/drivers/bun-sqlite.d.ts
-import type { LocalDb } from "./local-db.ts";
+import type { Open } from "./local-db.ts";
 import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
 /**
  * A bun:sqlite database's provider, by file path or `:memory:`; it runs on Bun alone. Each connection
@@ -1201,8 +1212,8 @@ import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
  * missing, except by a reader, which opens it read-only and throws `DatabaseMissing` when it is not there
  */
 export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
-/** How bun:sqlite opens a private database file, or `:memory:` (local-db.ts) */
-declare function bunLocal(): Promise<(file: string) => LocalDb>;
+/** How bun:sqlite opens a private database file, or `:memory:`; with `create` false, only a file that is there (local-db.ts) */
+declare function bunLocal(): Promise<Open>;
 export { bunLocal };
 
 // migrate/core/classify-verdict.d.ts
@@ -1337,8 +1348,17 @@ export type ScratchDb = LocalDb & {
 };
 /** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on (SL3 of r22) */
 export type ScratchEngine = "libsql" | "runtime";
+/** How a database file, or `:memory:`, opens on an engine; with `create` false, only a file that is there, read-write */
+export type Open = (file: string, create?: boolean) => LocalDb;
 /** A new in-memory database on the runtime comb runs on */
 export declare function openMemory(): Promise<LocalDb>;
+/**
+ * Whether another connection holds the write lock of the database file `file` now, as SQLite answers a try at it:
+ * BEGIN IMMEDIATE with no busy wait, rolled back at once, so nothing is written, on the file opened read-write and
+ * never created. The answer is SQLite's code, node:sqlite's errcode or bun:sqlite's errno, never its text; a file
+ * that is not there, or that SQLite cannot open, holds no lock comb can see.
+ */
+export declare function writeLocked(file: string): Promise<boolean>;
 /**
  * A new scratch database on `engine`, that only this process can reach: on the runtime's, a file in a
  * directory of its own that only this user can open (0700), removed with it on close; on libsql's, a

@@ -1,7 +1,7 @@
 /**
  * What a failed `wrangler d1 migrations apply` says, read for the refusal comb gives.
  */
-import { LOCAL_BUSY, LOCKER } from "../drivers/d1-lock.ts"
+import { LOCKER } from "../drivers/d1-lock.ts"
 
 type Ran = { stderr: string; stdout: string }
 
@@ -14,12 +14,12 @@ export function wranglerError({ stderr, stdout }: Ran): string {
 }
 
 /**
- * Why a failed apply failed. On a --local target, workerd's SQLITE_BUSY means another process held the file's write
- * lock: wrangler runs its batch once and names only an internal error, so the lock is named here and never waited
- * out, since comb cannot know the batch did nothing, and what the table holds says what is still pending.
+ * Why a failed apply failed. When it `locked` out on a --local target (d1-lock.ts lockedOut), another process held
+ * the file's write lock: wrangler runs its batch once and names only an internal error, so the lock is named here and
+ * never waited out, since comb cannot know the batch did nothing, and what the table holds says what is still pending.
  */
-export function applyFailure(ran: Ran, local: boolean): string {
-	return local && LOCAL_BUSY.test(`${ran.stderr}\n${ran.stdout}`)
+export function applyFailure(ran: Ran, locked: boolean): string {
+	return locked
 		? `the local D1 database was locked by ${LOCKER} while wrangler applied: let it finish and rerun`
 		: wranglerError(ran)
 }

@@ -85,6 +85,7 @@ async function target() {
 		migrationsDir: migrations,
 		name: "CORE",
 		wrangler: wranglerBin(),
+		held: async () => false,
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 	const file = (name: string, sql: string) => {
