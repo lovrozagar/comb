@@ -15,8 +15,10 @@
  *   on a created table or view (a view's INSTEAD OF triggers carry out a write through it), each table and view a
  *   created reader references, and each created table's FK ancestors, which a write to it compiles checks against.
  * - Reflection reads the schema itself: a name with SQLite's reserved `sqlite_` prefix (its catalogs, sqlite_sequence,
- *   sqlite_stat*), a `pragma_` table-valued function, or a PRAGMA statement. When a file or an object the copy creates
- *   reflects, the copy creates every object and seeds every table, so SQLite's own tables hold what the whole schema's do.
+ *   sqlite_stat*), a `pragma_` table-valued function, or a PRAGMA statement but one that only sets how statements run
+ *   (foreign_keys, defer_foreign_keys, legacy_alter_table, recursive_triggers, case_sensitive_like,
+ *   ignore_check_constraints, busy_timeout). When a file or an object the copy creates reflects, the copy creates
+ *   every object and seeds every table, so SQLite's own tables hold what the whole schema's do.
  * - When a pending file holds an ALTER TABLE, it creates every other view and trigger too, with each table and view
  *   they name through views: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere
  *   fails the file, and the copy carries them all rather than a list of which ALTER forms check. The check resolves
@@ -24,7 +26,7 @@
  */
 import type { LiveObject } from "./proof-copy.ts"
 import { codeOf, segments } from "../../sql-lexer.ts"
-import { asciiFold, sqliteNames, unquote } from "./sql-code.ts"
+import { asciiFold, pragmaOf, sqliteNames, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 // lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again
@@ -88,6 +90,23 @@ const REFLECTION = /^(?:sqlite_|pragma_)/
 
 /** Whether `names` reflect on the schema */
 const reflects = (names: Iterable<string>): boolean => [...names].some((name) => REFLECTION.test(name))
+
+// lookup-table: the pragmas that set how statements run and touch no schema object; any other one reads the schema
+const QUIET_PRAGMAS: readonly string[] = [
+	"busy_timeout",
+	"case_sensitive_like",
+	"defer_foreign_keys",
+	"foreign_keys",
+	"ignore_check_constraints",
+	"legacy_alter_table",
+	"recursive_triggers",
+]
+
+/** Whether statement `stmt` is a PRAGMA that reads the schema: any but a quiet one, and one comb cannot read */
+function reflectingPragma(stmt: string): boolean {
+	const code = codeOf(stmt, "sqlite")
+	return /^PRAGMA\b/i.test(code) && !QUIET_PRAGMAS.includes(pragmaOf(code)?.name as string)
+}
 
 /** What a copy scoped to pending files holds: the live objects it creates, in their order, and the tables it seeds, folded */
 type Scope = { objects: LiveObject[]; seeded: Set<string> }
@@ -213,7 +232,7 @@ function observable(
 	const kept = objects.filter((object) => made.has(object) || read.has(object))
 	/* what reflects on the schema reads every object, and SQLite's own tables, whose rows the whole schema's make */
 	if (
-		statements.some((stmt) => /^PRAGMA\b/i.test(codeOf(stmt, "sqlite"))) ||
+		statements.some(reflectingPragma) ||
 		reflects(spelled) ||
 		kept.some((object) => reflects(graph.names.get(object) as Set<string>))
 	)

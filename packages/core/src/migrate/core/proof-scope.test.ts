@@ -150,13 +150,16 @@ describe("observable: with an ALTER TABLE pending", () => {
 
 /* AC2-1 of area C round 2, and ruling 3 of area C round 3: what reads the schema itself observes every object and
    SQLite's own tables, which the rows of every table make */
+/* a table, one SQLite counts the ids of, a view of it, and a view that reflects */
+const REFLECTING = [
+	table("t", "CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)"),
+	table("far", "CREATE TABLE far (id INTEGER PRIMARY KEY AUTOINCREMENT)"),
+	view("far_v", "CREATE VIEW far_v AS SELECT id FROM far"),
+	view("cat_v", "CREATE VIEW cat_v AS SELECT name FROM sqlite_schema"),
+]
+
 describe("observable: a file or a created object that reflects on the schema", () => {
-	const objects = [
-		table("t", "CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)"),
-		table("far", "CREATE TABLE far (id INTEGER PRIMARY KEY AUTOINCREMENT)"),
-		view("far_v", "CREATE VIEW far_v AS SELECT id FROM far"),
-		view("cat_v", "CREATE VIEW cat_v AS SELECT name FROM sqlite_schema"),
-	]
+	const objects = REFLECTING
 	const names = (sql: string) => observable(objects, [{ sql }]).objects.map(({ name }) => name)
 
 	it.each([
@@ -170,7 +173,12 @@ describe("observable: a file or a created object that reflects on the schema", (
 		"ANALYZE;\nINSERT INTO t (n) SELECT stat FROM [sqlite_stat1];",
 		"UPDATE t SET n = 'x';\nPRAGMA table_list;",
 		"UPDATE t SET n = 'x';\nPRAGMA main.table_list;",
-		"PRAGMA foreign_keys = OFF;\nUPDATE t SET n = 'x';",
+		"UPDATE t SET n = 'x';\nPRAGMA table_info('t');",
+		"UPDATE t SET n = 'x';\nPRAGMA index_list(t);",
+		"UPDATE t SET n = 'x';\nPRAGMA main.foreign_key_list(\"t\");",
+		"PRAGMA foreign_keys = OFF;\nUPDATE t SET n = 'x';\nPRAGMA foreign_key_check;",
+		"PRAGMA no_such_pragma = 1;\nUPDATE t SET n = 'x';",
+		"PRAGMA foreign_keys(OFF;\nUPDATE t SET n = 'x';",
 		"INSERT INTO t (n) SELECT name FROM cat_v;",
 	])("creates every object for %j, and seeds every table", (sql) => {
 		const scope = observable(objects, [{ sql }])
@@ -186,5 +194,44 @@ describe("observable: a file or a created object that reflects on the schema", (
 	it("reads a catalog's name in a comment as no read, and table_list outside a PRAGMA as a name", () => {
 		expect(names("-- sqlite_master\nUPDATE t SET n = 'x';\n/* PRAGMA */ SELECT 1;")).toEqual(["t"])
 		expect(names("UPDATE t SET n = 'table_list';")).toEqual(["t"])
+	})
+})
+
+/* rulings 14:55Z of area C round 3: a pragma that only sets how statements run is no reflection */
+describe("observable: a file with a pragma that touches no schema object", () => {
+	const objects = REFLECTING
+
+	it.each([
+		"PRAGMA foreign_keys = OFF;",
+		"PRAGMA foreign_keys;",
+		"PRAGMA main.defer_foreign_keys = ON;",
+		"PRAGMA temp.[defer_foreign_keys] = 'on';",
+		'PRAGMA "legacy_alter_table" = 1;',
+		"PRAGMA recursive_triggers(1);",
+		"PRAGMA Case_Sensitive_Like = true;",
+		"PRAGMA ignore_check_constraints = 0;",
+		"PRAGMA busy_timeout = 5000;",
+	])("creates and seeds only what the file names past %j", (pragma) => {
+		const scope = observable(objects, [{ sql: `${pragma}\nUPDATE t SET n = 'x';` }])
+		expect(scope.objects.map(({ name }) => name)).toEqual(["t"])
+		expect([...scope.seeded]).toEqual(["t"])
+	})
+
+	it("scopes a drizzle-kit table rebuild to the rebuilt table and what reaches it", () => {
+		const rebuild = [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint",
+			"CREATE TABLE `__new_far` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL);--> statement-breakpoint",
+			"INSERT INTO `__new_far`(`id`) SELECT `id` FROM `far`;--> statement-breakpoint",
+			"DROP TABLE `far`;--> statement-breakpoint",
+			"ALTER TABLE `__new_far` RENAME TO `far`;--> statement-breakpoint",
+			"PRAGMA foreign_keys=ON;",
+		].join("\n")
+		/* cat_v reflects, and an ALTER pending creates every view */
+		const scope = observable(
+			objects.filter(({ name }) => name !== "cat_v"),
+			[{ sql: rebuild }],
+		)
+		expect(scope.objects.map(({ name }) => name)).toEqual(["far", "far_v"])
+		expect([...scope.seeded]).toEqual(["far"])
 	})
 })

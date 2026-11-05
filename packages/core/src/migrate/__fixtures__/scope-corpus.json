@@ -225,5 +225,47 @@
 		"label": "generated with round 3's known classes, seed 439",
 		"schema": "CREATE TABLE t0 (id INTEGER PRIMARY KEY, a TEXT UNIQUE, b INTEGER, r0 INTEGER REFERENCES t0 (id) ON DELETE SET DEFAULT);\nCREATE TABLE t1 (id INTEGER PRIMARY KEY, a TEXT, b INTEGER, r0 INTEGER NOT NULL REFERENCES t1 (id) ON DELETE CASCADE, r1 INTEGER REFERENCES t1 (id) ON UPDATE CASCADE);\nCREATE TABLE t2 (id INTEGER PRIMARY KEY, a TEXT, b INTEGER, r0 INTEGER REFERENCES t1 (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED, r1 INTEGER REFERENCES t1 (id) ON UPDATE CASCADE);\nCREATE TABLE t3 (id INTEGER PRIMARY KEY, a TEXT, b INTEGER);\nCREATE VIRTUAL TABLE f0 USING fts5 (a);\nINSERT INTO f0 (a) VALUES ('alpha beta'), ('gamma');\nCREATE TABLE zz (x);\nCREATE TABLE cap (id INTEGER PRIMARY KEY, n TEXT CHECK (n IS NULL OR n < 'u'));\nCREATE VIEW cv AS SELECT max(name) AS n FROM sqlite_master;\nCREATE TRIGGER g0 BEFORE UPDATE ON t1 BEGIN UPDATE t0 SET a = 'trig'; UPDATE t3 SET b = 1 WHERE id = new.id; END;\nCREATE TRIGGER g1 BEFORE UPDATE ON t2 BEGIN INSERT INTO t0 (a) VALUES (new.a); END;\nCREATE TRIGGER g2 AFTER DELETE ON t1 WHEN (SELECT count(*) FROM t2) >= 0 BEGIN UPDATE t1 SET a = 'trig'; INSERT INTO cap (n) SELECT max(name) FROM sqlite_master; END;\nCREATE INDEX i0 ON t2 (lower(a));\nCREATE UNIQUE INDEX i1 ON t0 (a, b);\nCREATE TABLE gone (x);\nCREATE VIEW stale AS SELECT x FROM gone;\nDROP TABLE gone;",
 		"files": ["INSERT INTO cap (n) SELECT n FROM cv;\nINSERT INTO t3 (a) SELECT a FROM f0 WHERE f0 MATCH 'alpha';"]
+	},
+	{
+		"label": "drizzle rebuild, a child with a cascade",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\nCREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users (id) ON DELETE CASCADE);",
+		"files": [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_users` (`id` integer PRIMARY KEY NOT NULL, `name` text DEFAULT '' NOT NULL);--> statement-breakpoint\nINSERT INTO `__new_users`(`id`, `name`) SELECT `id`, `name` FROM `users`;--> statement-breakpoint\nDROP TABLE `users`;--> statement-breakpoint\nALTER TABLE `__new_users` RENAME TO `users`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"
+		]
+	},
+	{
+		"label": "drizzle rebuild, a child with no action",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\nCREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users (id));",
+		"files": [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_users` (`id` integer PRIMARY KEY NOT NULL, `name` text DEFAULT '' NOT NULL);--> statement-breakpoint\nINSERT INTO `__new_users`(`id`, `name`) SELECT `id`, `name` FROM `users`;--> statement-breakpoint\nDROP TABLE `users`;--> statement-breakpoint\nALTER TABLE `__new_users` RENAME TO `users`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"
+		]
+	},
+	{
+		"label": "drizzle rebuild, a trigger on the table",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\nCREATE TABLE log (id INTEGER PRIMARY KEY, what TEXT);\nCREATE TRIGGER users_del AFTER DELETE ON users BEGIN INSERT INTO log (what) VALUES (old.name); END;",
+		"files": [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_users` (`id` integer PRIMARY KEY NOT NULL, `name` text DEFAULT '' NOT NULL);--> statement-breakpoint\nINSERT INTO `__new_users`(`id`, `name`) SELECT `id`, `name` FROM `users`;--> statement-breakpoint\nDROP TABLE `users`;--> statement-breakpoint\nALTER TABLE `__new_users` RENAME TO `users`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"
+		]
+	},
+	{
+		"label": "drizzle rebuild, a NOT NULL the rows break",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\n",
+		"files": [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_users` (`id` integer PRIMARY KEY NOT NULL, `name` text NOT NULL);--> statement-breakpoint\nINSERT INTO `__new_users`(`id`, `name`) SELECT `id`, `name` FROM `users`;--> statement-breakpoint\nDROP TABLE `users`;--> statement-breakpoint\nALTER TABLE `__new_users` RENAME TO `users`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"
+		]
+	},
+	{
+		"label": "drizzle rebuild of a child, a parent it now references",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\nCREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER);",
+		"files": [
+			"PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `__new_posts` (`id` integer PRIMARY KEY NOT NULL, `user_id` integer REFERENCES `users`(`id`));--> statement-breakpoint\nINSERT INTO `__new_posts`(`id`, `user_id`) SELECT `id`, `user_id` FROM `posts`;--> statement-breakpoint\nDROP TABLE `posts`;--> statement-breakpoint\nALTER TABLE `__new_posts` RENAME TO `posts`;--> statement-breakpoint\nPRAGMA foreign_keys=ON;"
+		]
+	},
+	{
+		"label": "quiet pragmas before writes",
+		"schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE other (id INTEGER PRIMARY KEY, x TEXT);\nCREATE INDEX other_x ON other (x);\nCREATE VIEW names AS SELECT name FROM users;\nCREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users (id));\nCREATE TRIGGER posts_in AFTER INSERT ON posts BEGIN UPDATE users SET name = name || '!' WHERE id = new.user_id; END;",
+		"files": [
+			"PRAGMA defer_foreign_keys = ON;\nPRAGMA recursive_triggers = 1;\nPRAGMA case_sensitive_like = true;\nPRAGMA ignore_check_constraints = 0;\nPRAGMA legacy_alter_table = ON;\nPRAGMA busy_timeout = 5000;\nDELETE FROM users;\nINSERT INTO posts (user_id) VALUES (1);"
+		]
 	}
 ]
