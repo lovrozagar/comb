@@ -38,10 +38,40 @@ export type Api = { exports: Exports; inputs: string[]; members: Members }
 
 const printer = ts.createPrinter({ removeComments: true })
 
+const CLOSERS = new Set([
+	ts.SyntaxKind.CloseBraceToken,
+	ts.SyntaxKind.CloseBracketToken,
+	ts.SyntaxKind.CloseParenToken,
+	ts.SyntaxKind.GreaterThanToken,
+])
+
+/**
+ * `text` without each comma that only ends a list, which tsc's declarations keep where the source has
+ * one (a binding pattern the formatter split): read token by token, so a comma inside a string or a
+ * template literal type stays
+ */
+function withoutTrailingCommas(text: string): string {
+	const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, text)
+	/* the braces open inside each template span, innermost last */
+	const spans: number[] = []
+	const dropped: number[] = []
+	let comma: number | undefined
+	for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+		if (kind === ts.SyntaxKind.CloseBraceToken && spans.at(-1) === 0) {
+			if (scanner.reScanTemplateToken(false) === ts.SyntaxKind.TemplateTail) spans.pop()
+			kind = scanner.getToken()
+		} else if (kind === ts.SyntaxKind.TemplateHead) spans.push(0)
+		else if (kind === ts.SyntaxKind.OpenBraceToken && spans.length > 0) spans[spans.length - 1]++
+		else if (kind === ts.SyntaxKind.CloseBraceToken && spans.length > 0) spans[spans.length - 1]--
+		if (comma !== undefined && CLOSERS.has(kind)) dropped.push(comma)
+		comma = kind === ts.SyntaxKind.CommaToken ? scanner.getTokenStart() : undefined
+	}
+	return dropped.reduceRight((kept, at) => kept.slice(0, at) + kept.slice(at + 1), text)
+}
+
 /** A declaration as its text, without comments, layout, or the modifiers that say whether it is exported */
 const textOf = (node: ts.Node): string =>
-	printer
-		.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile())
+	withoutTrailingCommas(printer.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile()))
 		.replaceAll(/\s+/g, " ")
 		.replace(/^(?:export )?(?:declare )?/, "")
 

@@ -19,8 +19,14 @@ export type Base = { autogenerate?: boolean; inner: Inner }
 type Inner = { label: string }
 `
 
-/** A package whose root exports `Text`, which names the unexported `Base`, and `UsesShared`, which names the exported `Shared` */
-function fixture(base: string, shared = "export type Shared = { s: string }\n", inner = false): string {
+/**
+ * A package whose root exports `Text`, which names the unexported `Base`, and `UsesShared`, which names
+ * the exported `Shared`, then `index`
+ */
+function fixture(
+	base: string,
+	{ index = "", inner = false, shared = "export type Shared = { s: string }\n" } = {},
+): string {
 	const root = mkdtempSync(join(tmpdir(), "comb-exports-of-"))
 	made.push(root)
 	mkdirSync(join(root, "src"))
@@ -45,7 +51,7 @@ import type { Shared } from "./shared.ts"
 export type { Shared } from "./shared.ts"
 ${inner ? 'export type { Inner } from "./base.ts"\n' : ""}export type Text = Base & { max: number }
 export type UsesShared = { shared: Shared }
-`,
+${index}`,
 		"src/shared.ts": shared,
 		"tsconfig.json": JSON.stringify({ compilerOptions, include: ["src"] }),
 		"tsconfig.strict.json": JSON.stringify({ extends: "./tsconfig.json" }),
@@ -55,6 +61,10 @@ export type UsesShared = { shared: Shared }
 }
 
 const hashes = (root: string) => apiOf(root).exports["."] as Record<string, string>
+
+/** The hashes of a package that also exports `pick`, its one parameter written as `layout` */
+const pick = (layout: string) =>
+	hashes(fixture(BASE, { index: `export function pick(${layout}): boolean {\n\treturn folded\n}\n` }))
 
 describe("an export's hash covers what a consumer's compiler reads for it (KT3; siblings: comments, exported types)", () => {
 	it("changes when an unexported type it names changes, however deep", () => {
@@ -72,9 +82,20 @@ describe("an export's hash covers what a consumer's compiler reads for it (KT3; 
 		)
 	})
 
+	/* the formatter splits a binding pattern whose type gains a member comment, with a trailing comma tsc's declarations keep (buildFtsMatch, 3.1) */
+	it("keeps every hash when only layout changes, a trailing comma among it", () => {
+		const oneLine = "{ folded = false }: { folded?: boolean } = {}"
+		expect(pick("{\n\tfolded = false,\n}: {\n\t/** folded or not */\n\tfolded?: boolean\n} = {},\n")).toEqual(
+			pick(oneLine),
+		)
+		expect(pick("{ folded = false, other = 1 }: { folded?: boolean; other?: number } = {}")["pick"]).not.toBe(
+			pick(oneLine)["pick"],
+		)
+	})
+
 	it("changes each export that names a changed exported type, and none when a type only becomes exported", () => {
 		const before = hashes(fixture(BASE))
-		const after = hashes(fixture(BASE, "export type Shared = { s: number }\n"))
+		const after = hashes(fixture(BASE, { shared: "export type Shared = { s: number }\n" }))
 		expect({
 			shared: after["Shared"] === before["Shared"],
 			uses: after["UsesShared"] === before["UsesShared"],
@@ -83,7 +104,7 @@ describe("an export's hash covers what a consumer's compiler reads for it (KT3; 
 			uses: false,
 		})
 		/* 0.21 exports types 0.20.1 kept internal (KT6): what a consumer reads for Text stays as it was */
-		const published = hashes(fixture(BASE.replace("type Inner", "export type Inner"), undefined, true))
+		const published = hashes(fixture(BASE.replace("type Inner", "export type Inner"), { inner: true }))
 		expect(published["Text"]).toBe(before["Text"])
 	})
 })
