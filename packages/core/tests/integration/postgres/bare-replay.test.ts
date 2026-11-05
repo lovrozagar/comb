@@ -121,24 +121,25 @@ END $$;\n`
 /* the server's catalogs show every session's work, so only a change to an object the file names is the file's */
 describe("another session's change is its own (P2; sibling: two checks on one server)", () => {
 	it.each([
-		["passes a role another session makes during a bare statement, which the file does not name", false],
+		["passes a role another session makes while the file runs, which the file does not name", false],
 		["refuses one the file names, as it could have made it", true],
 	])(
 		"%s",
 		async (_, named) => {
 			const [other] = testRoles("comb_t_other")
+			/*
+			 * the file waits for the other session's role, spelled by concatenation so the file does not
+			 * name it, so the role commits between the reads around the file whatever the server's load:
+			 * a role committed after the file is no change of it (AE6, .tmp/grunt/p21/areas/pg/ae6/red.log)
+			 */
+			const tail = other.slice("comb_t_".length)
+			const wait = `DO $$ BEGIN WHILE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'comb_t_' || '${tail}') LOOP PERFORM pg_sleep(0.02); END LOOP; END $$`
 			const spelled = named ? `-- comb:allow-unsafe: the test's name\nSELECT '${other}';\n` : ""
-			const pending = `-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's sleep\nSELECT pg_sleep(1.5);\n${spelled}`
+			const pending = `-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's wait\n${wait};\n${spelled}`
 			const check = checked(T, pending)
-			/* the other session's change lands while the replay's bare statement runs */
-			for (let i = 0; i < 200; i++) {
-				const [sleeping] = await query(
-					pgUrl(),
-					"SELECT 1 AS n FROM pg_stat_activity WHERE query = 'SELECT pg_sleep(1.5)' AND datname LIKE 'comb\\_replay\\_%'",
-				)
-				if (sleeping !== undefined) break
-				await new Promise((tick) => setTimeout(tick, 25))
-			}
+			/* the role is made once the file waits for it, so after the read before the file */
+			const waiting = `SELECT 1 AS n FROM pg_stat_activity WHERE query LIKE 'DO $$ BEGIN WHILE NOT EXISTS%${tail}%' AND datname LIKE 'comb\\_replay\\_%'`
+			while ((await query(pgUrl(), waiting)).length === 0) await new Promise((tick) => setTimeout(tick, 25))
 			await query(pgUrl(), `CREATE ROLE ${other}`)
 			const { refused } = await check
 			expect(refused === undefined ? undefined : refused.includes(`role ${other} added`)).toBe(named ? true : undefined)
