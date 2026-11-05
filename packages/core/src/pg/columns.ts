@@ -45,10 +45,14 @@ const timestampDefaults = {
 	now: () => sql`(extract(epoch from now()) * 1000)::bigint`,
 }
 
+/** A Postgres text column builder */
 type Text = PgTextBuilder<[string, ...string[]]>
 
+/** The names a creation timestamp may take, in either casing, so codegen recognizes it */
 type CreatedAtName = "createdAt" | "created_at"
+/** The names a soft-delete timestamp may take, in either casing, so codegen recognizes it */
 type DeletedAtName = "deletedAt" | "deleted_at"
+/** The names an update timestamp may take, in either casing, so codegen recognizes it */
 type UpdatedAtName = "updatedAt" | "updated_at"
 
 /**
@@ -57,32 +61,72 @@ type UpdatedAtName = "updatedAt" | "updated_at"
  * the constraints are read by codegen and erased at runtime.
  */
 export type PgColumns = {
+	/** a native boolean, where SQLite stores an INTEGER 0 or 1 */
 	boolean: (name: string) => PgBooleanBuilder
+	/**
+	 * the creation time in epoch milliseconds, a NOT NULL bigint read as a JavaScript number, filled by
+	 * the database when a row is inserted: its transaction's start time (`now()`) to the millisecond,
+	 * where SQLite's fill keeps whole seconds
+	 */
 	createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetNotNull<PgBigInt53Builder>>
+	/** the soft-delete time in epoch milliseconds, a bigint read as a JavaScript number; null while the row is live */
 	deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => PgBigInt53Builder
+	/**
+	 * one of `values`, stored as text, not as a Postgres enum type; the enum-checks generator writes a
+	 * CHECK holding it to them, in force once the table's extra config returns `<table>EnumChecks(table)`
+	 */
 	enum: <T extends readonly string[]>(
 		name: string,
 		_values: T,
 		_options?: EnumOptions<T[number]>,
 	) => Set$Type<Text, T[number]>
+	/**
+	 * The text primary key `id`, holding `<prefix>_<ulid>` ids the app writes with `generateId(prefix)`.
+	 * Throws unless `prefix` is 2 to 10 lowercase letters and digits starting with a letter
+	 */
 	id: (_prefix: string) => SetIsPrimaryKey<Text>
+	/**
+	 * a 4-byte integer, -2147483648 to 2147483647, where SQLite's holds a JavaScript number's exact
+	 * range; the generated DTOs clamp a declared `min` and `max` to it
+	 */
 	integer: (name: string, _constraints?: IntegerConstraints) => PgIntegerBuilder
+	/**
+	 * a JSON value stored as jsonb, which keeps neither key order nor a duplicate key, typed by `schema`,
+	 * which the generated DTOs validate it with
+	 */
 	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(
 		name: string,
 		_schema: TSchema,
 		_constraints?: JsonConstraints,
 	) => Set$Type<PgJsonbBuilder, z.infer<TSchema>>
+	/** a floating-point number, stored as double precision */
 	real: (name: string, _constraints?: IntegerConstraints) => PgDoublePrecisionBuilder
+	/** a text foreign key; chain `.references()` to name the column it points at */
 	ref: (name: string, _constraints?: TextConstraints) => Text
+	/** the auto-incrementing 4-byte `serial` primary key `id`, filled by the database */
 	serialId: () => SetIsPrimaryKey<PgSerialBuilder>
+	/**
+	 * a text column with no declared length: a declared `max` bounds the generated DTOs alone, where
+	 * SQLite also declares it as the column's length
+	 */
 	text: (name: string, _constraints?: TextConstraints) => Text
+	/** a point in time in epoch milliseconds, stored as a bigint and read as a JavaScript number */
 	timestamp: (name: string, _constraints?: TimestampConstraints) => PgBigInt53Builder
+	/**
+	 * the update time in epoch milliseconds, a NOT NULL bigint, filled on insert as `createdAt` is and
+	 * set to the current time on every update drizzle writes
+	 */
 	updatedAt: (
 		name: UpdatedAtName,
 		_constraints?: TimestampConstraints,
 	) => SetHasDefault<SetHasDefault<SetNotNull<PgBigInt53Builder>>>
 }
 
+/**
+ * comb's Postgres column helpers: drizzle columns that also record comb's constraints, which codegen
+ * reads to write the DTOs, constraint map and manifest. The same helpers exist for SQLite in
+ * `./sqlite/columns`, so a tables file moves between the dialects by its import
+ */
 export const c: PgColumns = {
 	/* Native boolean */
 	boolean: (name: string) => withCombColumn(boolean(name), { kind: "boolean" }),

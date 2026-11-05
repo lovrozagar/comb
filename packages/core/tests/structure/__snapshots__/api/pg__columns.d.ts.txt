@@ -2,9 +2,13 @@
 import { type PgBigInt53Builder, type PgBooleanBuilder, type PgDoublePrecisionBuilder, type PgIntegerBuilder, type PgJsonbBuilder, type PgSerialBuilder, type PgTextBuilder, type Set$Type, type SetHasDefault, type SetIsPrimaryKey, type SetNotNull } from "drizzle-orm/pg-core";
 import type { EnumOptions, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "../sqlite/constraints.ts";
 import type * as z from "zod";
+/** A Postgres text column builder */
 type Text = PgTextBuilder<[string, ...string[]]>;
+/** The names a creation timestamp may take, in either casing, so codegen recognizes it */
 type CreatedAtName = "createdAt" | "created_at";
+/** The names a soft-delete timestamp may take, in either casing, so codegen recognizes it */
 type DeletedAtName = "deletedAt" | "deleted_at";
+/** The names an update timestamp may take, in either casing, so codegen recognizes it */
 type UpdatedAtName = "updatedAt" | "updated_at";
 /**
  * What each `c` factory returns: drizzle's own builder types, spelled out for isolated
@@ -12,20 +16,60 @@ type UpdatedAtName = "updatedAt" | "updated_at";
  * the constraints are read by codegen and erased at runtime.
  */
 export type PgColumns = {
+    /** a native boolean, where SQLite stores an INTEGER 0 or 1 */
     boolean: (name: string) => PgBooleanBuilder;
+    /**
+     * the creation time in epoch milliseconds, a NOT NULL bigint read as a JavaScript number, filled by
+     * the database when a row is inserted: its transaction's start time (`now()`) to the millisecond,
+     * where SQLite's fill keeps whole seconds
+     */
     createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetNotNull<PgBigInt53Builder>>;
+    /** the soft-delete time in epoch milliseconds, a bigint read as a JavaScript number; null while the row is live */
     deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => PgBigInt53Builder;
+    /**
+     * one of `values`, stored as text, not as a Postgres enum type; the enum-checks generator writes a
+     * CHECK holding it to them, in force once the table's extra config returns `<table>EnumChecks(table)`
+     */
     enum: <T extends readonly string[]>(name: string, _values: T, _options?: EnumOptions<T[number]>) => Set$Type<Text, T[number]>;
+    /**
+     * The text primary key `id`, holding `<prefix>_<ulid>` ids the app writes with `generateId(prefix)`.
+     * Throws unless `prefix` is 2 to 10 lowercase letters and digits starting with a letter
+     */
     id: (_prefix: string) => SetIsPrimaryKey<Text>;
+    /**
+     * a 4-byte integer, -2147483648 to 2147483647, where SQLite's holds a JavaScript number's exact
+     * range; the generated DTOs clamp a declared `min` and `max` to it
+     */
     integer: (name: string, _constraints?: IntegerConstraints) => PgIntegerBuilder;
+    /**
+     * a JSON value stored as jsonb, which keeps neither key order nor a duplicate key, typed by `schema`,
+     * which the generated DTOs validate it with
+     */
     json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => Set$Type<PgJsonbBuilder, z.infer<TSchema>>;
+    /** a floating-point number, stored as double precision */
     real: (name: string, _constraints?: IntegerConstraints) => PgDoublePrecisionBuilder;
+    /** a text foreign key; chain `.references()` to name the column it points at */
     ref: (name: string, _constraints?: TextConstraints) => Text;
+    /** the auto-incrementing 4-byte `serial` primary key `id`, filled by the database */
     serialId: () => SetIsPrimaryKey<PgSerialBuilder>;
+    /**
+     * a text column with no declared length: a declared `max` bounds the generated DTOs alone, where
+     * SQLite also declares it as the column's length
+     */
     text: (name: string, _constraints?: TextConstraints) => Text;
+    /** a point in time in epoch milliseconds, stored as a bigint and read as a JavaScript number */
     timestamp: (name: string, _constraints?: TimestampConstraints) => PgBigInt53Builder;
+    /**
+     * the update time in epoch milliseconds, a NOT NULL bigint, filled on insert as `createdAt` is and
+     * set to the current time on every update drizzle writes
+     */
     updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetHasDefault<SetNotNull<PgBigInt53Builder>>>;
 };
+/**
+ * comb's Postgres column helpers: drizzle columns that also record comb's constraints, which codegen
+ * reads to write the DTOs, constraint map and manifest. The same helpers exist for SQLite in
+ * `./sqlite/columns`, so a tables file moves between the dialects by its import
+ */
 export declare const c: PgColumns;
 export {};
 
@@ -50,7 +94,11 @@ type BaseConstraints = {
      * lists it flagged `private: true`, on both dialects
      */
     private?: boolean | undefined;
-    /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
+    /**
+     * the name this foreign key's relation and its way back take, where the column's role would take a
+     * column's own name (`currency` toward `currency.code`, a `parent` self-reference): an identifier,
+     * refused on a column that references nothing
+     */
     relation?: string | undefined;
     /**
      * This column scopes rows to a tenant.
@@ -62,6 +110,12 @@ type BaseConstraints = {
      */
     tenant?: boolean | undefined;
 };
+/**
+ * Rewrites a written text takes in the generated DTOs before its checks, so its bounds and pattern
+ * hold the rewritten value: `trim` first, then `lowercase`, or `uppercase` when `lowercase` is unset.
+ * An email is always trimmed and lowercased, a url trimmed and stripped of tabs and line breaks, and
+ * codegen refuses a rewrite either would drop, or any on a password, which is kept as written
+ */
 type StringTransformConstraints = {
     /** Apply lowercase transformation */
     lowercase?: boolean | undefined;
@@ -70,12 +124,17 @@ type StringTransformConstraints = {
     /** Apply uppercase transformation */
     uppercase?: boolean | undefined;
 };
+/** Bounds a written value is held to: a text's length, or a number's or timestamp's value */
 type NumericRangeConstraints = {
     /** Maximum value */
     max?: number | undefined;
     /** Minimum value */
     min?: number | undefined;
 };
+/**
+ * What a written text must hold, checked by the generated DTOs: one kind at most, of `email`, `url`,
+ * `password`, `imageUri` and `name`, which codegen refuses a second of, and a `pattern` beside it
+ */
 type StringValidationConstraints = {
     /** Email validation */
     email?: boolean | undefined;
@@ -130,6 +189,6 @@ export type EnumStates<TState extends string = string> = {
         readonly [K in TState]?: readonly TState[] | undefined;
     } | undefined;
 };
-/** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */
+/** What `c.enum` takes beside its values: its state machine, and the `nomutate`, `private` and `tenant` flags every helper takes */
 export type EnumOptions<TState extends string = string> = EnumStates<TState> & Pick<BaseConstraints, "nomutate" | "private" | "tenant">;
 export {};

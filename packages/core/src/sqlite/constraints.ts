@@ -20,7 +20,12 @@ type BaseConstraints = {
 	 * lists it flagged `private: true`, on both dialects
 	 */
 	private?: boolean | undefined
-	/** the name this key's relation takes, where its column's role would take the column's own name (F57) */
+	// F57
+	/**
+	 * the name this foreign key's relation and its way back take, where the column's role would take a
+	 * column's own name (`currency` toward `currency.code`, a `parent` self-reference): an identifier,
+	 * refused on a column that references nothing
+	 */
 	relation?: string | undefined
 	/**
 	 * This column scopes rows to a tenant.
@@ -33,7 +38,12 @@ type BaseConstraints = {
 	tenant?: boolean | undefined
 }
 
-/* String transformation constraints */
+/**
+ * Rewrites a written text takes in the generated DTOs before its checks, so its bounds and pattern
+ * hold the rewritten value: `trim` first, then `lowercase`, or `uppercase` when `lowercase` is unset.
+ * An email is always trimmed and lowercased, a url trimmed and stripped of tabs and line breaks, and
+ * codegen refuses a rewrite either would drop, or any on a password, which is kept as written
+ */
 type StringTransformConstraints = {
 	/** Apply lowercase transformation */
 	lowercase?: boolean | undefined
@@ -43,7 +53,7 @@ type StringTransformConstraints = {
 	uppercase?: boolean | undefined
 }
 
-/* Numeric range constraints */
+/** Bounds a written value is held to: a text's length, or a number's or timestamp's value */
 type NumericRangeConstraints = {
 	/** Maximum value */
 	max?: number | undefined
@@ -51,7 +61,10 @@ type NumericRangeConstraints = {
 	min?: number | undefined
 }
 
-/* String validation constraints */
+/**
+ * What a written text must hold, checked by the generated DTOs: one kind at most, of `email`, `url`,
+ * `password`, `imageUri` and `name`, which codegen refuses a second of, and a `pattern` beside it
+ */
 type StringValidationConstraints = {
 	/** Email validation */
 	email?: boolean | undefined
@@ -114,6 +127,7 @@ export type EnumStates<TState extends string = string> = {
 	transitions?: { readonly [K in TState]?: readonly TState[] | undefined } | undefined
 }
 
-/** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */
+// F9
+/** What `c.enum` takes beside its values: its state machine, and the `nomutate`, `private` and `tenant` flags every helper takes */
 export type EnumOptions<TState extends string = string> = EnumStates<TState> &
 	Pick<BaseConstraints, "nomutate" | "private" | "tenant">
