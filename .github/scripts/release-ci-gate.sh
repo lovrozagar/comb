@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The release's test gate: CI is the full gate, so a release reruns no test. It passes when ci.yml's push run on main
-# passed at the tagged commit, and fails with the next command to run otherwise. release.yml's ci job runs this file,
-# and so can a person, with GITHUB_REPOSITORY and GH_TOKEN set.
+# passed at the tagged commit; scripts/ci-wait.ts does that wait, and this file adds only what ci-wait cannot know: the
+# tag's commit and its version. release.yml's ci job runs it in a checkout of the tag; so can a person, in a checkout
+# holding the commit, with GITHUB_REPOSITORY and GH_TOKEN set.
 #
 #   TAG            the release tag, v<version>; required
 #   SHA            the tagged commit; empty resolves TAG through the GitHub API (a workflow_dispatch on an older tag)
@@ -14,6 +15,8 @@ set -euo pipefail
 grace="${GRACE_SECONDS:-600}"
 poll="${POLL_SECONDS:-30}"
 api="repos/$GITHUB_REPOSITORY"
+# ci-wait's gh calls name no repo; this points them at the one being released, whatever the checkout's remote.
+export GH_REPO="$GITHUB_REPOSITORY"
 
 sha="${SHA:-}"
 if [ -z "$sha" ]; then
@@ -33,44 +36,10 @@ if [ "${TAG#v}" != "$version" ]; then
   exit 1
 fi
 
-start="$SECONDS"
-said=""
-while :; do
-  runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --commit "$sha" --limit 20 \
-    --json status,conclusion,databaseId,url,createdAt)"
-  passed="$(jq -r 'map(select(.conclusion == "success"))[0].url // empty' <<<"$runs")"
-  if [ -n "$passed" ]; then
-    echo "ci.yml passed on main at $sha: $passed"
-    exit 0
-  fi
-  going="$(jq -r 'map(select(.status != "completed") | .url) | join(" ")' <<<"$runs")"
-  if [ -z "$going" ]; then
-    last="$(jq -c 'sort_by(.createdAt) | last // empty' <<<"$runs")"
-    if [ -n "$last" ]; then
-      url="$(jq -r .url <<<"$last")"
-      id="$(jq -r .databaseId <<<"$last")"
-      if [ "$(jq -r .conclusion <<<"$last")" = "cancelled" ]; then
-        created="$(jq -r .createdAt <<<"$last")"
-        newer="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --limit 5 \
-          --json headSha,createdAt,url |
-          jq -r --arg sha "$sha" --arg at "$created" 'map(select(.headSha != $sha and .createdAt > $at))[0] // empty | "\(.url) at \(.headSha)"')"
-        if [ -n "$newer" ]; then
-          echo "ci.yml at $sha was cancelled by a newer push ($newer): tag that commit once its run passes"
-          exit 1
-        fi
-      fi
-      echo "ci.yml did not pass on main at $sha ($url): re-run it with gh run rerun $id, then this release with gh workflow run release.yml -f tag=$TAG"
-      exit 1
-    fi
-    if [ $((SECONDS - start)) -ge "$grace" ]; then
-      echo "ci.yml has no push run on main at $sha after ${grace}s: push the commit to main before its tag"
-      exit 1
-    fi
-    line="waiting for ci.yml's push run on main at $sha"
-  else
-    line="waiting on $going"
-  fi
-  if [ "$line" != "$said" ]; then echo "$line"; fi
-  said="$line"
-  sleep "$poll"
-done
+# ci-wait prints its own line: passed (0), failed, cancelled or never pushed (1), superseded (2).
+code=0
+bun "$(dirname "$0")/../../scripts/ci-wait.ts" "$sha" --grace "$grace" --poll "$poll" || code=$?
+if [ "$code" -eq 2 ]; then
+  echo "$TAG is on a commit whose run a newer push cancelled: tag the newer commit once its run passes"
+fi
+[ "$code" -eq 0 ]

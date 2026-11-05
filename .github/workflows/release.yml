@@ -38,7 +38,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
-          sparse-checkout: .github/scripts
+          # the gate and ci-wait, which it runs; package.json pins the bun version
+          sparse-checkout: |
+            /.github/scripts/
+            /scripts/ci-wait.ts
+            /package.json
+          sparse-checkout-cone-mode: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
       - name: Wait for main's ci.yml run on the tagged commit
         env:
           GH_TOKEN: ${{ github.token }}
