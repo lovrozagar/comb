@@ -1,9 +1,9 @@
 /**
  * B2-5 and B2-12 of area B on SQLite: a list sorted by an expression over a blob, which no buffer-mode
  * column maps, reads its key as each driver reads a blob: bun:sqlite as a Uint8Array, which the next
- * page refused as `invalid_cursor` (a 400), libsql and D1 as an ArrayBuffer, which the mint refused
- * as a 500. Blobs compare byte by byte, the shorter first when one begins the other: 00 < 01 < 0101
- * < ff. Ids are out of key order. Each engine's suite runs it on its own driver.
+ * page refused as `invalid_cursor` (a 400), libsql as an ArrayBuffer and D1 as an array of its bytes,
+ * which the mint refused as a 500. Blobs compare byte by byte, the shorter first when one begins the
+ * other: 00 < 01 < 0101 < ff. Ids are out of key order. Each engine's suite runs it on its own driver.
  */
 import { sql } from "drizzle-orm"
 import { blob, type SQLiteAsyncDatabase, sqliteTable, text } from "drizzle-orm/sqlite-core"

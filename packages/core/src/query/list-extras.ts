@@ -70,13 +70,23 @@ function storedClasses(row: Record<string, unknown>): readonly KeyClass[] | unde
 }
 
 /**
+ * A blob as the driver read it, as its bytes: libsql reads one no buffer-mode column maps as an
+ * ArrayBuffer, and D1 as an array of its bytes
+ */
+function bytesOf(value: unknown): unknown {
+	if (value instanceof ArrayBuffer) return new Uint8Array(value)
+	return Array.isArray(value) ? Uint8Array.from(value as number[]) : value
+}
+
+/**
  * `value` as SQLite stored it under `stored`: an integer read as a decimal string as that integer, a
- * REAL read as the text of its double (drizzle's `numeric()`, B2-4 of area B) as that double, and a
- * ±Infinity read as null (D1) as itself
+ * REAL read as the text of its double (drizzle's `numeric()`, B2-4 of area B) as that double, a
+ * ±Infinity read as null (D1) as itself, and a blob as its bytes (bytesOf)
  */
 function storedValue(value: unknown, stored: KeyClass | undefined): unknown {
 	if (stored === "+inf") return Number.POSITIVE_INFINITY
 	if (stored === "-inf") return Number.NEGATIVE_INFINITY
+	if (stored === "blob") return bytesOf(value)
 	if (typeof value !== "string") return value
 	if (stored === "integer" && INTEGER_TEXT.test(value)) return BigInt(value)
 	/* only the text JS writes for that very double, so the number is exact */

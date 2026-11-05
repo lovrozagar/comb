@@ -88,7 +88,7 @@ describe("a drizzle numeric() key pages with no anchor and merged (B2-4 of area 
 	})
 })
 
-/* B2-12 of area B: D1 reads a blob no buffer-mode column maps as an ArrayBuffer, which the mint refused */
+/* B2-12 of area B: D1 reads a blob no buffer-mode column maps as an array of its bytes, which the mint refused */
 describe("an expression over a blob pages by its bytes (B2-12 of area B; sibling: QL5's bytes)", () => {
 	it("pages an anchored and an anchorless list sorted by an expression over a blob, every row once", async () => {
 		harness = await d1Memory()

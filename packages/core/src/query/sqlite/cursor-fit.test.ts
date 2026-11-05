@@ -269,6 +269,12 @@ describe("a blob key's cursor value (QL5 of r22b; sibling: a json key, which no 
 		expect(() => assertCursorFits([files.j], [new Uint8Array([1])])).toThrow()
 		expect(boundForKeys("sqlite", [files.b], [new Uint8Array([1])])).toEqual([new Uint8Array([1])])
 	})
+
+	/* B2-5 of area B: an expression over bytes reads them as a Uint8Array, which its cursor carries */
+	it("fits bytes on an expression, and binds them as they are", () => {
+		expect(() => assertCursorFits([sql`${files.b}`], [new Uint8Array([1])])).not.toThrow()
+		expect(boundForKeys("sqlite", [sql`${files.b}`], [new Uint8Array([1])])).toEqual([new Uint8Array([1])])
+	})
 })
 
 /* AB2 of area B: a customType key fits what its mapper read, and a Postgres one carries a numeric's text */

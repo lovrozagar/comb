@@ -88,6 +88,16 @@ describe("typedKeys", () => {
 	})
 })
 
+describe("typedKeys: a blob (B2-12 of area B; sibling: Q3 of r20's ±Infinity)", () => {
+	/* B2-12 of area B: libsql reads a blob no buffer-mode column maps as an ArrayBuffer, D1 as an array of its bytes */
+	it("reads a key SQLite stored as a blob, which the driver read as an ArrayBuffer or an array of bytes, as its bytes", () => {
+		const read = { _combKeyTypes: "blob,blob,integer", k: new Uint8Array([1, 2]).buffer, name: [0, 255] }
+		expect(typedKeys(read, SORT)).toEqual({ ...read, k: new Uint8Array([1, 2]), name: new Uint8Array([0, 255]) })
+		const bytes = { _combKeyTypes: "blob,text,integer", k: new Uint8Array([1]), name: "a" }
+		expect(typedKeys(bytes, SORT)).toBe(bytes)
+	})
+})
+
 /* QL2 of r22b: a time key's stored value, carried where the Date the driver read keeps milliseconds only */
 describe("typedKeys and malformed: _combKeyTexts (QL2 of r22b; sibling: _combKeyTypes)", () => {
 	const at = new Date(Date.UTC(2024, 0, 1, 0, 0, 0, 123))

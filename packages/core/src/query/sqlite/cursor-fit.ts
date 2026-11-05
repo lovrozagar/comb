@@ -143,8 +143,8 @@ const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
  * Null fits every key. A column takes what its dataType holds, and a time column bound as read
  * (`asRead`) its stored value too (carriedTime); a key declared as time, a Date or the epoch
  * milliseconds its row selected; any other SQL expression (a derived sort) only what every driver
- * binds: a string, a number, a bigint or a boolean (bun:sqlite and D1 refuse a Date that libsql would
- * bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp
+ * binds: a string, a number, a bigint, a boolean or bytes (bun:sqlite and D1 refuse a Date that libsql
+ * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp
  * the list reads back the TEXT it carried (`carried`), which the row held (B2-3 of area B)
  */
 function fits(
@@ -159,9 +159,7 @@ function fits(
 	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
 	if (carriedText(column, value, { asRead, carried })) return true
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
-	return (
-		typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
-	)
+	return ["string", "number", "boolean", "bigint"].includes(typeof value) || value instanceof Uint8Array
 }
 
 /**
