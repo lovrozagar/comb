@@ -129,7 +129,7 @@ function placeOf(path, scope) {
 			if (flow) flip = !flip
 		} else if (key === "params") flip = !flip
 		if (ALIASES.has(parent.type) || (at === 1 && parent.type === "ClassDeclaration"))
-			return { alias: parent.id.name, flip }
+			return { alias: parent.id?.name, flip }
 	}
 	return flip ? "input" : "output"
 }

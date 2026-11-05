@@ -365,6 +365,12 @@ describe("comb/optional-undefined on a generic class and an import type", () => 
 		expect(reported({ [PROBE]: taken(held, "Held") })).toEqual([PROBE])
 	})
 
+	it("follows an anonymous default-exported generic class as it follows a named one (D6-1)", () => {
+		const anonymous = "export default class<T> { put(_value: T): void {} }\n"
+		expect(reported({ [ALIAS]: anonymous, [PROBE]: made("import type Box from './alias.ts'", "Box") })).toEqual([PROBE])
+		expect(reported({ [ALIAS]: anonymous, [PROBE]: taken("import Box from './alias.ts'", "Box") })).toEqual([])
+	})
+
 	it("follows an import type's relative file as a named import does, in a return type and a parameter (Q2, Q3)", () => {
 		const alias = { [ALIAS]: `export ${SETTER}` }
 		expect(reported({ ...alias, [PROBE]: made("", "import('./alias.ts').Setter") })).toEqual([PROBE])
