@@ -62,8 +62,7 @@ const narrowed = (from: Members, to: Members): string[] =>
 							const now = to[type]?.[member]
 							return now === undefined || (was === "optional" && now === "required")
 						})
-						/* a type keyed `Name (file)`, one of two of that name, is still `Name` to a reader */
-						.map(([member]) => `${type.replace(/ \(.*\)$/, "")}.${member}`),
+						.map(([member]) => `${type}.${member}`),
 		)
 		.sort()
 

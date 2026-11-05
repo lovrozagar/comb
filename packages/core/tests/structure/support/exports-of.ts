@@ -10,7 +10,6 @@
  * became required is read from, which no hash names.
  */
 import { createHash } from "node:crypto"
-import { dirname, join, relative } from "node:path"
 import { ts } from "ts-morph"
 import {
 	checkerOf,
@@ -85,27 +84,28 @@ function membersOf(
 	)
 }
 
+type Found = { exported: boolean; members: Optionality; name: string }
+
 /**
- * Each type's key in `Members`: its name, which is what a consumer and an Upgrading section call it.
- * When types of one name hold different members, the exported one keeps the name and every other is
- * keyed `Name (file)`, its declaration file under the package's declarations without `.d.ts`.
+ * Each type's members by its name, which is what a consumer and an Upgrading section call it. Types of
+ * one name with different members throw, so the newer is renamed in src. A release is past renaming:
+ * there, the one type of the name an entry exports stands for it (0.20.1 reached the exported
+ * ListQueryInput beside the z.ZodObject list-schema.ts called by that name, since ListQueryRequest).
  */
-function keyed(found: Array<{ exported: boolean; file: string; members: Optionality; name: string }>): Members {
+function byName(found: Found[], released: boolean): Members {
 	const members: Members = {}
-	const byName = Map.groupBy(found, (type) => type.name)
-	for (const [name, types] of byName) {
+	for (const [name, types] of Map.groupBy(found, (type) => type.name)) {
 		const distinct = new Set(types.map((type) => JSON.stringify(type.members)))
 		const exported = types.filter((type) => type.exported)
-		for (const type of types) {
-			const bare = distinct.size === 1 || (exported.length === 1 && type.exported)
-			members[bare ? name : `${name} (${type.file})`] = type.members
-		}
+		const kept = distinct.size === 1 ? types[0] : released && exported.length === 1 ? exported[0] : undefined
+		if (kept === undefined) throw new Error(`two types an export reaches are named ${name}, with different members`)
+		members[name] = kept.members
 	}
 	return Object.fromEntries(Object.entries(members).sort(([a], [b]) => (a < b ? -1 : 1)))
 }
 
-/** The hashes of what `declarations` exports, by subpath and name, and the members of each type they reach */
-function apiIn({ dir, entries }: Declarations): Api {
+/** The hashes of what `declarations` exports, by subpath and name, and the members of each type they reach, `released` or not */
+function apiIn({ dir, entries }: Declarations, released: boolean): Api {
 	const { checker, program } = checkerOf(dir, Object.values(entries))
 	const bySubpath = exportsBySubpath(checker, program, entries)
 	const local = (symbol: ts.Symbol) => symbol.declarations?.[0]?.getSourceFile().fileName.startsWith(dir) === true
@@ -144,20 +144,19 @@ function apiIn({ dir, entries }: Declarations): Api {
 		}),
 	)
 	const exported = new Set(bySubpath.flatMap(([, symbols]) => symbols.map((symbol) => real(checker, symbol))))
-	const base = dirname(entries["."] ?? join(dir, "index.d.ts"))
 	const inPackage = (node: ts.Node) => node.getSourceFile().fileName.startsWith(dir)
-	const members = keyed(
+	const members = byName(
 		[...reachedTypes].flatMap((symbol) => {
 			const own = membersOf(checker, symbol, inPackage)
-			const file = relative(base, symbol.declarations?.[0]?.getSourceFile().fileName ?? base).replace(/\.d\.ts$/, "")
-			return own === undefined ? [] : [{ exported: exported.has(symbol), file, members: own, name: symbol.name }]
+			return own === undefined ? [] : [{ exported: exported.has(symbol), members: own, name: symbol.name }]
 		}),
+		released,
 	)
 	return { exports, members }
 }
 
 /** What the package tree at `root` exports, from the declarations its pack would emit */
-export const apiOf = (root: string): Api => withEmitted(root, apiIn)
+export const apiOf = (root: string): Api => withEmitted(root, (declarations) => apiIn(declarations, false))
 
 /** What the packed package at `dir`, a release's tarball unpacked, exports, from the declarations it ships */
-export const releasedApiOf = (dir: string): Api => apiIn(packedDeclarations(dir))
+export const releasedApiOf = (dir: string): Api => apiIn(packedDeclarations(dir), true)

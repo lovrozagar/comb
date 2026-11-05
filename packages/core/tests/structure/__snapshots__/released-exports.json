@@ -1037,7 +1037,6 @@
 			"q": "optional",
 			"validated": "optional"
 		},
-		"ListQueryInput (query/list-schema)": {},
 		"ListQueryLimits": {
 			"maxConditions": "required",
 			"maxDepth": "required",

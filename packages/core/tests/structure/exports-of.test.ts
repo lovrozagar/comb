@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { apiOf } from "./support/exports-of.ts"
+import { apiOf, releasedApiOf } from "./support/exports-of.ts"
 
 const made: string[] = []
 afterEach(() => {
@@ -124,9 +124,8 @@ describe("the members of each type an export reaches, as a consumer's compiler r
 	})
 })
 
-describe("two types an export reaches under one name", () => {
-	/* 0.20.1 reached the exported ListQueryInput of query/types.ts and a z.ZodObject of that name in query/list-schema.ts */
-	it("keep the bare name for the exported one, and key the other by its file", () => {
+describe("two types an export reaches under one name, with different members", () => {
+	it("throw for a tree, whose newer one is renamed in src", () => {
 		const root = fixture(BASE)
 		writeFileSync(join(root, "src/a.ts"), "export type Shared = { a: string }\n")
 		writeFileSync(join(root, "src/b.ts"), "type Shared = { b?: number }\nexport type UsesB = { shared: Shared }\n")
@@ -134,26 +133,21 @@ describe("two types an export reaches under one name", () => {
 			join(root, "src/index.ts"),
 			'export type { Shared } from "./a.ts"\nexport type { UsesB } from "./b.ts"\n',
 		)
-		expect(apiOf(root).members).toEqual({
-			Shared: { a: "required" },
-			"Shared (b)": { b: "optional" },
-			UsesB: { shared: "required" },
-		})
+		expect(() => apiOf(root)).toThrow("two types an export reaches are named Shared, with different members")
 	})
 
-	it("key each by its file when none is exported, or more than one is", () => {
-		const root = fixture(BASE)
-		writeFileSync(join(root, "src/a.ts"), "type Shared = { a: string }\nexport type UsesA = { shared: Shared }\n")
-		writeFileSync(join(root, "src/b.ts"), "type Shared = { b?: number }\nexport type UsesB = { shared: Shared }\n")
-		writeFileSync(
-			join(root, "src/index.ts"),
-			'export type { UsesA } from "./a.ts"\nexport type { UsesB } from "./b.ts"\n',
-		)
-		expect(apiOf(root).members).toEqual({
-			"Shared (a)": { a: "required" },
-			"Shared (b)": { b: "optional" },
-			UsesA: { shared: "required" },
-			UsesB: { shared: "required" },
-		})
+	/* 0.20.1 reached the exported ListQueryInput of query/types.ts and a z.ZodObject list-schema.ts called by that name */
+	it("are the exported one in a release, which is past renaming", () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-exports-of-released-"))
+		made.push(dir)
+		mkdirSync(join(dir, "types"))
+		const files = {
+			"package.json": JSON.stringify({ exports: { ".": { default: "./src/index.ts", types: "./types/index.d.ts" } } }),
+			"types/a.d.ts": "export type Shared = { a: string }\n",
+			"types/b.d.ts": "type Shared = { b?: number }\nexport type UsesB = { shared: Shared }\nexport {}\n",
+			"types/index.d.ts": 'export type { Shared } from "./a.js"\nexport type { UsesB } from "./b.js"\n',
+		}
+		for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text)
+		expect(releasedApiOf(dir).members).toEqual({ Shared: { a: "required" }, UsesB: { shared: "required" } })
 	})
 })
