@@ -145,7 +145,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		const values = anchored(
 			keys,
 			cursor.values.map((value, i) =>
-				bindableOn(keys[i]?.column, boundCarried(keys[i]?.column, value, cursor.carried[i] ?? false)),
+				bindableOn(keys[i]?.column, boundCarried(keys[i]?.column, value, cursor.carried[i] === true)),
 			),
 			{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 		)
