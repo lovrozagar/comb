@@ -155,7 +155,7 @@ describe("createCursor on a row without a sort field or its id (QL5 of r22b; sib
 describe("the public createCursor: a tiebreak id no cursor carries", () => {
 	it.each([
 		[true, "a boolean"],
-		[Number.NaN, "a number"],
+		[Number.NaN, "a number that is not finite"],
 	])("refuses a row whose id reads %s with sort_not_wired, naming it", (id, kind) => {
 		expect(() => publicCreateCursor({ id, title: "a" }, BY_TITLE, SEALED)).toThrow(
 			expect.objectContaining({

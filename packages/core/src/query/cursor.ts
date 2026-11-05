@@ -150,10 +150,16 @@ function refuseComputedSort(parsedSort: readonly SortField[]): void {
 	})
 }
 
-/** What a value no cursor carries is, for the 500 that names it */
+/** What a value no cursor carries is, for the 500 that names it; a sort value or an id */
 function kindOf(value: unknown): string {
+	if (value === null) return "null"
 	if (Array.isArray(value)) return "an array"
-	return typeof value === "bigint" ? "an integer past 20 digits" : `a ${typeof value}`
+	if (value instanceof Date) return "a time"
+	if (value instanceof Uint8Array) return "bytes"
+	const kind = typeof value
+	if (kind === "bigint") return "an integer past 20 digits"
+	if (kind === "number") return "a number that is not finite"
+	return kind === "object" ? "an object" : `a ${kind}`
 }
 
 /**

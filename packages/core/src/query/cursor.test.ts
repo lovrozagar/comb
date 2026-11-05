@@ -293,16 +293,30 @@ describe("a minted cursor is one comb reads (QL5 of r22b; sibling: what openCurs
 	const BY_K: SortField[] = [{ direction: "asc", field: "k" }]
 
 	it.each([
-		["a JSON object", { n: 1 }],
+		["an object", { n: 1 }],
 		["an array", [1, 2]],
 		["a function", () => 1],
 		["a symbol", Symbol("k")],
-		["a bigint past 20 digits", 10n ** 25n],
-	])("refuses %s as sort_not_wired naming its field, a 500 on the page that reads it", (_label, value) => {
+		["an integer past 20 digits", 10n ** 25n],
+	])("refuses %s as sort_not_wired naming its field, a 500 on the page that reads it", (kind, value) => {
 		expect(thrown(() => mintCursor({ id: "a", k: value }, BY_K, SEALED))).toMatchObject({
-			cause: expect.stringContaining("k"),
+			cause: `the sort by k reads ${kind}, which no cursor carries: sort by a column of text, numbers, booleans, times or bytes`,
 			errorKey: "sort_not_wired",
 			status: 500,
+		})
+	})
+
+	it.each([
+		["null", null],
+		["a boolean", true],
+		["a number that is not finite", Number.NaN],
+		["a time", new Date(0)],
+		["bytes", new Uint8Array([1])],
+		["an object", { n: 1 }],
+	])("refuses a tiebreak id that reads %s, naming it", (kind, id) => {
+		expect(thrown(() => mintCursor({ id, k: 1 }, BY_K, SEALED))).toMatchObject({
+			cause: `the tiebreak id id reads ${kind}, which no cursor carries: key the table by text or an integer`,
+			errorKey: "sort_not_wired",
 		})
 	})
 
