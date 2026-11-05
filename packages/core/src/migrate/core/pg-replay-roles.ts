@@ -21,7 +21,8 @@ import type { Snapshot, Strays } from "./pg-server-snapshot.ts"
 
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
- * that owns it, whether its role is a superuser, which reads pg_authid, and the roles it made; the
+ * that owns it, its role (`role`, which CURRENT_USER and its kin name in a file), whether that role
+ * is a superuser, which reads pg_authid, and the roles it made; the
  * open transaction's own writes, comb's CREATE ROLEs', with the rows they left; the shared catalogs
  * as last read committed (`seen`), and the roles, databases and replication slots a refused window
  * added (`strays`), which the cleanup drops
@@ -32,16 +33,17 @@ type Run = {
 	database: string
 	ours: { rows: Rows; writes: Writes }
 	owner: string
+	role: string
 	seen: Snapshot
 	sql: Sql
 	strays: Strays
 	superuser: boolean
 }
 
-/** Whether the role `sql` runs as is a superuser */
-async function superuserOf(sql: Sql): Promise<boolean> {
-	const [row] = await sql.unsafe("SELECT rolsuper FROM pg_roles WHERE rolname = current_user", [])
-	return row?.["rolsuper"] === true
+/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, and whether it is a superuser */
+async function devRoleOf(sql: Sql): Promise<{ role: string; superuser: boolean }> {
+	const [row] = await sql.unsafe("SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user", [])
+	return { role: String(row?.["rolname"] ?? ""), superuser: row?.["rolsuper"] === true }
 }
 
 /** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
@@ -226,4 +228,4 @@ async function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string
 	return new Set((await sql.unsafe(HELD, [[...roles]])).map((row) => String(row["rolname"])))
 }
 
-export { adopt, bareAgain, bareRole, createRole, grantsMade, heldRoles, ownGrant, ownRole, type Run, superuserOf }
+export { adopt, bareAgain, bareRole, createRole, devRoleOf, grantsMade, heldRoles, ownGrant, ownRole, type Run }

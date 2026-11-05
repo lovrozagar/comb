@@ -54,7 +54,7 @@ import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-transaction.ts"
 import { claim, copyExtensions, extensionsOf, makeDatabase, replayOptions, type Sql } from "./pg-replay-database.ts"
 import { cleanUp, leaving, sweep } from "./pg-replay-drops.ts"
-import { grantsMade, ownGrant, ownRole, type Run, superuserOf } from "./pg-replay-roles.ts"
+import { devRoleOf, grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
@@ -191,7 +191,7 @@ async function opening(
 		seen: new Map(),
 		sql: open(),
 		strays: { databases: [], roles: [], slots: [] },
-		superuser: await superuserOf(admin),
+		...(await devRoleOf(admin)),
 	}
 	return { open, run }
 }

@@ -14,8 +14,10 @@ import { type Catalog, catalogsOf, changedFields } from "./pg-server-writes.ts"
 /* the roles a replay made, by the tag their comment carries */
 const TAGGED =
 	"(SELECT objoid FROM pg_shdescription WHERE classoid = 'pg_authid'::regclass AND description LIKE 'comb\\_replay %')"
-const REPLAY_SETTING = "(SELECT datname FROM pg_database WHERE oid = setdatabase) LIKE 'comb\\_replay\\_%'"
-const REPLAY_OBJECT = "(SELECT datname FROM pg_database WHERE oid = objoid) LIKE 'comb\\_replay\\_%'"
+/* a setting for every database has no datname, and NOT of a NULL would drop its row too (AE6 of r22); a comment's too, by construction */
+const REPLAY_SETTING =
+	"coalesce((SELECT datname FROM pg_database WHERE oid = setdatabase) LIKE 'comb\\_replay\\_%', false)"
+const REPLAY_OBJECT = "coalesce((SELECT datname FROM pg_database WHERE oid = objoid) LIKE 'comb\\_replay\\_%', false)"
 
 /* a shared comment's or security label's row a replay makes: on a role it tagged, or on its database */
 const REPLAY_SHARED = `(classoid = 'pg_authid'::regclass AND objoid IN ${TAGGED}) OR (classoid = 'pg_database'::regclass AND ${REPLAY_OBJECT})`
@@ -28,6 +30,16 @@ const REPLAYS: Readonly<Record<string, string>> = {
 	pg_db_role_setting: `${REPLAY_SETTING} AND (setrole = 0 OR setrole IN ${TAGGED})`,
 	pg_shdescription: REPLAY_SHARED,
 	pg_shseclabel: REPLAY_SHARED,
+}
+
+/*
+ * the names a catalog's row is about as the snapshot reads them, where they differ from the counts'
+ * read (AE6 of r22): a setting for every role, which ALTER ROLE ALL makes, is about `all`, the word
+ * the file spells; only here, so the counts' read never takes a role named all for every role
+ */
+const NAMES: Readonly<Record<string, string>> = {
+	pg_db_role_setting:
+		"ARRAY[(SELECT datname FROM pg_database WHERE oid = setdatabase), CASE WHEN setrole = 0 THEN 'all' ELSE (SELECT rolname FROM pg_roles WHERE oid = setrole) END]",
 }
 
 // lookup-table: what the server holds beside its catalogs, read as the catalogs are: a slot's fields that do not move as it is used
@@ -55,7 +67,8 @@ const ownDatabase = (database: string): string =>
  */
 function snapshotRead(superuser: boolean): string {
 	return Object.entries({ ...catalogsOf(superuser), ...BESIDE })
-		.map(([catalog, { names, noun, query }]) => {
+		.map(([catalog, { names: stored, noun, query }]) => {
+			const names = NAMES[catalog] ?? stored
 			const replays = REPLAYS[catalog]
 			const read = (replays === undefined ? query : `${query} WHERE NOT (${replays})`).replace(
 				" AS row FROM ",

@@ -43,6 +43,9 @@ type At = {
 	stops: string
 }
 
+/* the words that name devUrl's role in a file, as namesIn folds them: CURRENT_USER and its kin (AE6 of r22) */
+const SESSION_ROLE = ["current_role", "current_user", "session_user", "user"]
+
 /**
  * The server's shared catalogs read as committed against the last read: a change since to an object
  * the file `name` names (`names`), while `sent` or the whole file ran, is refused, and a role or
@@ -60,6 +63,7 @@ async function window(run: Run, at: At, read?: Snapshot): Promise<void> {
  */
 function strayed(run: Run, { name, names, sent, stops }: At, now: Snapshot): void {
 	const its = new Set([...names, run.database])
+	if (SESSION_ROLE.some((word) => names.has(word))) its.add(run.role)
 	const changes = snapshotChanges(run.seen, now, its)
 	const { databases, roles, slots } = added(run.seen, now, its)
 	run.seen = now

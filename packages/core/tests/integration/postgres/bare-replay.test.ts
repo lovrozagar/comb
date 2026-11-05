@@ -173,22 +173,39 @@ describe("another session's change is its own (P2; sibling: two checks on one se
 /** A txmode none file whose committing DO runs `change` bare */
 const bare = (change: string) => `${NONE}DO $$ BEGIN COMMIT; EXECUTE '${change}'; END $$;\n`
 
+/* each catalog statement the AE6 tests make on the shared server, written to the run's log */
+const logCatalog = (statement: string): void => void process.stderr.write(`[comb] AE6 catalog: ${statement}\n`)
+
+/** `statement` run on the test server as its superuser, logged first */
+async function catalog(statement: string): Promise<void> {
+	logCatalog(statement)
+	await query(pgUrl(), statement)
+}
+
 /* AE6 of r22: a bare committing DO's change to a role or setting it names by keyword, which the read must resolve */
 describe("a bare change to a row the file names by keyword is the file's (AE6; sibling: P2's spelled names)", () => {
 	it("refuses ALTER ROLE CURRENT_USER SET under a CREATEDB devUrl, naming the setting devUrl's server keeps", async () => {
 		const [role] = testRoles("comb_t_kw")
-		/* DROP ROLE, which testRoles runs as the test ends, takes the role's settings with it */
+		logCatalog(
+			`CREATE ROLE ${role} LOGIN CREATEDB PASSWORD <the URL's>; DROP ROLE ${role} with dropRoles as the test ends`,
+		)
 		const dev = await asRole(pgUrl(), role, "CREATEDB")
-		const { refused } = await checked(T, bare("ALTER ROLE CURRENT_USER SET work_mem = ''9MB''"), dev)
-		expect(refused).toContain(`devUrl's server keeps setting every database for ${role} added`)
+		try {
+			logCatalog(`ALTER ROLE CURRENT_USER SET work_mem = '9MB', as ${role}, from the check's bare DO`)
+			const { refused } = await checked(T, bare("ALTER ROLE CURRENT_USER SET work_mem = ''9MB''"), dev)
+			expect(refused).toContain(`setting every database for ${role} added, which comb cannot undo`)
+		} finally {
+			await catalog(`ALTER ROLE ${role} RESET ALL`)
+		}
 	}, 60_000)
 
 	it("refuses ALTER ROLE ALL SET, naming the setting every role keeps", async () => {
 		try {
+			logCatalog("ALTER ROLE ALL SET comb_t.probe = 'leaked', from the check's bare DO")
 			const { refused } = await checked(T, bare("ALTER ROLE ALL SET comb_t.probe = ''leaked''"))
 			expect(refused).toContain("devUrl's server keeps setting every database for every role ")
 		} finally {
-			await query(pgUrl(), "ALTER ROLE ALL RESET comb_t.probe")
+			await catalog("ALTER ROLE ALL RESET comb_t.probe")
 		}
 	}, 60_000)
 })

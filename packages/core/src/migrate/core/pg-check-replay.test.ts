@@ -41,7 +41,7 @@ const AROUND = {
 		expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
 		"SELECT set_config($1, $2, false), set_config($3, $4, false)",
 		"CREATE DATABASE <db> TEMPLATE template0",
-		"SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
+		"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
 		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
 		/* the read prepared on the connection that makes it, once, and read before the first file */

@@ -61,7 +61,7 @@ const SWEEP = [
 ]
 const MADE = [
 	"CREATE DATABASE <db> TEMPLATE template0",
-	"SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
+	"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
 	COUNTED,
 	expect.stringMatching(/^SELECT e\.extname/),
 ]

@@ -34,6 +34,7 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 		database: "comb_replay_7_9_00000000",
 		ours: { rows: new Map(), writes: new Map() },
 		owner: "comb_replay_7_9",
+		role: "dev",
 		seen: new Map([["role kept", { names: ["kept"], row: { rolconnlimit: -1 } }]]),
 		sql,
 		strays: { databases: [], roles: [], slots: [] },
@@ -90,6 +91,21 @@ describe("window", () => {
 		const { run } = runOf({ snapshot: [["role", "kept", ["kept"], { rolconnlimit: 5 }]] })
 		expect(await refusal(window(run, at(["svc"])))).toBeUndefined()
 		expect(run.seen.get("role kept")?.row).toEqual({ rolconnlimit: 5 })
+	})
+
+	it.each(["current_user", "current_role", "session_user", "user"])(
+		"refuses a change to devUrl's role, which a file names as %s (AE6 of r22)",
+		async (word) => {
+			const { run } = runOf({ snapshot: [["setting", "every database for dev", ["dev"], { work_mem: "9MB" }]] })
+			expect(await refusal(window(run, at([word])))).toContain(
+				"devUrl's server keeps setting every database for dev added, which comb cannot undo",
+			)
+		},
+	)
+
+	it("passes a change to devUrl's role from a file that names no role by keyword", async () => {
+		const { run } = runOf({ snapshot: [["setting", "every database for dev", ["dev"], { work_mem: "9MB" }]] })
+		expect(await refusal(window(run, at(["svc"])))).toBeUndefined()
 	})
 
 	it("refuses a change the file names: what it added comb drops, and what it changed devUrl keeps", async () => {

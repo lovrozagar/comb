@@ -15,15 +15,21 @@
  *
  * Once it holds the lock, the run sweeps the scratch databases a timed-out or killed run left
  * (scratch-sweep.ts, plan 21 leaf 10.9): no other run's suites are running then, so none of theirs
- * is in use.
+ * is in use. And it resets each every-role `comb_t.*` setting a killed run left (probe-settings.ts).
  */
 import { acquirePgRunLock } from "../../support/pg-lock.ts"
 import setupIntegration from "./global-setup.ts"
 import { pgUrl } from "./pg.ts"
+import { resetProbeSettings } from "./probe-settings.ts"
 import { sweepScratchDbs } from "./scratch-sweep.ts"
 
-/** The integration setup, then the run's lock, held until this project tears down, and the scratch swept once it is taken */
+/** The integration setup, then the run's lock, held until this project tears down, and the scratch and probe settings swept once it is taken */
 export default async function setup(): Promise<() => Promise<void>> {
 	setupIntegration()
-	return acquirePgRunLock(pgUrl(), { taken: sweepScratchDbs })
+	return acquirePgRunLock(pgUrl(), {
+		taken: async (session) => {
+			await sweepScratchDbs(session)
+			await resetProbeSettings(session)
+		},
+	})
 }
