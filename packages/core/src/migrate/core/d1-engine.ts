@@ -15,7 +15,6 @@ import type { ProofInput, ProofResult } from "./d1-engine-child.mjs"
 import { binEntry } from "./optional-peer.ts"
 import { type ProjectBin, type Run, run } from "./process.ts"
 import { copyScript, type LiveObject } from "./proof-copy.ts"
-import { SHADOWS } from "./proof-scope.ts"
 import { quote } from "./proof-seed.ts"
 import { scratchDir } from "./cleanup.ts"
 
@@ -85,7 +84,6 @@ async function proofInput(
 			query: `${sql}\nINSERT INTO ${quote(table)} (name)\nvalues ('${name.replaceAll("'", "''")}');`,
 		})),
 		seed: [...(await copyScript(live, files, table)), history],
-		shadows: SHADOWS,
 		wrangler: binEntry(bin),
 	}
 }

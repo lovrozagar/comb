@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { wranglerBin } from "../../cli/__fixtures__/d1.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { scopeCorpus } from "../__fixtures__/scope-corpus.ts"
-import { main, prove } from "./d1-engine-child.mjs"
+import { main, type ProofResult, prove } from "./d1-engine-child.mjs"
 import { proofInput } from "./d1-engine.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { creatable, jsonColumns, liveObjects, scriptOf } from "./proof-copy.ts"
@@ -14,23 +14,27 @@ vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 const LIVE = "CREATE TABLE t (id INTEGER PRIMARY KEY, v REAL NOT NULL DEFAULT 1);\nINSERT INTO t (v) VALUES (2), (3);"
 
-/* a wrangler whose D1 dies compiling any DELETE, as workerd does on AC2-2's sequence, and answers nothing after */
+/* a wrangler whose D1 dies compiling a DELETE from t, as workerd does on AC2-2's sequence, and answers nothing after;
+   compiling an INSERT into u it answers a D1 error */
 const CRASHING_WRANGLER = `
 const fail = () => { throw new TypeError("fetch failed", { cause: new Error("other side closed") }) }
 export const unstable_splitSqlQuery = (sql) => [sql]
 export async function getPlatformProxy() {
 	let dead = false
-	let made = false
-	const t = { type: "table", name: "t", tbl_name: "t", sql: "CREATE TABLE t (x)" }
+	const made = []
+	const row = (name) => ({ type: "table", name, tbl_name: name, sql: "CREATE TABLE " + name + " (x)" })
 	const prepare = (sql) => ({ sql, all: async () => {
 		if (dead) fail()
-		return { results: sql.startsWith("SELECT type") && made ? [t] : [] }
+		if (sql.startsWith("PRAGMA table_list")) return { results: [{ schema: "main", type: "table" }] }
+		return { results: sql.startsWith("SELECT type") ? made.map(row) : [] }
 	} })
 	const batch = async (statements) => {
 		if (dead) fail()
 		for (const { sql } of statements) {
-			if (sql.startsWith("EXPLAIN DELETE")) { dead = true; fail() }
-			if (sql === t.sql) made = true
+			if (sql.startsWith('EXPLAIN DELETE FROM "t"')) { dead = true; fail() }
+			if (sql.startsWith('EXPLAIN INSERT INTO "u"')) throw new Error("no such function: power")
+			const table = /^CREATE TABLE (\\w+)/.exec(sql)?.[1]
+			if (table !== undefined) made.push(table)
 		}
 	}
 	return { dispose: async () => {}, env: { DB: { batch, prepare } } }
@@ -42,36 +46,40 @@ afterEach(() => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true })
 })
 
-/** `files` proven in this process on the checked wrangler's D1, over a live database `schema` made (t by default) */
-async function proven(
+/** The child's answer to `files` proven in this process on the checked wrangler's D1, over a live database `schema` made (t by default) */
+async function answer(
 	files: Array<{ name: string; sql: string }>,
 	{ schema = LIVE, table = "d1_migrations" }: { schema?: string; table?: string } = {},
-): Promise<string | undefined> {
+): Promise<ProofResult> {
 	const live = libsqlConnection()
 	const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))
 	dirs.push(dir)
 	try {
 		await live.client.executeMultiple(schema)
 		const objects = creatable(await liveObjects(live, notEngineTables(live)))
-		return (await prove(await proofInput(objects, files, { bin: wranglerBin(), dir, table }))).refused
+		return await prove(await proofInput(objects, files, { bin: wranglerBin(), dir, table }))
 	} finally {
 		await live.close()
 	}
 }
 
-/** D1's answer to `file` over a live database `schema` made, on the scoped copy and on the whole schema's copy */
-async function d1Verdicts(schema: string, sql: string): Promise<{ scoped: string; whole: string }> {
+/** D1's refusal of `files`, as `answer` proves them */
+const proven = async (...args: Parameters<typeof answer>): Promise<string | undefined> =>
+	(await answer(...args)).refused
+
+/** D1's answer to `sources` over a live database `schema` made, on the scoped copy and on the whole schema's copy */
+async function d1Verdicts(schema: string, sources: readonly string[]): Promise<{ scoped: unknown; whole: unknown }> {
 	const live = libsqlConnection()
 	const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))
 	dirs.push(dir)
 	try {
 		await live.client.executeMultiple(schema)
 		const objects = creatable(await liveObjects(live, notEngineTables(live)))
-		const files = [{ name: "1_case.sql", sql }]
+		const files = sources.map((sql, i) => ({ name: `${i + 1}_case.sql`, sql }))
 		const input = await proofInput(objects, files, { bin: wranglerBin(), dir, table: "d1_migrations" })
 		const whole = [...(await scriptOf(objects, { json: jsonColumns(files), variant: 0 })), input.seed.at(-1) as string]
-		const answer = async (seed: string[]): Promise<string> => (await prove({ ...input, seed })).refused ?? "passes"
-		return { scoped: await answer(input.seed), whole: await answer(whole) }
+		const run = async (seed: string[]) => await prove({ ...input, seed })
+		return { scoped: await run(input.seed), whole: await run(whole) }
 	} finally {
 		await live.close()
 	}
@@ -81,9 +89,9 @@ async function d1Verdicts(schema: string, sql: string): Promise<{ scoped: string
 describe("prove answers every corpus file on the scoped copy as on the whole schema's copy (8.5)", () => {
 	it.each(scopeCorpus().map((each) => [each.label, each] as const))(
 		"%s",
-		async (_, { file, schema }) => {
-			const { scoped, whole } = await d1Verdicts(schema, file)
-			expect(scoped).toBe(whole)
+		async (_, { files, schema }) => {
+			const { scoped, whole } = await d1Verdicts(schema, files)
+			expect(scoped).toEqual(whole)
 		},
 		120_000,
 	)
@@ -183,7 +191,7 @@ describe("prove when comb's local D1 crashes on a probe", () => {
 			},
 			{ name: "2_c8.sql", sql: "ALTER TABLE t1 ADD COLUMN c8 TEXT;" },
 		]
-		expect(await proven(files, { schema: "" })).toBeUndefined()
+		expect(await answer(files, { schema: "" })).toEqual({})
 	}, 120_000)
 
 	it("lists a file whose probe crashes it again on a fresh copy as unproven, and proves the files after it", async () => {
@@ -198,7 +206,6 @@ describe("prove when comb's local D1 crashes on a probe", () => {
 			configPath: join(dir, "wrangler.json"),
 			files,
 			seed: [],
-			shadows: {},
 			wrangler: join(dir, "wrangler.mjs"),
 		}
 		expect(await prove(input)).toEqual({
@@ -208,6 +215,21 @@ describe("prove when comb's local D1 crashes on a probe", () => {
 					why: `comb's local D1 (wrangler's workerd) crashed compiling DELETE FROM "t" once this file applied, and again on a fresh copy, so D1's engine proves nothing of it; wrangler's apply compiles no such statement, so this does not show the live database refuses the file`,
 				},
 			],
+		})
+	})
+
+	/* AC3-9 of area C round 3: an approval would otherwise let through a file D1 refuses after an unproven one */
+	it("refuses a later file D1 refuses after an unproven one", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))
+		dirs.push(dir)
+		writeFileSync(join(dir, "wrangler.mjs"), CRASHING_WRANGLER)
+		const files = [
+			{ name: "1_t.sql", query: "CREATE TABLE t (x)" },
+			{ name: "2_u.sql", query: "CREATE TABLE u (x)" },
+		]
+		const input = { configPath: join(dir, "wrangler.json"), files, seed: [], wrangler: join(dir, "wrangler.mjs") }
+		expect(await prove(input)).toEqual({
+			refused: `2_u.sql: D1 applies this file, then refuses INSERT INTO "u" DEFAULT VALUES: no such function: power, so it would fail on the live database once applied; leave out what D1 does not run`,
 		})
 	})
 })

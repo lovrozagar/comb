@@ -1,6 +1,6 @@
 /**
  * What SQLite answers a pending file on a copy's script (8.5 of plan 21), as the D1 proof asks D1: the script in one
- * transaction with foreign keys on, as D1 runs its batch, then the file in one, then an EXPLAIN of each view, and each
+ * transaction with foreign keys on, as D1 runs its batch, then each file in one, then an EXPLAIN of each view, and each
  * table's writes, the file made or changed (d1-engine.ts's probes). "passes", or the first error, the probe named.
  */
 import { DatabaseSync } from "node:sqlite"
@@ -54,8 +54,26 @@ function probes(db: DatabaseSync, before: ReturnType<typeof master>): string[] {
 	]
 }
 
-/** SQLite's answer to `file` on a copy `script` makes: "passes", "seed: …" when the script fails, or the file's error */
-export function verdictOf(script: readonly string[], file: string): string {
+/** The error `file` meets on `db`, running or in its probes */
+function fileError(db: DatabaseSync, file: string): string | undefined {
+	const before = master(db)
+	try {
+		inTransaction(db, file)
+	} catch (error) {
+		return (error as Error).message
+	}
+	for (const probe of probes(db, before)) {
+		try {
+			db.exec(probe)
+		} catch (error) {
+			return `${probe}: ${(error as Error).message}`
+		}
+	}
+	return undefined
+}
+
+/** SQLite's answer to `files` on a copy `script` makes: "passes", "seed: …" when the script fails, or the first error */
+export function verdictOf(script: readonly string[], files: readonly string[]): string {
 	const db = new DatabaseSync(":memory:")
 	try {
 		db.exec("PRAGMA foreign_keys = ON")
@@ -64,18 +82,9 @@ export function verdictOf(script: readonly string[], file: string): string {
 		} catch (error) {
 			return `seed: ${(error as Error).message}`
 		}
-		const before = master(db)
-		try {
-			inTransaction(db, file)
-		} catch (error) {
-			return (error as Error).message
-		}
-		for (const probe of probes(db, before)) {
-			try {
-				db.exec(probe)
-			} catch (error) {
-				return `${probe}: ${(error as Error).message}`
-			}
+		for (const file of files) {
+			const failed = fileError(db, file)
+			if (failed !== undefined) return failed
 		}
 		return "passes"
 	} finally {

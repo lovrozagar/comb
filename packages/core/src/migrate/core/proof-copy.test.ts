@@ -3,7 +3,7 @@ import { verdictOf } from "../__fixtures__/copy-verdict.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
-import { copyScript, creatable, jsonColumns, liveObjects, scriptOf } from "./proof-copy.ts"
+import { copyOf, copyScript, creatable, jsonColumns, liveObjects, scriptOf } from "./proof-copy.ts"
 
 /** The live schema of `conn`, as the proof reads it */
 const schemaOf = async (conn: Connection) => creatable(await liveObjects(conn, notEngineTables(conn)))
@@ -192,7 +192,7 @@ async function verdictBy(schema: string, file: string): Promise<string> {
 	const live = libsqlConnection()
 	try {
 		await live.client.executeMultiple(schema)
-		return verdictOf(await copyScript(await schemaOf(live), [{ sql: file }], "d1_migrations"), file)
+		return verdictOf(await copyScript(await schemaOf(live), [{ sql: file }], "d1_migrations"), [file])
 	} finally {
 		await live.close()
 	}
@@ -253,4 +253,25 @@ describe("copyScript creates what the pending files can observe (8.5)", () => {
 		expect(await createdBy(schema, [file])).toEqual(["c", "c_gone", "p", "w"])
 		expect(await verdictBy(schema, file)).toMatch(/CHECK constraint failed/)
 	})
+})
+
+/* AC3-1 and AC3-10 of area C round 3: SQLite reads the module after USING however it is written */
+describe("creatable and copyScript on a virtual table's module, however it is written", () => {
+	it.each(["fts5(a)", " fts5(a)", "\nfts5(a)", '"fts5"(a)', "[fts5](a)", "/* m */fts5(a)"])(
+		"leave out the shadow tables of USING%j and seed the table",
+		async (module) => {
+			const schema = `CREATE VIRTUAL TABLE f USING${module.startsWith("fts") ? " " : ""}${module};`
+			const live = libsqlConnection()
+			try {
+				await live.client.executeMultiple(schema)
+				const objects = await schemaOf(live)
+				expect(objects.map(({ name }) => name)).toEqual(["f"])
+				const copy = await copyOf(objects, { json: new Set(), variant: 0 })
+				expect([...copy.unproven]).toEqual([])
+				copy.db.close()
+			} finally {
+				await live.close()
+			}
+		},
+	)
 })

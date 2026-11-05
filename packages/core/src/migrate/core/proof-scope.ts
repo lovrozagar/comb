@@ -3,24 +3,28 @@
  * can observe, created, and the tables whose rows they can observe, seeded, so the copy refuses what the whole
  * schema would and costs what the files reach.
  *
- * - N: each live object whose name a file spells as a name (sql-code's lexer, compared folded, never as a
- *   substring), and the history table; S is N's tables, which a file creates, alters, drops, renames or writes.
- * - Rows go to S, each table a trigger or view reached from S names (to a fixpoint), D (their FK descendants: a
- *   cascade reaches them) and A (the FK ancestors of all those: their keys must be met).
- * - A file that reads a catalog (sqlite_master, sqlite_schema, their temp forms, pragma_table_list or PRAGMA
- *   table_list) observes every object, so the copy creates them all, seeding only the tables above.
- * - Otherwise the copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
- *   them on DROP COLUMN and RENAME COLUMN, and a rename rewrites them). Then to a fixpoint each index and trigger on a
- *   created table or view (a view's INSTEAD OF triggers carry out a write through it), each table and view a created
- *   trigger or view names, and each created table's FK ancestors, which a write to it compiles checks against.
+ * - An object's references are every name its text spells (sql-code's lexer, compared folded, never as a substring)
+ *   and, for a virtual table, each string and quoted name among its module's arguments, whole. A table's FK parents
+ *   are the other tables it references; a reader is a view, a trigger or a virtual table, and reads what it references.
+ * - N: each live object whose name a file spells, and the history table; S is N's tables, which a file creates,
+ *   alters, drops, renames or writes.
+ * - Rows go to S, each table a reader reached from S references (to a fixpoint), D (their FK descendants: a cascade
+ *   reaches them) and A (the FK ancestors of all those: their keys must be met).
+ * - The copy creates N, the seeded tables, and each reader that references an S table (SQLite checks views and
+ *   triggers on DROP COLUMN and RENAME COLUMN, and a rename rewrites them). Then to a fixpoint each index and trigger
+ *   on a created table or view (a view's INSTEAD OF triggers carry out a write through it), each table and view a
+ *   created reader references, and each created table's FK ancestors, which a write to it compiles checks against.
+ * - Reflection reads the schema itself: a name with SQLite's reserved `sqlite_` prefix (its catalogs, sqlite_sequence,
+ *   sqlite_stat*), a `pragma_` table-valued function, or a PRAGMA statement. When a file or an object the copy creates
+ *   reflects, the copy creates every object and seeds every table, so SQLite's own tables hold what the whole schema's do.
  * - When a pending file holds an ALTER TABLE, it creates every other view and trigger too, with each table and view
  *   they name through views: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere
  *   fails the file, and the copy carries them all rather than a list of which ALTER forms check. The check resolves
  *   names and nothing writes them, so their tables' indexes and FK ancestors stay out. Only the seeded tables get rows.
  */
 import type { LiveObject } from "./proof-copy.ts"
-import { codeOf } from "../../sql-lexer.ts"
-import { asciiFold, IDENT, sqliteNames } from "./sql-code.ts"
+import { codeOf, segments } from "../../sql-lexer.ts"
+import { asciiFold, sqliteNames, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 // lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again
@@ -39,31 +43,51 @@ const isVirtual = (object: LiveObject): boolean => /^CREATE VIRTUAL TABLE\b/i.te
 /** Whether SQLite statement `stmt` is an ALTER TABLE, read as code (a comment or a string before it is not) */
 const isAlterTable = (stmt: string): boolean => /^ALTER\s+TABLE\b/i.test(codeOf(stmt, "sqlite"))
 
-// lookup-table: the catalogs that list every object of a schema without a statement naming one
-const CATALOGS = ["sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema", "pragma_table_list"]
+/* a bare word or one character of punctuation, in code */
+const TOKEN = /[A-Za-z_\u0080-\uffff][\w$\u0080-\uffff]*|\S/g
 
-/** Whether SQLite statement `stmt` reads a catalog: names one, or is the PRAGMA table_list that reads one */
-function readsCatalog(stmt: string): boolean {
-	const names = sqliteNames(stmt)
-	if (CATALOGS.some((catalog) => names.has(catalog))) return true
-	return /^PRAGMA\b/i.test(codeOf(stmt, "sqlite")) && names.has("table_list")
+/** A token of SQLite code, by the lexer's kind of segment it came from */
+type Token = { kind: string; text: string }
+
+/** `sql`'s tokens as SQLite reads them, comments left out: each word and punctuation of code, each string and quoted name whole */
+const tokensOf = (sql: string): Token[] =>
+	segments(sql, "sqlite").flatMap<Token>(({ kind, text }) =>
+		kind === "comment"
+			? []
+			: kind === "code"
+				? [...text.matchAll(TOKEN)].map(([word]) => ({ kind, text: word }))
+				: [{ kind, text }],
+	)
+
+/** A token as SQLite resolves it to a name, folded: a string as its whole text, a quoted name unquoted */
+const nameOf = ({ kind, text }: Token): string =>
+	asciiFold(kind === "literal" ? text.slice(1, -1).replaceAll("''", "'") : unquote(text))
+
+/**
+ * Virtual table `object`'s module, the name after USING however it is written, and each string and quoted name among
+ * the module's arguments, which the module may read as a table's name (fts5vocab, content=)
+ */
+function virtualOf(object: LiveObject): { args: string[]; module: string } | undefined {
+	if (!isVirtual(object)) return undefined
+	const tokens = tokensOf(object.sql)
+	const at = tokens.findIndex(({ kind, text }) => kind === "code" && /^using$/i.test(text)) + 1
+	const args = tokens[at + 1]?.text === "(" ? tokens.slice(at + 2).filter(({ kind }) => kind !== "code") : []
+	return { args: args.map(nameOf), module: nameOf(tokens[at] as Token) }
 }
 
 /** The folded names of the shadow tables virtual table `object`'s module makes */
-function shadowsOf(object: LiveObject): string[] {
-	/* a CREATE VIRTUAL TABLE names its module */
-	const module = (/\bUSING\s+(\w+)/i.exec(object.sql) as RegExpExecArray)[1]?.toLowerCase() as string
-	return (SHADOWS[module] ?? []).map((suffix) => asciiFold(`${object.name}_${suffix}`))
-}
+const shadowsOf = (object: LiveObject): string[] =>
+	(SHADOWS[virtualOf(object)?.module as string] ?? []).map((suffix) => asciiFold(`${object.name}_${suffix}`))
 
-// per-process-constant: a foreign key's parent, as a column or table constraint names it
-const REFERENCES = /* @__PURE__ */ new RegExp(`\\bREFERENCES\\s+(${IDENT})`, "gi")
-// per-process-constant: the table an external-content FTS table reads its rows from, as its content option names it
-const CONTENT = /* @__PURE__ */ new RegExp(`\\bcontent\\s*=\\s*('(?:[^']|'')*'|${IDENT})`, "gi")
+/** Every name `object` references, folded (see the module's comment) */
+const referencesOf = (object: LiveObject): Set<string> =>
+	new Set([...sqliteNames(object.sql), ...(virtualOf(object)?.args ?? [])])
 
-/** A written name part as SQLite resolves it, a string as its whole text */
-const nameOf = (part: string): string =>
-	part.startsWith("'") ? asciiFold(part.slice(1, -1).replaceAll("''", "'")) : ([...sqliteNames(part)][0] as string)
+/* a name SQLite reserves for its own tables, or a pragma's table-valued function: either reads the schema itself */
+const REFLECTION = /^(?:sqlite_|pragma_)/
+
+/** Whether `names` reflect on the schema */
+const reflects = (names: Iterable<string>): boolean => [...names].some((name) => REFLECTION.test(name))
 
 /** What a copy scoped to pending files holds: the live objects it creates, in their order, and the tables it seeds, folded */
 type Scope = { objects: LiveObject[]; seeded: Set<string> }
@@ -81,7 +105,7 @@ const add = (into: Map<string, LiveObject[]>, key: string, object: LiveObject) =
 
 /** The schema `objects` as the closure walks it: by folded name, each table's keys both ways, and each table's indexes and triggers */
 function graphOf(objects: readonly LiveObject[]) {
-	const names = new Map(objects.map((object) => [object, sqliteNames(object.sql)]))
+	const names = new Map(objects.map((object) => [object, referencesOf(object)]))
 	const named = new Map<string, LiveObject[]>()
 	const on = new Map<string, LiveObject[]>()
 	for (const object of objects) {
@@ -95,9 +119,7 @@ function graphOf(objects: readonly LiveObject[]) {
 	for (const object of objects.filter((each) => each.type === "table")) {
 		const child = asciiFold(object.name)
 		/* an FTS table's content table is a parent too: the table's index and every read of it are that table's rows */
-		const parents = [...object.sql.matchAll(REFERENCES), ...(isVirtual(object) ? object.sql.matchAll(CONTENT) : [])]
-			.map((match) => nameOf(match[1] as string))
-			.filter((parent) => tables.has(parent))
+		const parents = [...(names.get(object) as Set<string>)].filter((name) => name !== child && tables.has(name))
 		parentsOf.set(child, parents)
 		for (const parent of parents) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), child])
 	}
@@ -114,22 +136,26 @@ const tablesIn = (objects: Iterable<LiveObject>): Set<string> =>
 const objectsOf = (graph: Graph, names: Iterable<string>): LiveObject[] =>
 	[...names].flatMap((name) => graph.named.get(name) ?? [])
 
-/** The tables and views trigger or view `object` names, none for another object */
+/** Whether `object` is a reader: a view, a trigger or a virtual table, which reads what it references */
+const isReader = (object: LiveObject): boolean =>
+	object.type === "trigger" || object.type === "view" || isVirtual(object)
+
+/** The tables and views reader `object` references, none for another object */
 function namedBy(graph: Graph, object: LiveObject): LiveObject[] {
-	if (object.type !== "trigger" && object.type !== "view") return []
+	if (!isReader(object)) return []
 	return objectsOf(graph, graph.names.get(object) as Set<string>).filter(
 		(each) => each.type === "table" || each.type === "view",
 	)
 }
 
-/** `start` and, to a fixpoint, each table and view a trigger or view in it names */
+/** `start` and, to a fixpoint, each table and view a reader in it references */
 function resolved(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
 	const out = new Set(start)
 	for (const object of out) for (const each of namedBy(graph, object)) out.add(each)
 	return out
 }
 
-/** `start` and, to a fixpoint, each index and trigger on a table or view in it, and each table and view a trigger or view in it names */
+/** `start` and, to a fixpoint, each index and trigger on a table or view in it, and each table and view a reader in it references */
 function forward(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
 	const out = new Set(start)
 	for (const object of out) {
@@ -169,11 +195,12 @@ function observable(
 	/* SQLite checks each view and trigger naming a table on DROP COLUMN and RENAME COLUMN of it, and every one of
 	   them on an ALTER TABLE that renames or drops a column, wherever it reads */
 	const statements = files.flatMap(({ sql }) => splitSqlStatements(sql))
-	/* a catalog lists every object, so a file that reads one observes them all, though no more rows */
-	if (statements.some(readsCatalog)) return { objects: [...objects], seeded }
 	const checks = objects.filter((object) => object.type === "view" || object.type === "trigger")
-	/* a rename rewrites the text of each naming an S table, and D1 then compiles the writes to its table */
-	const rewritten = checks.filter((object) => [...(graph.names.get(object) as Set<string>)].some((name) => s.has(name)))
+	/* a rename rewrites the text of each view and trigger naming an S table, and D1 then compiles the writes to its
+	   table; a virtual table reading one reads the rows a file writes */
+	const rewritten = objects.filter(
+		(object) => isReader(object) && [...(graph.names.get(object) as Set<string>)].some((name) => s.has(name)),
+	)
 	/* a write to a created table compiles its keys' checks, which need each parent table */
 	let made = forward(graph, [...n, ...objectsOf(graph, seeded), ...rewritten])
 	for (;;) {
@@ -183,7 +210,15 @@ function observable(
 	}
 	/* the others an ALTER checks resolve against what they name, which no statement writes */
 	const read = statements.some(isAlterTable) ? resolved(graph, checks) : new Set<LiveObject>()
-	return { objects: objects.filter((object) => made.has(object) || read.has(object)), seeded }
+	const kept = objects.filter((object) => made.has(object) || read.has(object))
+	/* what reflects on the schema reads every object, and SQLite's own tables, whose rows the whole schema's make */
+	if (
+		statements.some((stmt) => /^PRAGMA\b/i.test(codeOf(stmt, "sqlite"))) ||
+		reflects(spelled) ||
+		kept.some((object) => reflects(graph.names.get(object) as Set<string>))
+	)
+		return { objects: [...objects], seeded: new Set(graph.tables) }
+	return { objects: kept, seeded }
 }
 
-export { isVirtual, observable, type Scope, SHADOWS, shadowsOf }
+export { isVirtual, observable, type Scope, shadowsOf, virtualOf }

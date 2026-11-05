@@ -27,15 +27,6 @@ import { pathToFileURL } from "node:url"
  * @typedef {import("./d1-engine-child.d.mts").ProofResult} ProofResult
  */
 
-/**
- * `name` as SQLite compares names, ASCII case folded
- * @param {string} name
- */
-const fold = (name) => name.replaceAll(/[A-Z]/g, (letter) => letter.toLowerCase())
-
-/* a virtual table's CREATE, and the module it names */
-const VIRTUAL = /^CREATE\s+VIRTUAL\s+TABLE\b[^]*?\bUSING\s+(\w+)/i
-
 /** @param {string} name */
 const quote = (name) => `"${name.replaceAll('"', '""')}"`
 
@@ -59,51 +50,48 @@ async function run(db, statements) {
 }
 
 /**
- * The scratch D1's schema, each object by type and name: a virtual table's shadow tables left out,
- * which its module alone writes (D1: "may not be modified"), named by the `shadows` its module makes.
- * Not pragma_table_list, which opens every table and runs D1 out of memory on a large schema
+ * The scratch D1's schema, each object by type and name
  * @param {D1Database} db
- * @param {ProofInput["shadows"]} shadows
  * @returns {Promise<Map<string, SchemaObject>>}
  */
-async function master(db, shadows) {
+async function master(db) {
 	const { results = [] } = await db
 		.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL")
 		.all()
-	const shadow = new Set(
-		results.flatMap((row) => {
-			const module = VIRTUAL.exec(String(row["sql"]))?.[1]
-			const suffixes = module === undefined ? [] : (shadows[module.toLowerCase()] ?? [])
-			return suffixes.map((suffix) => fold(`${String(row["name"])}_${suffix}`))
-		}),
-	)
 	return new Map(
-		results
-			.filter((row) => !(row["type"] === "table" && shadow.has(fold(String(row["name"])))))
-			.map((row) => [
-				`${String(row["type"])} ${String(row["name"])}`,
-				{ sql: String(row["sql"]), table: String(row["tbl_name"]), type: String(row["type"]) },
-			]),
+		results.map((row) => [
+			`${String(row["type"])} ${String(row["name"])}`,
+			{ sql: String(row["sql"]), table: String(row["tbl_name"]), type: String(row["type"]) },
+		]),
 	)
 }
 
 /**
- * The EXPLAINs that compile what a file made or changed: each view's read, and each table's writes,
- * triggers and generated columns with them. A virtual table holds neither, and its module may refuse
- * every write (fts5vocab), so its writes compile nothing of the file's
+ * Whether `table` is a table of rows SQLite itself calls one: not a virtual table, which holds neither triggers nor
+ * generated columns and whose module may refuse every write (fts5vocab), nor a shadow table its module alone writes
+ * (D1: "may not be modified"). Asked of each changed table alone: pragma_table_list over the whole schema opens every
+ * table and runs D1 out of memory on a large one
  * @param {D1Database} db
- * @param {ProofInput["shadows"]} shadows
+ * @param {string} table
+ */
+async function isRowTable(db, table) {
+	const { results = [] } = await db.prepare(`PRAGMA table_list(${quote(table)})`).all()
+	return results.some((row) => row["schema"] === "main" && row["type"] === "table")
+}
+
+/**
+ * The EXPLAINs that compile what a file made or changed: each view's read, and each table's writes,
+ * triggers and generated columns with them
+ * @param {D1Database} db
  * @param {ReadonlyMap<string, SchemaObject>} before
  * @returns {Promise<string[]>}
  */
-async function probes(db, shadows, before) {
-	const changed = [...(await master(db, shadows))].filter(([key, object]) => before.get(key)?.sql !== object.sql)
+async function probes(db, before) {
+	const changed = [...(await master(db))].filter(([key, object]) => before.get(key)?.sql !== object.sql)
 	const views = changed.filter(([, object]) => object.type === "view").map(([, object]) => object.table)
-	const tables = new Set(
-		changed
-			.filter(([, object]) => (object.type === "table" && !VIRTUAL.test(object.sql)) || object.type === "trigger")
-			.map(([, object]) => object.table),
-	)
+	const tables = new Set(changed.filter(([, object]) => object.type === "trigger").map(([, object]) => object.table))
+	for (const [, object] of changed)
+		if (object.type === "table" && (await isRowTable(db, object.table))) tables.add(object.table)
 	/** @type {string[]} */
 	const writes = []
 	for (const table of tables) {
@@ -131,7 +119,6 @@ class Scratch {
 	constructor(wrangler, input, proxy) {
 		this.wrangler = wrangler
 		this.configPath = input.configPath
-		this.shadows = input.shadows
 		this.proxy = proxy
 		/** @type {string[][]} each batch the scratch D1 has run: the seed, then each file's */
 		this.ran = [input.seed]
@@ -193,7 +180,7 @@ async function compile(scratch, probe) {
  * @returns {Promise<{ refused?: string; unproven?: string }>}
  */
 async function proveFile(scratch, file) {
-	const before = await master(scratch.db, scratch.shadows)
+	const before = await master(scratch.db)
 	/** @type {string[]} */
 	let statements
 	try {
@@ -208,7 +195,7 @@ async function proveFile(scratch, file) {
 	scratch.ran.push(statements)
 	/** @type {string[]} */
 	const crashed = []
-	for (const probe of await probes(scratch.db, scratch.shadows, before)) {
+	for (const probe of await probes(scratch.db, before)) {
 		const compiled = await compile(scratch, probe)
 		const what = probe.replace(/^EXPLAIN /, "")
 		if (compiled !== undefined && "error" in compiled)

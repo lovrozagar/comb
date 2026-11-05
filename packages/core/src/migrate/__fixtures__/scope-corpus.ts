@@ -2,12 +2,16 @@
  * The pending files the D1 proof's scoped copy must answer as the whole schema's copy does (8.5 of plan 21): the
  * SQLite and D1 proof suites' files over their live schemas, the trigger corpus (SL2), and generated shapes, each
  * statement kind over each object of a schema holding keys, cascades, triggers, views, indexes and a virtual table.
- * A finding on the D1 proof adds its file here.
+ * A finding on the D1 proof adds its files here, or to scope-corpus.json.
  */
+import { readFileSync } from "node:fs"
 import { CORPUS, CORPUS_SETUP, corpusFile } from "./trigger-corpus.ts"
 
-/** One case: what it shows, the live schema, and the pending file */
-export type ScopeCase = { file: string; label: string; schema: string }
+/** One case: what it shows, the live schema, and the pending files, in order */
+export type ScopeCase = { files: string[]; label: string; schema: string }
+
+/** A case of one pending file */
+const one = (label: string, schema: string, file: string): ScopeCase => ({ files: [file], label, schema })
 
 const D1_LIVE =
 	"CREATE TABLE t (id INTEGER PRIMARY KEY, v REAL NOT NULL DEFAULT 1);\nINSERT INTO t (v) VALUES (2), (3);"
@@ -43,20 +47,12 @@ function d1Cases(): ScopeCase[] {
 			"CREATE TABLE node (id TEXT PRIMARY KEY, up TEXT REFERENCES node (id), n INTEGER) WITHOUT ROWID;",
 			"UPDATE node SET n = 1;",
 		],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `d1: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`d1: ${label as string}`, schema as string, file as string))
 }
 
 /* the trigger corpus, each file over its tables */
 function triggerCases(): ScopeCase[] {
-	return CORPUS.map(({ label, statements }) => ({
-		file: corpusFile(statements),
-		label: `trigger: ${label}`,
-		schema: CORPUS_SETUP,
-	}))
+	return CORPUS.map(({ label, statements }) => one(`trigger: ${label}`, CORPUS_SETUP, corpusFile(statements)))
 }
 
 /** The schema the generated shapes run over */
@@ -141,11 +137,7 @@ function ftsCases(): ScopeCase[] {
 			"CREATE VIRTUAL TABLE notes USING fts5(body, content='src', content_rowid='id');\nINSERT INTO notes(notes) VALUES ('rebuild');",
 		],
 		["a table named as a string", SRC, "CREATE TABLE cp AS SELECT * FROM 'src';"],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `fts: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`fts: ${label as string}`, schema as string, file as string))
 }
 
 const VIEW_OVER_BASE =
@@ -164,11 +156,7 @@ function viewTriggerCases(): ScopeCase[] {
 			`${VIEW_OVER_BASE}\nCREATE TRIGGER v_ins INSTEAD OF INSERT ON v BEGIN DELETE FROM base; END;`,
 			"INSERT INTO v (a) VALUES ('z');",
 		],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `view trigger: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`view trigger: ${label as string}`, schema as string, file as string))
 }
 
 /* a view and a trigger left naming a table dropped after them, which DROP TABLE allows, beside a table they never name */
@@ -187,11 +175,7 @@ function brokenElsewhereCases(): ScopeCase[] {
 		["a broken trigger, RENAME COLUMN", STALE_TRIGGER, "ALTER TABLE t RENAME COLUMN a TO a_2;"],
 		/* drizzle and Atlas write a comment before a statement, which the ALTER is still read past */
 		["a broken view, an ALTER after a comment", STALE_VIEW, "-- rename a\nALTER TABLE t RENAME COLUMN a TO a_2;"],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `broken elsewhere: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`broken elsewhere: ${label as string}`, schema as string, file as string))
 }
 
 /* the closure's clauses no other case reaches (AC2-5 of area C round 2): a trigger on a table a cascade reaches,
@@ -215,11 +199,7 @@ function closureCases(): ScopeCase[] {
 			`${views}\nCREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);\nCREATE TABLE logt (n INTEGER);\nCREATE TRIGGER t_ins AFTER INSERT ON t BEGIN INSERT INTO logt SELECT count(*) FROM v1; END;`,
 			"INSERT INTO t (a) VALUES ('x');",
 		],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `closure: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`closure: ${label as string}`, schema as string, file as string))
 }
 
 /** `n` tables of one column, x1 on */
@@ -243,12 +223,14 @@ function catalogCases(): ScopeCase[] {
 			`CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER NOT NULL CHECK (n < 6));\n${tables(4)}`,
 			"INSERT INTO t (n) SELECT count(*) FROM pragma_table_list;",
 		],
-	].map(([label, schema, file]) => ({
-		file: file as string,
-		label: `catalog: ${label as string}`,
-		schema: schema as string,
-	}))
+	].map(([label, schema, file]) => one(`catalog: ${label as string}`, schema as string, file as string))
 }
+
+/* area C round 3's cases: module names quoted or past a comment, keys glued to a quoted name, fts5vocab tables, FTS
+   content that is a view, schema catalogs and sqlite_sequence read in views and triggers, and the generated schemas
+   whose scoped and whole verdicts differed */
+const reviewed = (): ScopeCase[] =>
+	JSON.parse(readFileSync(new URL("scope-corpus.json", import.meta.url), "utf8")) as ScopeCase[]
 
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
@@ -260,6 +242,7 @@ export function scopeCorpus(): ScopeCase[] {
 		...brokenElsewhereCases(),
 		...closureCases(),
 		...catalogCases(),
-		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
+		...shapes().map((file) => one(`shape: ${file}`, SHAPES_SCHEMA, file)),
+		...reviewed(),
 	]
 }

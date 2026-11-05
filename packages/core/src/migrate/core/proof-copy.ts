@@ -8,7 +8,7 @@ import { isMirror, seedMirrors } from "./proof-mirror.ts"
 import { type LocalDb, openScratch, type ScratchDb, type ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { keyGroups, quote, seedTables } from "./proof-seed.ts"
-import { isVirtual, observable, shadowsOf } from "./proof-scope.ts"
+import { isVirtual, observable, shadowsOf, virtualOf } from "./proof-scope.ts"
 import { asciiFold } from "./sql-code.ts"
 import { isVectorIndexSql, vectorShadows } from "./vector-index.ts"
 
@@ -100,7 +100,7 @@ function buildCopy(db: LocalDb, objects: readonly LiveObject[], seed: Seed): Map
 		(object) =>
 			inScope(object) &&
 			!unproven.has(asciiFold(object.name)) &&
-			(!isVirtual(object) || /\busing fts5\b/i.test(object.sql)) &&
+			(!isVirtual(object) || virtualOf(object)?.module === "fts5") &&
 			!isMirror(object),
 	)
 	for (const object of tables.filter(

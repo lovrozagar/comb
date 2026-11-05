@@ -19,13 +19,13 @@ async function liveOf(schema: string): Promise<LiveObject[]> {
 	}
 }
 
-/** SQLite's answer to `file` on the scoped copy and on the whole schema's copy */
-async function verdicts(schema: string, file: string): Promise<{ scoped: string; whole: string }> {
+/** SQLite's answer to `sources` on the scoped copy and on the whole schema's copy */
+async function verdicts(schema: string, sources: readonly string[]): Promise<{ scoped: string; whole: string }> {
 	const objects = await liveOf(schema)
-	const files = [{ sql: file }]
+	const files = sources.map((sql) => ({ sql }))
 	return {
-		scoped: verdictOf(await copyScript(objects, files, "d1_migrations"), file),
-		whole: verdictOf(await scriptOf(objects, { json: jsonColumns(files), variant: 0 }), file),
+		scoped: verdictOf(await copyScript(objects, files, "d1_migrations"), sources),
+		whole: verdictOf(await scriptOf(objects, { json: jsonColumns(files), variant: 0 }), sources),
 	}
 }
 
@@ -39,14 +39,14 @@ const view = (name: string, sql: string): LiveObject => ({ name, sql, table: nam
 describe("the D1 proof's scoped copy answers every corpus file as the whole schema's copy does (8.5)", () => {
 	const corpus = scopeCorpus()
 
-	it.each(corpus.map((each) => [each.label, each] as const))("%s", async (_, { file, schema }) => {
-		const { scoped, whole } = await verdicts(schema, file)
+	it.each(corpus.map((each) => [each.label, each] as const))("%s", async (_, { files, schema }) => {
+		const { scoped, whole } = await verdicts(schema, files)
 		expect(scoped).toBe(whole)
 	})
 
 	it("holds files the whole schema refuses, so an equal verdict is not one that passes everything", async () => {
 		const refused = []
-		for (const { file, schema } of corpus) if ((await verdicts(schema, file)).whole !== "passes") refused.push(file)
+		for (const { files, schema } of corpus) if ((await verdicts(schema, files)).whole !== "passes") refused.push(files)
 		expect(refused.length).toBeGreaterThanOrEqual(20)
 	}, 60_000)
 })
@@ -148,12 +148,14 @@ describe("observable: with an ALTER TABLE pending", () => {
 	})
 })
 
-/* AC2-1 of area C round 2: a catalog lists every object, so a file that reads one observes them all */
-describe("observable: a file that reads the schema's catalog", () => {
+/* AC2-1 of area C round 2, and ruling 3 of area C round 3: what reads the schema itself observes every object and
+   SQLite's own tables, which the rows of every table make */
+describe("observable: a file or a created object that reflects on the schema", () => {
 	const objects = [
 		table("t", "CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)"),
-		table("far", "CREATE TABLE far (id INTEGER PRIMARY KEY)"),
-		{ name: "far_v", sql: "CREATE VIEW far_v AS SELECT id FROM far", table: "far_v", type: "view" },
+		table("far", "CREATE TABLE far (id INTEGER PRIMARY KEY AUTOINCREMENT)"),
+		view("far_v", "CREATE VIEW far_v AS SELECT id FROM far"),
+		view("cat_v", "CREATE VIEW cat_v AS SELECT name FROM sqlite_schema"),
 	]
 	const names = (sql: string) => observable(objects, [{ sql }]).objects.map(({ name }) => name)
 
@@ -163,16 +165,26 @@ describe("observable: a file that reads the schema's catalog", () => {
 		"INSERT INTO t (n) SELECT name FROM sqlite_temp_master;",
 		'INSERT INTO t (n) SELECT name FROM "sqlite_temp_schema";',
 		"INSERT INTO t (n) SELECT name FROM pragma_table_list;",
+		"INSERT INTO t (n) SELECT name FROM pragma_table_info('t');",
+		"INSERT INTO t (n) SELECT count(*) FROM sqlite_sequence;",
+		"ANALYZE;\nINSERT INTO t (n) SELECT stat FROM [sqlite_stat1];",
 		"UPDATE t SET n = 'x';\nPRAGMA table_list;",
 		"UPDATE t SET n = 'x';\nPRAGMA main.table_list;",
-	])("creates every object for %j, and seeds only what it writes", (sql) => {
+		"PRAGMA foreign_keys = OFF;\nUPDATE t SET n = 'x';",
+		"INSERT INTO t (n) SELECT name FROM cat_v;",
+	])("creates every object for %j, and seeds every table", (sql) => {
 		const scope = observable(objects, [{ sql }])
-		expect(scope.objects.map(({ name }) => name)).toEqual(["t", "far", "far_v"])
-		expect([...scope.seeded]).toEqual(["t"])
+		expect(scope.objects.map(({ name }) => name)).toEqual(["t", "far", "far_v", "cat_v"])
+		expect([...scope.seeded]).toEqual(["t", "far"])
+	})
+
+	it("reads a virtual table with no module arguments as one referencing only its own name", () => {
+		const stat = table("s", "CREATE VIRTUAL TABLE s USING dbstat")
+		expect(observable([...objects, stat], [{ sql: "SELECT * FROM s;" }]).objects).toEqual([stat])
 	})
 
 	it("reads a catalog's name in a comment as no read, and table_list outside a PRAGMA as a name", () => {
-		expect(names("-- sqlite_master\nUPDATE t SET n = 'x';")).toEqual(["t"])
+		expect(names("-- sqlite_master\nUPDATE t SET n = 'x';\n/* PRAGMA */ SELECT 1;")).toEqual(["t"])
 		expect(names("UPDATE t SET n = 'table_list';")).toEqual(["t"])
 	})
 })

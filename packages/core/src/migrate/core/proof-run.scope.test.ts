@@ -27,25 +27,28 @@ afterEach(async () => {
 	for (const conn of open.splice(0)) await conn.close()
 })
 
-/** The proof of `file` over a database `schema` made, on the scoped copy or the whole schema's */
-async function proofOf(schema: string, file: string, scoped: boolean): Promise<Proof> {
+/** The proof of each of `files` over a database `schema` made, on the scoped copy or the whole schema's */
+async function proofsOf(schema: string, files: readonly string[], scoped: boolean): Promise<Proof[]> {
 	const conn = libsqlConnection()
 	open.push(conn)
 	await conn.client.executeMultiple(schema)
 	whole.on = !scoped
-	const proofs = await provePending(conn, [{ name: "1.sql", sql: file }])
-	return proofs.get("1.sql") as Proof
+	const proofs = await provePending(
+		conn,
+		files.map((sql, i) => ({ name: `${i + 1}.sql`, sql })),
+	)
+	return [...proofs.values()]
 }
 
 /* 8.5 of plan 21: the bun:sqlite proof on the scoped copy finds what it finds on the whole schema's, and lists unproven
    only tables the whole copy lists */
 describe("the bun:sqlite proof answers every corpus file on the scoped copy as on the whole schema's (8.5)", () => {
-	it.each(scopeCorpus().map((each) => [each.label, each] as const))("%s", async (_, { file, schema }) => {
-		const scoped = await proofOf(schema, file, true)
-		const all = await proofOf(schema, file, false)
-		const { unproven, ...verdict } = scoped
-		const { unproven: allUnproven, ...wholeVerdict } = all
-		expect(verdict).toEqual(wholeVerdict)
-		expect(allUnproven).toEqual(expect.arrayContaining(unproven))
+	it.each(scopeCorpus().map((each) => [each.label, each] as const))("%s", async (_, { files, schema }) => {
+		const scoped = await proofsOf(schema, files, true)
+		const all = await proofsOf(schema, files, false)
+		expect(scoped.map(({ unproven: _unproven, ...verdict }) => verdict)).toEqual(
+			all.map(({ unproven: _unproven, ...verdict }) => verdict),
+		)
+		for (const [i, { unproven }] of scoped.entries()) expect(all[i]?.unproven).toEqual(expect.arrayContaining(unproven))
 	})
 })
