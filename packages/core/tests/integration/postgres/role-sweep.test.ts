@@ -1,7 +1,7 @@
 /**
  * A test run leaves no test role behind (comb-5d, plan 21): testRoles and dropRoles drop each
  * comb_t_* role as its test ends, and a run killed before that left them for a later run to hand-
- * clean. The Postgres projects' global setup sweeps, once it holds the run's lock (pg-run-lock.ts),
+ * clean. The Postgres projects' global setup sweeps, once it holds the run's lock (pg-run-lock.ts, then pg-sweeps.ts),
  * every comb_t_* role with no pg_shdepend row and no session; any other is kept, and said why.
  * Sibling: the scratch database sweep (scratch-sweep.test.ts).
  */
@@ -33,7 +33,8 @@ describe("a test run leaves no test role behind (sibling: the scratch database s
 		try {
 			const lines: string[] = []
 			const swept = await sweepTestRoles(admin, { like: `${prefix}\\_%`, log: (line) => lines.push(line) })
-			expect(swept.dropped).toEqual([free])
+			/* with the sweep's lines, so a role it kept says why */
+			expect({ dropped: swept.dropped, lines }).toMatchObject({ dropped: [free] })
 			const left = await query(pgUrl(), `SELECT rolname FROM pg_roles WHERE rolname LIKE '${prefix}\\_%' ORDER BY 1`)
 			expect(left.map(({ rolname }) => rolname)).toEqual([busy, held])
 			expect(lines).toEqual([

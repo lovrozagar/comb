@@ -2,7 +2,7 @@
  * The every-role settings the replay suites make on the shared test server, `comb_t.*` placeholders
  * set by ALTER ROLE ALL SET (bare-replay.test.ts, AE6 of r22), reset as their test ends. A run killed
  * before that leaves the setting on every new session of the server, so the Postgres projects' global
- * setup resets each one left once the run's lock is held (pg-run-lock.ts), when no other run's
+ * setup resets each one left once the run's lock is held (pg-run-lock.ts, then pg-sweeps.ts), when no other run's
  * Postgres suites are running. Each statement is logged.
  */
 import type pg from "pg"

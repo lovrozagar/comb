@@ -44,7 +44,7 @@ export default defineConfig({
 				test: {
 					name: "postgres",
 					include: PG_INTEGRATION,
-					globalSetup: ["tests/integration/support/pg-run-lock.ts"],
+					globalSetup: ["tests/integration/support/pg-run-lock.ts", "tests/integration/support/pg-sweeps.ts"],
 					testTimeout: CODEGEN_BUDGET_MS,
 					hookTimeout: 60_000,
 				},
@@ -72,7 +72,7 @@ export default defineConfig({
 			{
 				test: {
 					env: { TZ: OFF_UTC_ZONE },
-					globalSetup: ["tests/integration/support/pg-run-lock.ts"],
+					globalSetup: ["tests/integration/support/pg-run-lock.ts", "tests/integration/support/pg-sweeps.ts"],
 					hookTimeout: 60_000,
 					include: OFF_UTC_POSTGRES,
 					name: `postgres (${OFF_UTC_ZONE})`,

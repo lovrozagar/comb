@@ -3,7 +3,7 @@
  * ones a timed-out or killed run left (plan 21 leaf 10.9). Each name carries the millisecond it was
  * made, so a later run reads its age from the name; one without it, made before the stamp, is aged by
  * its directory's mtime, which only a role allowed pg_stat_file can read. The Postgres projects'
- * global setup sweeps once the run's lock is held (pg-run-lock.ts), when no other run's Postgres
+ * global setup sweeps once the run's lock is held (pg-run-lock.ts, then pg-sweeps.ts), when no other run's Postgres
  * suites are running, so none of their databases is in use; a database is still dropped only when
  * this role owns it, no session is on it and it is over an hour old, and without FORCE, so a session
  * that connects first keeps it. Every other is kept and logged with why.

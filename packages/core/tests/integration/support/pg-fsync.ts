@@ -3,7 +3,7 @@
  * for every DROP DATABASE forces a checkpoint, and each scratch and replay database a suite drops waits
  * on its fsync: with fsync on, migrate-adopt.test.ts spent 37.8 s of its 53.7 s there alone, and a drop
  * waited up to 16.5 s while other runs dropped theirs, which timed its cases out. The Postgres projects'
- * global setup warns when the server has it on (pg-run-lock.ts), so a rebuilt or foreign server cannot
+ * global setup warns when the server has it on (pg-run-lock.ts, then pg-sweeps.ts), so a rebuilt or foreign server cannot
  * bring that back unseen. The test server is throwaway: nothing on it needs to survive a crash.
  */
 /** The warning for `admin`'s server when its fsync is on, undefined when it is off */

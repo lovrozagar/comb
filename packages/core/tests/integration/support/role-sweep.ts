@@ -2,7 +2,7 @@
  * The test roles the Postgres suites make on the shared test server, comb_t_* (pg-roles.ts's
  * testRoles and unique), and the sweep of the ones a killed run left: each test drops its own as it
  * ends, which a killed run never reaches. The Postgres projects' global setup sweeps once the run's
- * lock is held (pg-run-lock.ts), when no other run's Postgres suites are running, so none of their
+ * lock is held (pg-run-lock.ts, then pg-sweeps.ts), when no other run's Postgres suites are running, so none of their
  * roles is in use; a role is still dropped only when nothing depends on it (no pg_shdepend row: no
  * object it owns, no grant to it, in any database) and no session runs as it. Every other is kept
  * and logged with why, and each drop is logged.

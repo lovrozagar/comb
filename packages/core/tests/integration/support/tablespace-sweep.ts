@@ -2,7 +2,7 @@
  * The tablespaces the replay suites make on the shared test server, `comb_t_*` ones in place
  * (replay-left-out.test.ts, PR5 of r22b), dropped as their test ends. A run killed before that leaves
  * the tablespace on the server, so the Postgres projects' global setup drops each one left once the
- * run's lock is held (pg-run-lock.ts), when no other run's Postgres suites are running. A tablespace
+ * run's lock is held (pg-run-lock.ts, then pg-sweeps.ts), when no other run's Postgres suites are running. A tablespace
  * that still holds a relation, which Postgres refuses to drop (55000), is kept and said. Each is logged.
  */
 import type pg from "pg"

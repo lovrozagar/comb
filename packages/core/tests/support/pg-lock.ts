@@ -28,10 +28,10 @@ const HELD = Symbol.for("comb.test.pg-run-lock")
 const store = globalThis as typeof globalThis & { [HELD]?: Held }
 
 /**
- * A session on `url` holding the lock, said once on stderr when another run holds it first, with
- * `taken` run on it once it holds the lock; a session that fails either is ended, freeing the lock
+ * A session on `url` holding the lock, said once on stderr when another run holds it first; a
+ * session that fails to take it is ended
  */
-async function take(url: string, taken: ((session: pg.Client) => Promise<unknown>) | undefined): Promise<pg.Client> {
+async function take(url: string): Promise<pg.Client> {
 	const session = new pg.Client({ connectionString: url, keepAlive: true })
 	await session.connect()
 	try {
@@ -43,7 +43,6 @@ async function take(url: string, taken: ((session: pg.Client) => Promise<unknown
 			)
 			await session.query(`SELECT pg_advisory_lock(${RUN_KEY})`)
 		}
-		await taken?.(session)
 	} catch (error) {
 		await session.end()
 		throw error
@@ -53,15 +52,10 @@ async function take(url: string, taken: ((session: pg.Client) => Promise<unknown
 
 /**
  * Hold the run's lock on `url`'s server, waiting for any other run that holds it; the release ends
- * the process's session once no holder is left. Each call is one holder, released once. `taken` runs
- * once a process, on the session that takes the lock, before any holder's call returns: the
- * Postgres projects' setup sweeps the scratch a gone run left there.
+ * the process's session once no holder is left. Each call is one holder, released once
  */
-export async function acquirePgRunLock(
-	url: string,
-	{ taken }: { taken?: ((session: pg.Client) => Promise<unknown>) | undefined } = {},
-): Promise<() => Promise<void>> {
-	const held = (store[HELD] ??= { holders: 0, session: take(url, taken) })
+export async function acquirePgRunLock(url: string): Promise<() => Promise<void>> {
+	const held = (store[HELD] ??= { holders: 0, session: take(url) })
 	held.holders += 1
 	/* a session that never took the lock is no holder's: the next call opens its own */
 	await held.session.catch((error: unknown) => {

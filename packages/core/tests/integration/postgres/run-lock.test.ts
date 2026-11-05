@@ -11,7 +11,8 @@ import { tmpdir } from "node:os"
 import { join, matchesGlob } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import config from "../../../vitest.config.ts"
-import { withScratchDb } from "../support/pg.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { query, roleOf, testRoles } from "../support/pg-roles.ts"
 
 const CORE = join(import.meta.dirname, "../../..")
 
@@ -117,6 +118,27 @@ describe("two runs of the Postgres suites on one server", () => {
 			expect(await waiter.ended).toBe(0)
 			expect(lines()).toEqual(["start a", "start b", "end b", "exit b"])
 			expect(waits(waiter.said())).toBe(1)
+		})
+	}, 60_000)
+})
+
+describe("a run's window beside this run", () => {
+	/*
+	 * a window's lock is its scratch database's, as Postgres keys an advisory lock by database, so it
+	 * never holds off this run's tests: what it does past that database would land among them
+	 */
+	it("sweeps nothing on the shared server, whose roles this run's tests hold", async () => {
+		const [idle] = testRoles("comb_t_window")
+		await query(pgUrl(), `CREATE ROLE ${idle}`)
+		await withScratchDb(async (url) => {
+			const holder = window(url, { hold: 0, name: "a", peer: "never", projects: 1 })
+			try {
+				await until(() => lines().includes("start a"))
+				expect(await roleOf(idle)).toHaveLength(1)
+			} finally {
+				holder.kill()
+				await holder.ended
+			}
 		})
 	}, 60_000)
 })
