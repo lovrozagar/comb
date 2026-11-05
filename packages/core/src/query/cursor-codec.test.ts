@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { carried, CursorRef, decodeId, decodeValue, encodeValue } from "./cursor-codec.ts"
+import {
+	carried,
+	CursorRef,
+	decodeId,
+	decodeValue,
+	encodeValue,
+	RealText,
+	realTextOf,
+	sameValue,
+} from "./cursor-codec.ts"
 
 /** `value` as the cursor carries it: encoded, written as JSON and read back */
 const roundTrip = (value: unknown): unknown => decodeValue(JSON.parse(JSON.stringify(encodeValue(value))))
@@ -63,5 +72,23 @@ describe("the cursor codec reads back every value a key column reads (QL5 of r22
 		["a bytes tag that is not a string", { $bytes: 1 }],
 	])("reads no value from %s", (_label, value) => {
 		expect(decodeValue(value)).toBeUndefined()
+	})
+})
+
+/* AB4-7 of area B: a SQLite REAL goes in the cursor as the text SQLite reads back as it, flagged `r` */
+describe("a REAL's text in the cursor (AB4-7 of area B; sibling: the values the codec reads back)", () => {
+	it("reads back as the same text, on the wire or as a RealText, and as no other text or number", () => {
+		const real = new RealText("1.5")
+		expect(sameValue(real, "1.5")).toBe(true)
+		expect(sameValue(real, new RealText("1.5"))).toBe(true)
+		expect(sameValue(real, new RealText("1.50"))).toBe(false)
+		expect(sameValue(real, 1.5)).toBe(false)
+	})
+
+	it("opens a flagged value as its RealText only where it is text SQLite prints a REAL in", () => {
+		for (const text of ["7", "-0.1", "1e-300", "1.0000000000000002e+300", "9e999"])
+			expect(realTextOf(text), text).toEqual(new RealText(text))
+		for (const value of [1.5, null, "", "1.", ".5", "0x10", "Infinity", "1e", " 1"])
+			expect(realTextOf(value), String(value)).toBeUndefined()
 	})
 })

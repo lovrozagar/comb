@@ -8,6 +8,8 @@ import { type Client, createClient } from "@libsql/client"
 import { drizzle } from "drizzle-orm/libsql"
 import { afterEach, describe, expect, it } from "vitest"
 import {
+	HELD_REALS,
+	HELD_UNPRINTED,
 	INTEGER_TEXT,
 	JSON_OBJECT,
 	JSON_TEXT,
@@ -82,5 +84,13 @@ describe("a row no cursor holds is refused on the page that serves it, at any pa
 			ids: ["r0", "r3"],
 			page: 2,
 		})
+	})
+})
+
+describe("a REAL a key's mode reads apart pages exactly where a text of it reads back, on libsql (AB4-7 of area B)", () => {
+	it.each(
+		Object.entries({ ...HELD_REALS, "text() holding a REAL D1 prints no text of that reads back": HELD_UNPRINTED }),
+	)("%s", async (_, kase) => {
+		expect(await storedProblems(open, kase)).toEqual([])
 	})
 })

@@ -17,6 +17,7 @@ import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../
 /** The drizzle modes a case declares its key with */
 const MODES = {
 	blob: () => blob("k", { mode: "buffer" }),
+	boolean: () => integer("k", { mode: "boolean" }),
 	integer: () => integer("k"),
 	json: () => text("k", { mode: "json" }),
 	numeric: () => numeric("k"),
@@ -281,3 +282,15 @@ export const TIMESTAMP_BLOB: StoredCase = {
 	mode: "timestamp_ms",
 	values: ["1000", "x'01'", "x'02'", "2000"],
 }
+
+/* AB4-7 of area B: REALs a key's mode reads apart, past where D1's printf reads back and below, carried as a text of them that reads back */
+export const HELD_REALS: Record<string, StoredCase> = {
+	"boolean holding REALs": { ddl: "INTEGER", mode: "boolean", values: ["0", "1e300", "1", "1e-300", "2.5"] },
+	"text() over an untyped column holding REALs": {
+		ddl: "",
+		mode: "text",
+		values: ["'a'", "1e300", "1e-300", "'b'", "1000"],
+	},
+}
+/* AB4-7: a REAL no text D1 prints of reads back as, which libsql and bun:sqlite print exactly; drizzle's blob mode reads no REAL */
+export const HELD_UNPRINTED: StoredCase = { ddl: "", mode: "text", values: ["1000", "7.0631582885980606e300", "2000"] }

@@ -805,7 +805,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
 export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, totalOf, };
 
 // query/cursor.d.ts
-import { CursorRef, type CursorId, type CursorValue } from "./cursor-codec.ts";
+import { CursorRef, RealText, type CursorId, type CursorValue } from "./cursor-codec.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import type { SortDirection, SortField, SortNulls } from "./types.ts";
 /**
@@ -835,6 +835,7 @@ type CursorPayload = {
     c?: boolean[] | undefined;
     d?: Array<[unknown] | number | "invalid" | null> | undefined;
     i: CursorId;
+    r?: boolean[] | undefined;
     s: string;
     v: unknown[];
 };
@@ -849,8 +850,9 @@ type DecodedCursor = {
     /** one value per sort key, in order */
     values: CursorValue[];
 };
-type OpenedCursor = DecodedCursor & {
+type OpenedCursor = Omit<DecodedCursor, "values"> & {
     read?: Array<readonly [CursorValue] | null> | undefined;
+    values: Array<CursorValue | RealText>;
 };
 /** PostgreSQL semantics: nulls sort last ascending and first descending. */
 declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
@@ -886,6 +888,11 @@ declare function openCursor(cursor: string, options: CursorOptions): OpenedCurso
 /** The cursor as the keyset binds it, each key's stored value, for this sort; a 400 CombError as readCursor throws */
 declare function readKeyset(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): OpenedCursor;
 /**
+ * The cursor as the merge compares rows with it: readKeyset's, a REAL's text as the number typedKeys
+ * parses each shard's row's text to, the same parse of the same text (AB4-7 of area B)
+ */
+declare function readCompared(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
+/**
  * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. Each key is
  * as the cursor's row read it, where the list pages by another value: a time key is the Date the
  * driver read, an Invalid one included, and bytes are a Uint8Array. A value may be a CursorRef: a long sort value
@@ -893,7 +900,7 @@ declare function readKeyset(cursor: string, parsedSort: readonly SortField[], op
  * cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorBytes, cursorProblem, effectiveNulls, encodeCursor, mintCursor, readCursor, readKeyset, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorBytes, cursorProblem, effectiveNulls, encodeCursor, mintCursor, readCompared, readCursor, readKeyset, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, };
 
 // query/cursor-mint.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -1021,7 +1028,13 @@ declare function typedKeys(row: Record<string, unknown>, sort: readonly SortFiel
  * column's mapper; every other key binds through it, a text key that looks like a number included
  */
 declare function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]): Set<string>;
-export { carriedTexts, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, refuseUnheld, storedClasses, typedKeys, unencoded, };
+/**
+ * `typedKeys(row, sort)` as a cursor carries it: each SQLite REAL key's text, held (`_combTextKeys`)
+ * or a timestamp's carried (`_combKeyTexts`), as its RealText, which the next page binds as the list
+ * checked it (AB4-7 of area B); the merge compares typedKeys' numbers, the same parse of the same text
+ */
+declare function cursorKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
+export { carriedTexts, cursorKeys, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, refuseUnheld, storedClasses, typedKeys, unencoded, };
 
 // query/schema.d.ts
 /**
@@ -1066,6 +1079,17 @@ declare class CursorRef {
     /** A reference to a value `length` code points long that starts with `prefix` */
     constructor(prefix: string, length: number);
 }
+/**
+ * A SQLite REAL key's stored value as the text of it SQLite reads back as it (AB4-7 of area B): the
+ * cursor carries the text and flags it (`r`), and the next page binds `cast(? as real)`, one SQLite
+ * parse of one text, as the list checked it, where a JS number's shortest form D1 may parse as another
+ */
+declare class RealText {
+    /** the text, as `cast(k as text)` or `printf('%!.17g', k)` wrote it */
+    readonly text: string;
+    /** The REAL `text` reads as */
+    constructor(text: string);
+}
 /** What a sort key can hold and its database can compare, or a long one carried by reference */
 type CursorValue = bigint | boolean | CursorRef | Date | number | string | Uint8Array | null;
 declare function encodeValue(value: unknown): unknown;
@@ -1077,7 +1101,9 @@ declare function decodeId(value: unknown): CursorId | undefined;
 declare function sameValue(value: unknown, back: unknown): boolean;
 /** Whether a cursor carries `value` as itself: `decode` reads its encoding back as it */
 declare function carried(value: unknown, decode: (wire: unknown) => unknown): boolean;
-export { carried, CursorRef, decodeId, decodeValue, encodeValue, sameValue, type CursorId, type CursorValue };
+/** The `r`-flagged value from the wire as its RealText, or undefined for one that is no text SQLite prints a number in */
+declare const realTextOf: (value: unknown) => RealText | undefined;
+export { carried, CursorRef, decodeId, decodeValue, encodeValue, RealText, realTextOf, sameValue, type CursorId, type CursorValue, };
 
 // query/list-schema.d.ts
 /**

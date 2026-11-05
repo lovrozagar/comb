@@ -12,6 +12,10 @@ import { DateKey } from "./cursor-fit.ts"
 import { keyTextsSQL, textKeysSQL } from "./key-texts.ts"
 import { finish } from "./list-finish.ts"
 
+/** A SQLite number's text that reads back as it, else `!n` and its printf text, as readBackText renders it for `column` (AB4-7 of area B) */
+const readBack = (column: string): string =>
+	`case when cast(cast(${column} as text) as real) = ${column} then cast(${column} as text) when cast(printf('%!.17g', ${column}) as real) = ${column} then printf('%!.17g', ${column}) else '!n' || printf('%!.17g', ${column}) end`
+
 const t = sqliteTable("t", { id: integer("id").primaryKey() })
 const tiebreak = { column: t.id, direction: "desc" as const }
 
@@ -95,7 +99,7 @@ function extrasOf(
 describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)", () => {
 	/* AB3 of area B: a merged list carries them too, an INTEGER's as well, so its merge compares every row in seconds */
 	it("carries a SQLite seconds key's stored seconds on a list that binds it as read, merged or not, another's mark alone", () => {
-		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') and abs("ev"."at") < 9e999 then printf('%!.17g', "ev"."at") when (typeof("ev"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev"."at") end`
+		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') and abs("ev"."at") < 9e999 then ${readBack(`"ev"."at"`)} when (typeof("ev"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev"."at") end`
 		const MARK = `case when (typeof("ev"."n") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev"."n") end`
 		const anchorless = extrasOf("sqlite", [
 			{ column: ev.at, direction: "asc" },
@@ -155,7 +159,7 @@ describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
 		const anchorless = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }])
 		expect(anchorless).not.toHaveProperty("_combTextKeys")
 		expect(anchorless["_combKeyTexts"]).toBe(
-			`case when typeof("ev_ms"."at") in ('integer', 'real') and abs("ev_ms"."at") < 9e999 then printf('%!.17g', "ev_ms"."at") when (typeof("ev_ms"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev_ms"."at") end`,
+			`case when typeof("ev_ms"."at") in ('integer', 'real') and abs("ev_ms"."at") < 9e999 then ${readBack(`"ev_ms"."at"`)} when (typeof("ev_ms"."at") in ('null', 'integer', 'real')) then '' else '!' || typeof("ev_ms"."at") end`,
 		)
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
 			"_combTextKeys",

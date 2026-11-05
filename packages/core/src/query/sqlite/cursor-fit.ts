@@ -9,11 +9,12 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
 import { CursorRef } from "../cursor.ts"
+import { RealText } from "../cursor-codec.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
 import { refersBack } from "./reads-back.ts"
-import { carriedStored, carriedText, holdsText, inSeconds } from "./timestamp-column.ts"
+import { carriedStored, carriedText, heldApart, holdsText, inSeconds } from "./timestamp-column.ts"
 
 /**
  * What a column of each drizzle `dataType` family holds, given its full `dataType`. Keyed by drizzle's
@@ -100,6 +101,8 @@ function fits(
 ): boolean {
 	if (value === null) return true
 	if (value instanceof CursorRef) return refersBack(column, table)
+	/* AB4-7 of area B: a REAL's text, as a list carries it: a timestamp's bound as read, a held key's read back */
+	if (value instanceof RealText) return asRead ? holdsText(column) : heldApart(column)
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (asRead && carriedTime(column, value)) return true
 	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
@@ -146,6 +149,8 @@ const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
  * like a number included; a cursor with no flag, as every released comb minted, holds only those
  */
 function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
+	/* one SQLite parse of the text the list checked reads back as the key, on every driver (AB4-7 of area B) */
+	if (value instanceof RealText) return sql`cast(${value.text} as real)`
 	if (carriedText(column, value, { asRead: false, carried })) return sql`${value}`
 	/* a mode's mapper binds the value as another (a boolean's as 0 or 1); D1 binds no bigint, so one past 2^53 goes as its digits */
 	if (carriedStored(column, value, { asRead: false, carried }))

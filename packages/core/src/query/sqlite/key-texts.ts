@@ -48,8 +48,8 @@ const familyOf = (column: SQLWrapper): SQL =>
  * in every DateStyle, which it reads back as that type in any session, on every list: a cursor binds it
  * once the row a list reads the key back from is gone, and a read in string mode follows DateStyle,
  * whose zone abbreviation reads back as another zone (AB3-4 of area B); a SQLite timestamp's stored seconds or
- * milliseconds at 17 significant digits, which a double reads back exactly, where a Date keeps whole
- * milliseconds (AB3-1 of area B); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
+ * milliseconds as the text of them SQLite reads back as them (readBackText), where a Date keeps whole
+ * milliseconds (AB3-1 of area B), or `!n` and its printf text where no text does (AB4-7 of area B); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
  * A SQLite key holding a value of a class its mode does not read back as stored (readsAsStored), a
  * timestamp's TEXT or ±Infinity among them, carries `!` and that class, comma-free, on a list that
  * binds it as read, which no list binds a cursor from; one that reads it back carries the value itself
@@ -62,7 +62,7 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 		const reads = readsAsStored(column)
 		if (reads === undefined) return null
 		const time = holdsText(column)
-			? sql`when typeof(${column}) in ('integer', 'real') and abs(${column}) < 9e999 then printf('%!.17g', ${column}) `
+			? sql`when typeof(${column}) in ('integer', 'real') and abs(${column}) < 9e999 then ${readBackText(column, (text) => text)} `
 			: sql``
 		return sql`case ${time}when ${reads} then '' else '!' || typeof(${column}) end`
 	}
@@ -91,6 +91,19 @@ const isFloat = (column: SQLWrapper): SQL =>
  */
 const unprinted = (column: SQLWrapper): SQL =>
 	sql`(${column} is not null and current_setting('extra_float_digits')::int <= 0)`
+
+/**
+ * A SQLite number's text that SQLite reads back as it, in the same query, as `held` wraps it, else
+ * `!n` and the printf text (AB4-7 of area B): `cast(k as text)`, which libsql and D1 write at 15
+ * significant digits, else `printf('%!.17g', k)`, which D1 misprints past about 1e100 and below
+ * 1e-100. A cursor binds the text as `cast(? as real)`, the parse the check made, so no near text
+ * stands in for the value; a merge orders an unheld one by its printed text, and the page that serves it refuses
+ */
+function readBackText(column: SQLWrapper, held: (text: SQL) => SQL): SQL {
+	const cast = sql`cast(${column} as text)`
+	const printed = sql`printf('%!.17g', ${column})`
+	return sql`case when cast(${cast} as real) = ${column} then ${held(cast)} when cast(${printed} as real) = ${column} then ${held(printed)} else '!n' || ${printed} end`
+}
 
 type StoredClass = "blob" | "integer" | "real" | "text"
 
@@ -128,12 +141,12 @@ function readsAsStored(column: SQLWrapper): SQL | undefined {
 
 /**
  * A SQLite key's stored value, where its mode reads another (readsAsStored), as its storage class and
- * its text: an integer's digits, a REAL at 17 significant digits, which a double reads back exactly,
- * ±Infinity as the 9e999 SQLite reads as it, a TEXT itself and a blob's hex; null where the mode reads
- * it back (AB3-2, AB4-2 of area B)
+ * its text: an integer's digits, a REAL as the text of it SQLite reads back as it (readBackText), or
+ * `!n` and its printf text where none does (AB4-7 of area B), ±Infinity as the 9e999 SQLite reads as it, a TEXT itself and
+ * a blob's hex; null where the mode reads it back (AB3-2, AB4-2 of area B)
  */
 const heldStored = (column: SQLWrapper, reads: SQL): SQL =>
-	sql`case when ${reads} then null when typeof(${column}) = 'integer' then json_array('integer', cast(${column} as text)) when typeof(${column}) = 'real' then json_array('real', case when abs(${column}) < 9e999 then printf('%!.17g', ${column}) when ${column} > 0 then '9e999' else '-9e999' end) when typeof(${column}) = 'text' then json_array('text', ${column}) else json_array('blob', hex(${column})) end`
+	sql`case when ${reads} then null when typeof(${column}) = 'integer' then json_array('integer', cast(${column} as text)) when typeof(${column}) = 'real' then case when abs(${column}) < 9e999 then ${readBackText(column, (text) => sql`json_array('real', ${text})`)} else json_array('real', case when ${column} > 0 then '9e999' else '-9e999' end) end when typeof(${column}) = 'text' then json_array('text', ${column}) else json_array('blob', hex(${column})) end`
 
 // lookup-table: the Postgres columns whose read follows DateStyle, or keeps milliseconds of a time's microseconds (AB3-4 of area B)
 const DATESTYLED = /* @__PURE__ */ new Set(["object date", "string date", "string timestamp"])

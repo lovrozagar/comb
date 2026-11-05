@@ -26,6 +26,24 @@ class CursorRef {
 	}
 }
 
+/**
+ * A SQLite REAL key's stored value as the text of it SQLite reads back as it (AB4-7 of area B): the
+ * cursor carries the text and flags it (`r`), and the next page binds `cast(? as real)`, one SQLite
+ * parse of one text, as the list checked it, where a JS number's shortest form D1 may parse as another
+ */
+class RealText {
+	/** the text, as `cast(k as text)` or `printf('%!.17g', k)` wrote it */
+	readonly text: string
+
+	/** The REAL `text` reads as */
+	constructor(text: string) {
+		this.text = text
+	}
+}
+
+/* the texts SQLite prints a REAL in, or an integer, and the 9e999 it reads as ±Infinity */
+const REAL_TEXT = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/
+
 /** What a sort key can hold and its database can compare, or a long one carried by reference */
 type CursorValue = bigint | boolean | CursorRef | Date | number | string | Uint8Array | null
 
@@ -43,6 +61,8 @@ function encodeValue(value: unknown): unknown {
 	/* a Date no JS Date holds, a date-mode ±infinity, stays a Date: null under the tag, never the null group (3.24) */
 	if (value instanceof Date) return { [DATE_TAG]: Number.isNaN(value.getTime()) ? null : value.getTime() }
 	if (value instanceof CursorRef) return { [REF_TAG]: [value.prefix, value.length] }
+	/* the cursor's `r` flag, not a tag, marks it, so a released comb's decoder reads the text */
+	if (value instanceof RealText) return value.text
 	if (value instanceof Uint8Array) return { [BYTES_TAG]: encodeBase64Url(value) }
 	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
 	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
@@ -97,6 +117,7 @@ function sameValue(value: unknown, back: unknown): boolean {
 	if (value instanceof Date) return back instanceof Date && Object.is(back.getTime(), value.getTime())
 	if (value instanceof CursorRef)
 		return back instanceof CursorRef && back.prefix === value.prefix && back.length === value.length
+	if (value instanceof RealText) return back === value.text || (back instanceof RealText && back.text === value.text)
 	/* -0 reads back as 0, which every database compares as equal */
 	return value === back || (Number.isNaN(value) && Number.isNaN(back))
 }
@@ -107,4 +128,19 @@ function carried(value: unknown, decode: (wire: unknown) => unknown): boolean {
 	return json !== undefined && sameValue(value, decode(JSON.parse(json)))
 }
 
-export { carried, CursorRef, decodeId, decodeValue, encodeValue, sameValue, type CursorId, type CursorValue }
+/** The `r`-flagged value from the wire as its RealText, or undefined for one that is no text SQLite prints a number in */
+const realTextOf = (value: unknown): RealText | undefined =>
+	typeof value === "string" && REAL_TEXT.test(value) ? new RealText(value) : undefined
+
+export {
+	carried,
+	CursorRef,
+	decodeId,
+	decodeValue,
+	encodeValue,
+	RealText,
+	realTextOf,
+	sameValue,
+	type CursorId,
+	type CursorValue,
+}

@@ -7,10 +7,10 @@
  * cursors through closures over the options its builder was given, so logging or serializing a
  * built query shows no part of the secret.
  */
-import { type DecodedCursor, readKeyset } from "./cursor.ts"
+import { type DecodedCursor, readCompared } from "./cursor.ts"
 import { type ColumnCheck, fittedCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { carriedTexts, COMB_ID, refuseUnheld, typedKeys } from "./list-extras.ts"
+import { carriedTexts, COMB_ID, cursorKeys, refuseUnheld } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
 import { paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired } from "./page-refusals.ts"
 import type { paginationResponseSchema } from "./schema.ts"
@@ -131,7 +131,7 @@ function paginationOf<TMerged extends boolean = false>(
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
 		parsedSort: query.parsedSort,
-		read: (cursor) => readKeyset(cursor, query.parsedSort, options),
+		read: (cursor) => readCompared(cursor, query.parsedSort, options),
 		window: facts.window,
 	}
 }
@@ -185,7 +185,7 @@ function fitFrom(
 ): () => string {
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
 	const read = row as Record<string, unknown>
-	return fittedCursor(typedKeys(read, parsedSort), parsedSort, {
+	return fittedCursor(cursorKeys(read, parsedSort), parsedSort, {
 		...options,
 		carried: carriedTexts(read, parsedSort),
 		idField: COMB_ID,

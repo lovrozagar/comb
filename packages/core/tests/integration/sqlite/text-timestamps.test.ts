@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import {
 	FRACTION_SEED,
+	HUGE_SEED,
+	HUGE_SERVED,
 	INFINITY_SEED,
 	INFINITY_SERVED,
 	FRACTION_SERVED,
@@ -19,6 +21,8 @@ import {
 	TEXT_RELATIONS,
 	TEXT_SEED,
 	TEXT_SERVED,
+	UNPRINTED_SEED,
+	UNPRINTED_SERVED,
 	type TextKey,
 	type TextShape,
 	servedText,
@@ -165,6 +169,25 @@ describe("a TEXT row is refused on the page that serves it, wherever it lands (A
 				expect(await firstPair(await dbsFor(shape, LEADING_SEED), { direction: "desc", key, shape }), key).toEqual({
 					ids: ["d", "a"],
 				})
+		},
+	)
+})
+
+/* AB4-7 of area B: libsql's cast(k as text) keeps 15 digits, so a list carries the printf text that reads back */
+describe("a SQLite timestamp's REAL pages exactly by the text of it that reads back, on libsql (AB4-7 of area B)", () => {
+	it.each(["table", "anchored own", "anchored joined", "anchorless", "listOptions", "merged"] as const)(
+		"pages the %s list past 1e300 and 1e-300, and a REAL D1 prints in no text that reads back, every row once",
+		async (shape) => {
+			for (const walk of WALKS) {
+				expect(await servedText(await dbsFor(shape, HUGE_SEED), { ...walk, shape }), JSON.stringify(walk)).toEqual({
+					ids: HUGE_SERVED[walk.direction],
+				})
+				expect(await servedText(await dbsFor(shape, UNPRINTED_SEED), { ...walk, shape }), JSON.stringify(walk)).toEqual(
+					{
+						ids: UNPRINTED_SERVED[walk.direction],
+					},
+				)
+			}
 		},
 	)
 })

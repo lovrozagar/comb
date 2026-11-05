@@ -64,6 +64,7 @@ export const OFF_UTC_INTEGRATION = [
 	"tests/integration/sqlite/list-query-filters.test.ts",
 	"tests/integration/sqlite/list-query-seconds.test.ts",
 	"tests/integration/sqlite/merged-seconds.test.ts",
+	"tests/integration/sqlite/real-text-plan.test.ts",
 	"tests/integration/sqlite/text-timestamps.test.ts",
 ]
 

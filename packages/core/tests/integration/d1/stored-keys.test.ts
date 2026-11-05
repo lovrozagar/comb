@@ -8,6 +8,8 @@ import { drizzle } from "drizzle-orm/d1"
 import { afterEach, describe, expect, it } from "vitest"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import {
+	HELD_REALS,
+	HELD_UNPRINTED,
 	INTEGER_TEXT,
 	JSON_OBJECT,
 	JSON_TEXT,
@@ -76,4 +78,26 @@ describe("a row no cursor holds is refused on the page that serves it, at any pa
 	})
 
 	/* the timestamp BLOB libsql reads as an Invalid Date this driver reads as Date(1): AB4-2's timestamp_ms dataset holds it */
+})
+
+describe("a REAL a key's mode reads apart pages exactly where a text of it reads back, on D1 (AB4-7 of area B)", () => {
+	it.each(Object.entries(HELD_REALS))("%s", async (_, kase) => {
+		expect(await storedProblems(open, kase)).toEqual([])
+	})
+
+	/* a list that binds the key as read refuses a text column's number on page 1, as AB4-2 has it */
+	it.each(["table", "anchored", "listOptions"] as const)(
+		"answers the %s list a 500 naming the key on the page that serves a REAL no text reads back as",
+		async (kind) => {
+			for (const [direction, ids] of [
+				["asc", ["r0", "r2"]],
+				["desc", []],
+			] as const)
+				expect(await refusedOnPage(open, HELD_UNPRINTED, { direction, kind, limit: 1 }), direction).toEqual({
+					error: "sort_not_wired",
+					ids,
+					page: ids.length + 1,
+				})
+		},
+	)
 })

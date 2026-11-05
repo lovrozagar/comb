@@ -116,6 +116,44 @@ export const INFINITY_SERVED = {
 	desc: ["e", "b", "f", "c", "a", "d"],
 } as const
 
+/*
+ * AB4-7 of area B: REALs whose text one form of SQLite's alone reads back, both units: 1e-300 < 1000
+ * < 2000 < 1e300 < Infinity. On D1 printf('%!.17g') misprints 1e300 and cast(k as text) keeps 15
+ * digits, and a JS number bound for 1e-300 finds no row; libsql's cast keeps 15 digits too
+ */
+const HUGE_ROWS = [
+	"('a', 1000, 1000)",
+	"('b', 1e300, 1e300)",
+	"('c', 9e999, 9e999)",
+	"('d', 2000, 2000)",
+	"('e', 1e-300, 1e-300)",
+] as const
+
+/** The statements that seed a database, or one shard of two, with the huge rows */
+export const HUGE_SEED = seedOf(HUGE_ROWS)
+
+/** Every id by either key over the huge rows */
+export const HUGE_SERVED = {
+	asc: ["e", "a", "d", "b", "c"],
+	desc: ["c", "b", "d", "a", "e"],
+} as const
+
+/*
+ * AB4-7 of area B: a REAL no text D1 prints of reads back as it, neither cast(k as text) nor printf:
+ * 1000 < 2000 < 7.0631582885980606e300, which libsql and bun:sqlite print exactly
+ */
+const UNPRINTED_ROWS = [
+	"('a', 1000, 1000)",
+	"('b', 7.0631582885980606e300, 7.0631582885980606e300)",
+	"('c', 2000, 2000)",
+] as const
+
+/** The statements that seed a database, or one shard of two, with the unprinted rows */
+export const UNPRINTED_SEED = seedOf(UNPRINTED_ROWS)
+
+/** Every id by either key over the unprinted rows */
+export const UNPRINTED_SERVED = { asc: ["a", "c", "b"], desc: ["b", "c", "a"] } as const
+
 /** Every id in SQLite's order of either key */
 export const TEXT_SERVED = {
 	asc: ["c", "a", "d", "e", "h", "f", "g"],
