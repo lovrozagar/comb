@@ -282,9 +282,30 @@ describe("README peer install upgrade item", () => {
 				.map((provider) => [provider, commands.filter((command) => !loads(provider, command))]),
 		)
 		const said: Record<string, string[]> = {}
-		for (const [, list, but] of (refused ?? "").matchAll(/every ((?:[\w ,]+?)) command but `migrate (\w+)`/g))
-			for (const name of (list as string).split(/, | and /)) said[PROVIDER_NAMES[name] ?? name] = [but as string]
+		/* D6-3 of the area D round-six review: the whole exception list, so a second "and `migrate x`" is read */
+		for (const [, list, but] of (refused ?? "").matchAll(
+			/every ((?:[\w ,]+?)) command but ((?:`migrate \w+`(?:, | and )?)+)/g,
+		))
+			for (const name of (list as string).split(/, | and /))
+				said[PROVIDER_NAMES[name] ?? name] = [...(but as string).matchAll(/`migrate (\w+)`/g)]
+					.map(([, c]) => c as string)
+					.sort()
 		expect(said).toEqual(expected)
+	})
+
+	/* D6-3 of the area D round-six review: the FTS clause is derived, as the per-provider split is, from the rows with FTS declared */
+	it("names each command a declared FTS adds a child-loaded need to, on every SQLite provider", () => {
+		const commands = [...new Set(Object.values(PEERS).flatMap((row) => Object.keys(row)))].sort() as Command[]
+		const added = (Object.keys(PEERS) as Provider[]).flatMap((provider) =>
+			commands
+				.filter((command) => needsOf(command, provider, true).some((need) => need.child === true))
+				.map((command) => [provider, command] as const),
+		)
+		/* "SQLite" is every provider but Postgres */
+		const sqlite = (Object.keys(PEERS) as Provider[]).filter((provider) => provider !== "postgres").sort()
+		expect([...new Set(added.map(([provider]) => provider))].sort()).toEqual(sqlite)
+		for (const verb of new Set(added.map(([, command]) => command)))
+			expect(refused).toContain(`a SQLite \`migrate ${verb}\` whose comb.config.ts declares FTS`)
 	})
 
 	/* D5-2 of the area D round-five review: libsql, Turso and Postgres load their peers in process too */

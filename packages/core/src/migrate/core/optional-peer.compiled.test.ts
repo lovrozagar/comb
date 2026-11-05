@@ -58,6 +58,8 @@ describe("in a Bun single-file executable, a peer comb loads from the project", 
 		await expect(requirePeers("apply", "turso", finders)).rejects.toThrow(refused("@libsql/client"))
 		await expect(requirePeers("baseline", "postgres", finders)).rejects.toThrow(refused("libpg-query and postgres"))
 		await expect(requirePeers("diff", "postgres", finders)).rejects.toThrow(refused("libpg-query"))
+		/* D6-3 of the area D round-six review: an optional peer, postgres on a check, is one comb runs without, so it goes unnamed */
+		await expect(requirePeers("check", "postgres", finders)).rejects.toThrow(refused("libpg-query"))
 		/* D6-2 of the area D round-six review: the FTS tables file loads in a child process, as codegen loads it */
 		await expect(requirePeers("diff", "libsql", { ...finders, fts: true })).rejects.toThrow(
 			new Error(
