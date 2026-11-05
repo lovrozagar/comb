@@ -47,6 +47,17 @@ describe("statementTable on a schema-qualified table", () => {
 		expect(statementTable(query, "sqlite")).toEqual({ schema, table })
 	})
 
+	/* B2-10b of area B: a comment between the verb and the table is space, a quoted table a token of its own */
+	it.each([
+		["delete from /* x */ t where id = 1", "t"],
+		["update -- x\n t set a = 1", "t"],
+		['insert into"t"(a) values (1)', "t"],
+		["delete from t/* x */where id = 1", "t"],
+	])("reads %s as %s on both dialects", (query, table) => {
+		expect(statementTable(query, "postgres")).toEqual({ schema: undefined, table })
+		expect(statementTable(query, "sqlite")).toEqual({ schema: undefined, table })
+	})
+
 	/* AB7 of area B: Postgres's ONLY, a reserved word there, is no table */
 	it.each([
 		['DELETE FROM ONLY "app"."org" WHERE id = $1', "app", "org"],
@@ -54,6 +65,8 @@ describe("statementTable on a schema-qualified table", () => {
 		["update only app.org set id = $1", "app", "org"],
 		["UPDATE ONLY o SET a = 1", undefined, "o"],
 		["delete from only_org where id = 1", undefined, "only_org"],
+		["update only /* audit */ t set a = 1", undefined, "t"],
+		["delete from only -- audit\n app.org where id = 1", "app", "org"],
 	])("reads %s on Postgres as %s.%s", (query, schema, table) => {
 		expect(statementTable(query, "postgres")).toEqual({ schema, table })
 	})
