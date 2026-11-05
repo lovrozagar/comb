@@ -445,8 +445,8 @@ const timeOf = (value: unknown): unknown => (value instanceof Date ? ["Date", va
 
 /*
  * B2-6 of area B: a time key a list binds as read carries its stored text, and readCursor returned
- * that text where the row read a Date; it returns the row's Date, an 'infinity' read as an Invalid
- * Date included, while the cursor pages by the stored text
+ * that text where the row read a Date; it returns the row's Date, an 'infinity' read as drizzle's
+ * local midnight of 2000-01-01 included, while the cursor pages by the stored text
  */
 describe("readCursor returns a time key as the row read it (B2-6 of area B; sibling: QL2's carriage)", () => {
 	const sessions = usePg()
@@ -470,9 +470,11 @@ describe("readCursor returns a time key as the row read it (B2-6 of area B; sibl
 		}
 	})
 
-	it("returns an anchorless list's 'infinity' as the Invalid Date its row read", async () => {
+	it("returns an anchorless list's 'infinity' as the local 2000-01-01 its row read, paging past it by 'infinity'", async () => {
 		const cursors: Array<[unknown, DecodedCursor]> = []
-		await served(sessions.pg(), { cursors, direction: "desc", key: "ti", shape: "anchorless" })
-		expect(timeOf(cursors[0]?.[1].values[0])).toEqual(["Date", Number.NaN])
+		expect(await served(sessions.pg(), { cursors, direction: "desc", key: "ti", shape: "anchorless" })).toEqual(
+			SERVED.desc,
+		)
+		expect(timeOf(cursors[0]?.[1].values[0])).toEqual(timeOf(new Date(2000, 0, 1)))
 	})
 })

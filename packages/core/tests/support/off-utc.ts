@@ -31,6 +31,7 @@ export const OFF_UTC_UNIT = [
 	"src/query/cursor-mint.test.ts",
 	"src/query/cursor-precision.test.ts",
 	"src/query/cursor-ref.test.ts",
+	"src/query/cursor.dates.test.ts",
 	"src/query/cursor.test.ts",
 	"src/query/drizzle.test.ts",
 	"src/query/drizzle.text-keys.test.ts",
@@ -63,6 +64,7 @@ export const OFF_UTC_INTEGRATION = [
 	"tests/integration/sqlite/list-query-filters.test.ts",
 	"tests/integration/sqlite/list-query-seconds.test.ts",
 	"tests/integration/sqlite/merged-seconds.test.ts",
+	"tests/integration/sqlite/text-timestamps.test.ts",
 ]
 
 /** The ones of them on the shared Postgres server, in the Postgres project off UTC (tests/support/pg-suites.ts) */
