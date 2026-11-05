@@ -4,6 +4,7 @@
  * read as the DELETE they are. Comments, literals, quoted names and parenthesized groups are
  * blanked before the verb is looked for, so no word inside them is taken for it.
  */
+import { codeOf } from "./sql-lexer.ts"
 
 /** The closing index of the quote opened at `start`, a doubled quote standing for itself */
 function closeQuote(sql: string, start: number, close: string): number {
@@ -90,14 +91,16 @@ function unquoted(part: string): string {
 
 /**
  * The table `query` writes to in `dialect`, or undefined when no wrapper recorded the SQL or it writes
- * none: the table and the schema written before it, if any, each unquoted (U8). SQLite keys its maps
- * by the table alone; Postgres resolves both to a map key as every other violation does (QE8 of r22b)
+ * none: the table and the schema written before it, if any, each unquoted, read as `dialect` reads
+ * the statement, so a comment is space and a quoted name a token of its own. SQLite keys its maps by
+ * the table alone; Postgres resolves both to a map key as every other violation does
  */
 export function statementTable(
 	query: string | undefined,
 	dialect: "postgres" | "sqlite",
 ): { schema: string | undefined; table: string } | undefined {
-	const name = STATEMENT_TABLE[dialect].exec(statementHead(query ?? ""))?.[1]
+	/* U8, QE8 of r22b, B2-10b of area B */
+	const name = STATEMENT_TABLE[dialect].exec(statementHead(codeOf(query ?? "", dialect)))?.[1]
 	if (name === undefined) return undefined
 	const parts = (name.match(ONE_PART) as string[]).map(unquoted)
 	return { schema: parts.at(-2), table: parts.at(-1) as string }
