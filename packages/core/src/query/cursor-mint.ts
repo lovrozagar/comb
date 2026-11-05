@@ -5,9 +5,9 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { CursorRef, MAX_CURSOR_LENGTH, mintCursor } from "./cursor.ts"
+import { cursorBytes, CursorRef, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import { readsApart } from "./cursor-reads.ts"
-import type { CursorOptions } from "./cursor-seal.ts"
+import { type CursorOptions, seal, sealedLength } from "./cursor-seal.ts"
 import { roundedKey } from "./rounded-key.ts"
 import type { SortField } from "./types.ts"
 
@@ -85,6 +85,19 @@ function fitCursor(
 	sort: readonly SortField[],
 	options: Parameters<typeof createCursor>[2] & { read?: Record<string, unknown> | undefined },
 ): string {
+	return fittedCursor(row, sort, options)()
+}
+
+// AB4-3 of area B: paginate runs it on every row it serves, so a row no cursor holds is refused wherever it lands
+/**
+ * fitCursor's every refusal of `row`, run with no seal, and what seals its cursor: the cap is measured
+ * on the plaintext (sealedLength), so a page checks each row it serves and seals the last alone
+ */
+function fittedCursor(
+	row: Record<string, unknown>,
+	sort: readonly SortField[],
+	options: Parameters<typeof fitCursor>[2],
+): () => string {
 	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one (QL1 of r22b) */
 	const derived = options?.keyset === "derived"
 	const asRead = (field: string) => derived || (options?.asRead?.has(field) ?? false)
@@ -102,7 +115,7 @@ function fitCursor(
 	/* a key bound as the driver read it skips rows or repeats one once rounded (Q1 of r19, QL1 of r22b) */
 	const rounded = roundedKey(row, sort, derived ? "derived" : { unread: asRead })
 	if (rounded !== undefined) throw rounded
-	/* options a JS caller left out are refused by mintCursor, by name */
+	/* options a JS caller left out are refused by seal, by name */
 	const settled = options && {
 		...options,
 		read: readsApart(
@@ -111,26 +124,28 @@ function fitCursor(
 			sort.map(({ field }) => field),
 		),
 	}
-	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, settled)
-	const fits = (record: Record<string, unknown>) => mint(record).length <= MAX_CURSOR_LENGTH
-	const whole = mint(row)
-	if (whole.length <= MAX_CURSOR_LENGTH) return whole
+	const bytes = (record: Record<string, unknown>) => cursorBytes(record, sort, settled)
+	const sealer = (plaintext: Uint8Array) => () => seal(plaintext, options)
+	const fits = (record: Record<string, unknown>) => sealedLength(bytes(record).length) <= MAX_CURSOR_LENGTH
+	const whole = bytes(row)
+	const length = sealedLength(whole.length)
+	if (length <= MAX_CURSOR_LENGTH) return sealer(whole)
 	const fields = sort.map(({ field }) => field).join(", ")
-	if (options.keyset === "derived" || options.keyset === "merged") throw tooLong(fields, whole.length, options.keyset)
+	if (options.keyset === "derived" || options.keyset === "merged") throw tooLong(fields, length, options.keyset)
 	const long = sort
 		.map(({ field }) => field)
 		.filter((field) => typeof row[field] === "string" && (options.byReference?.has(field) ?? true))
 		.sort((a, b) => (row[b] as string).length - (row[a] as string).length)
 	/* a long value no reference reads back is refused here, on the page that meets it, never minted to be refused (27.7) */
 	const unread = sort.some(({ field }) => typeof row[field] === "string" && options.byReference?.has(field) === false)
-	if (long.length === 0 && unread) throw tooLong(fields, whole.length, "unread")
+	if (long.length === 0 && unread) throw tooLong(fields, length, "unread")
 	let record = row
 	for (const field of long) {
 		const ref = longestFitting(record, field, fits)
 		record = { ...record, [field]: ref ?? new CursorRef("", codePoints(row[field] as string).length) }
-		if (ref !== undefined) return mint(record)
+		if (ref !== undefined) return sealer(bytes(record))
 	}
-	throw tooLong(fields, whole.length, "table")
+	throw tooLong(fields, length, "table")
 }
 
-export { createCursor, fitCursor, type KeysetKind }
+export { createCursor, fitCursor, fittedCursor, type KeysetKind }

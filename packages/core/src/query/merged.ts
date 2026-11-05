@@ -8,7 +8,8 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { effectiveNulls, refuseRoundedId } from "./cursor.ts"
+import { effectiveNulls } from "./cursor.ts"
+import { refuseRoundedId } from "./cursor-refusals.ts"
 import { typedKeys } from "./list-extras.ts"
 import { paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired } from "./page-refusals.ts"
 import { roundedKey } from "./rounded-key.ts"
@@ -237,13 +238,14 @@ function paginateMerged<T extends object>(
 	const window = rows.slice(start, start + limit + 1)
 	const hasMore = full || window.length > limit
 	const page = hasMore ? window.slice(0, limit) : window
-	const last = page.at(-1)
+	/* every row served is one a cursor resumes after; the last one's is sealed (AB4-3 of area B) */
+	const last = page.map((row) => pagination.fit(row)).at(-1)
 	const meta: PaginationResponse = {
 		count: countOf(rowsPerShard, cursor),
 		hasMore,
 		limit,
 		/* a merged list is always cursorable: buildListQuery refuses one sorted by what no row carries (Q3 of r18) */
-		nextCursor: hasMore && last !== undefined ? pagination.mint(last) : null,
+		nextCursor: hasMore && last !== undefined ? last() : null,
 		page: cursor ? null : (pagination.page ?? 1),
 	}
 	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */

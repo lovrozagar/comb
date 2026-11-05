@@ -95,8 +95,8 @@ const defaultQuery = {
 describe("queryHelpers.paginate — items and projection", () => {
 	it("returns paginated result with hasMore=false", () => {
 		const items = [
-			{ _total: 2, id: "1" },
-			{ _total: 2, id: "2" },
+			{ _total: 2, createdAt: "2", id: "1" },
+			{ _total: 2, createdAt: "1", id: "2" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 5 }, SEALED))
 
@@ -109,15 +109,15 @@ describe("queryHelpers.paginate — items and projection", () => {
 
 	it("strips _total from returned items while keeping pagination.count", () => {
 		const items = [
-			{ _total: 2, id: "1", name: "a" },
-			{ _total: 2, id: "2", name: "b" },
+			{ _total: 2, createdAt: "2", id: "1", name: "a" },
+			{ _total: 2, createdAt: "1", id: "2", name: "b" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 5 }, SEALED))
 
 		expect(pagination.count).toBe(2)
 		expect(resultItems).toEqual([
-			{ id: "1", name: "a" },
-			{ id: "2", name: "b" },
+			{ createdAt: "2", id: "1", name: "a" },
+			{ createdAt: "1", id: "2", name: "b" },
 		])
 		for (const item of resultItems) {
 			expect(item).not.toHaveProperty("_total")
@@ -150,13 +150,13 @@ describe("queryHelpers.paginate — projection", () => {
 	})
 
 	it("returns the full public row when parsedFields is null", () => {
-		const items = [{ _total: 1, id: "1", name: "a" }]
+		const items = [{ _total: 1, createdAt: "1", id: "1", name: "a" }]
 		const [resultItems] = queryHelpers.paginate(
 			wired(items),
 			built({ ...defaultQuery, limit: 10, parsedFields: null }, SEALED),
 		)
 
-		expect(resultItems).toEqual([{ id: "1", name: "a" }])
+		expect(resultItems).toEqual([{ createdAt: "1", id: "1", name: "a" }])
 	})
 })
 
@@ -242,7 +242,7 @@ describe("queryHelpers.paginate — an anchor gone where no bound is safe", () =
 
 describe("queryHelpers.paginate — count and page", () => {
 	it("uses _total from first item", () => {
-		const items = [{ _total: 42, id: "1" }]
+		const items = [{ _total: 42, createdAt: "1", id: "1" }]
 		const [, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 10 }, SEALED))
 
 		expect(pagination.count).toBe(42)
@@ -257,7 +257,7 @@ describe("queryHelpers.paginate — count and page", () => {
 	})
 
 	it("respects page parameter", () => {
-		const items = [{ _total: 100, id: "1" }]
+		const items = [{ _total: 100, createdAt: "1", id: "1" }]
 		const [, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 10, page: 3 }, SEALED))
 
 		expect(pagination.page).toBe(3)
@@ -296,7 +296,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 	})
 
 	it("returns page=null when cursor is present in query", () => {
-		const items = [{ _total: 5, id: "1" }]
+		const items = [{ _total: 5, createdAt: "1", id: "1" }]
 		const [, pagination] = queryHelpers.paginate(
 			wired(items),
 			built(

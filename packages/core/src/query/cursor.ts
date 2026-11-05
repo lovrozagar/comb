@@ -9,16 +9,9 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import {
-	carried,
-	CursorRef,
-	decodeId,
-	decodeValue,
-	encodeValue,
-	type CursorId,
-	type CursorValue,
-} from "./cursor-codec.ts"
+import { CursorRef, decodeId, decodeValue, encodeValue, type CursorId, type CursorValue } from "./cursor-codec.ts"
 import { readOf, readSlot } from "./cursor-reads.ts"
+import { refuseComputedSort, refuseRoundedId, refuseUncarried } from "./cursor-refusals.ts"
 import { assertCursorWired, type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
@@ -86,8 +79,14 @@ function sortSignature(parsedSort: readonly SortField[]): string {
 
 /** A sealed cursor for `payload`, opened only under the same `cursorSecret` and `cursorScope` */
 function encodeCursor(payload: CursorPayload, options: CursorOptions): string {
-	const json = JSON.stringify({ ...payload, i: encodeValue(payload.i), v: payload.v.map(encodeValue) })
-	return seal(new TextEncoder().encode(json), options)
+	return seal(payloadBytes(payload), options)
+}
+
+/** What seal encrypts for `payload`: its JSON, each value encoded, as UTF-8 */
+function payloadBytes(payload: CursorPayload): Uint8Array {
+	return new TextEncoder().encode(
+		JSON.stringify({ ...payload, i: encodeValue(payload.i), v: payload.v.map(encodeValue) }),
+	)
 }
 
 /** Each key's carried flag from the wire; none is every key as read, as every cursor a released comb minted holds */
@@ -116,84 +115,6 @@ function decodePayload(bytes: Uint8Array): OpenedCursor | null {
 	}
 }
 
-/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
-const lossy = (value: unknown): value is number =>
-	typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
-
-/**
- * Throw a 500 for a tiebreak id a JS number rounds, which cannot find its own row, so the keyset
- * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
- */
-function refuseRoundedId(record: Record<string, unknown>, idField: string): void {
-	if (!lossy(record[idField])) return
-	throw new CombError({
-		cause: `the tiebreak id ${idField} reads ${String(record[idField])}, past 2^53, where a JS number rounds it, so no cursor can find its row; read it exactly (bun:sqlite safeIntegers, libsql intMode: "bigint", drizzle's mode: "bigint" on Postgres), or on D1 key the table by a text id`,
-		errorKey: combErrorKeys.SORT_NOT_WIRED,
-		status: "internal_server_error",
-	})
-}
-
-/** The cause of `cursor_pagination_unsupported` for an order no keyset can resume: a computed sort, or no tiebreak column */
-const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a column; use page instead"
-
-/**
- * Refuse a mint under a computed sort (`@relevance`), which no keyset can resume whatever the row
- * holds, as buildListQuery refuses a cursor under one; checked before any field, so the caller learns
- * the order cannot page by cursor, not that the row lacks a value it could never carry
- */
-function refuseComputedSort(parsedSort: readonly SortField[]): void {
-	if (!parsedSort.some(({ field }) => field.startsWith("@"))) return
-	throw new CombError({
-		cause: NO_KEYSET_CAUSE,
-		errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
-		status: "bad_request",
-	})
-}
-
-/** What a value no cursor carries is, for the 500 that names it; a sort value or an id */
-function kindOf(value: unknown): string {
-	if (value === null) return "null"
-	if (Array.isArray(value)) return "an array"
-	if (value instanceof Date) return "a time"
-	if (value instanceof Uint8Array) return "bytes"
-	const kind = typeof value
-	if (kind === "bigint") return "an integer past 20 digits"
-	if (kind === "number") return "a number that is not finite"
-	return kind === "object" ? "an object" : `a ${kind}`
-}
-
-/**
- * Throw a 500 naming the field for a row a cursor cannot resume after (QL5 of r22b): one without a
- * sort field or its id (a key set to undefined is one left out), or one whose value the cursor
- * would not read back as itself, a JSON object, an array or a function, which would mint a cursor
- * the next page refused as invalid
- */
-function refuseUncarried(record: Record<string, unknown>, parsedSort: readonly SortField[], idField: string): void {
-	const fields = [...parsedSort.map(({ field }) => field), idField]
-	const missing = fields.filter((field) => record[field] === undefined)
-	if (missing.length > 0) {
-		throw new CombError({
-			cause: `the next cursor is minted from each row's ${missing.join(", ")}; select them, and the built query's extras`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
-	const key = parsedSort.find(({ field }) => !carried(record[field], decodeValue))
-	if (key !== undefined) {
-		throw new CombError({
-			cause: `the sort by ${key.field} reads ${kindOf(record[key.field])}, which no cursor carries: sort by a column of text, numbers, booleans, times or bytes`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
-	if (carried(record[idField], decodeId)) return
-	throw new CombError({
-		cause: `the tiebreak id ${idField} reads ${kindOf(record[idField])}, which no cursor carries: key the table by text or an integer`,
-		errorKey: combErrorKeys.SORT_NOT_WIRED,
-		status: "internal_server_error",
-	})
-}
-
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
@@ -203,28 +124,40 @@ function refuseUncarried(record: Record<string, unknown>, parsedSort: readonly S
 function mintCursor(
 	record: Record<string, unknown>,
 	parsedSort: readonly SortField[],
-	options: CursorOptions & {
-		carried?: ReadonlySet<string> | undefined
-		idField?: string | undefined
-		read?: Record<string, unknown> | undefined
-	},
+	options: CursorOptions & MintOptions,
 ): string {
+	return seal(cursorBytes(record, parsedSort, options), options)
+}
+
+/** What a mint is told beside the seal's options: the carried keys, the id's field, and the row as read */
+type MintOptions = {
+	carried?: ReadonlySet<string> | undefined
+	idField?: string | undefined
+	read?: Record<string, unknown> | undefined
+}
+
+/**
+ * What mintCursor seals for `record`, every refusal of it run: the cursor's length, which the bytes'
+ * count alone sets (sealedLength), is known before any seal, so a page checks each row it serves
+ */
+function cursorBytes(
+	record: Record<string, unknown>,
+	parsedSort: readonly SortField[],
+	options: MintOptions | undefined,
+): Uint8Array {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
 	const flags = parsedSort.map(({ field }) => options?.carried?.has(field) ?? false)
 	const read = parsedSort.map(({ field }) => readSlot(options?.read?.[field], record[field]))
 	refuseComputedSort(parsedSort)
 	refuseRoundedId(record, idField)
 	refuseUncarried(record, parsedSort, idField)
-	return encodeCursor(
-		{
-			...(flags.includes(true) && { c: flags }),
-			...(read.some((slot) => slot !== null) && { d: read }),
-			i: record[idField] as CursorId,
-			s: sortSignature(parsedSort),
-			v: parsedSort.map(({ field }) => record[field]),
-		},
-		options,
-	)
+	return payloadBytes({
+		...(flags.includes(true) && { c: flags }),
+		...(read.some((slot) => slot !== null) && { d: read }),
+		i: record[idField] as CursorId,
+		s: sortSignature(parsedSort),
+		v: parsedSort.map(({ field }) => record[field]),
+	})
 }
 
 /**
@@ -278,15 +211,13 @@ export {
 	CursorRef,
 	CURSOR_TIEBREAK_COLUMN,
 	MAX_CURSOR_LENGTH,
+	cursorBytes,
 	cursorProblem,
 	effectiveNulls,
 	encodeCursor,
-	lossy,
 	mintCursor,
-	NO_KEYSET_CAUSE,
 	readCursor,
 	readKeyset,
-	refuseRoundedId,
 	sortSignature,
 	type CursorId,
 	type CursorOptions,

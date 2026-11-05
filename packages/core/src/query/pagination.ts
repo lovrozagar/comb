@@ -8,7 +8,7 @@
  * built query shows no part of the secret.
  */
 import { type DecodedCursor, readKeyset } from "./cursor.ts"
-import { fitCursor, type KeysetKind } from "./cursor-mint.ts"
+import { fittedCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { carriedTexts, COMB_ID, refuseUnheld, typedKeys } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
@@ -76,8 +76,12 @@ type ListPagination = {
 	parsedSort: readonly SortField[]
 	/** the most rows the built query reads: one past the page, so paginate can tell there is more, or on a merged page by number each shard's rows to the page's end and one more */
 	window: number
-	/** the cursor for the page after `row`, sealed under the builder's options */
-	mint(row: object): string
+	// AB4-3 of area B
+	/**
+	 * Every check the cursor for the page after `row` passes, run now, so a row no cursor holds is a 500
+	 * on the page that serves it; and what seals that cursor under the builder's options
+	 */
+	fit(row: object): () => string
 	/** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
 	read(cursor: string): DecodedCursor
 }
@@ -112,8 +116,8 @@ function paginationOf<TMerged extends boolean = false>(
 		keyset,
 		limit: query.limit,
 		merged: (facts.merged ?? false) as TMerged,
-		mint: (row) =>
-			mintFrom(row, query.parsedSort, { ...options, asRead: facts.asRead, byReference: facts.byReference, keyset }),
+		fit: (row) =>
+			fitFrom(row, query.parsedSort, { ...options, asRead: facts.asRead, byReference: facts.byReference, keyset }),
 		nonFinite: options.nonFinite,
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
@@ -156,11 +160,11 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 }
 
 /**
- * The next cursor, minted from the last row of the page: its sort keys, and the tiebreak the
- * builder selected as `_combId`. A row without one would mint a cursor that repeats or ends the
- * list, a wiring mistake mintCursor refuses (QL5 of r22b). Any id, 0 and "" included, carries the next page.
+ * The cursor after `row`, checked and ready to seal: its sort keys, and the tiebreak the builder
+ * selected as `_combId`. A row without one would mint a cursor that repeats or ends the list, a
+ * wiring mistake mintCursor refuses (QL5 of r22b). Any id, 0 and "" included, carries the next page.
  */
-function mintFrom(
+function fitFrom(
 	row: object,
 	parsedSort: readonly SortField[],
 	options: CursorOptions & {
@@ -168,10 +172,10 @@ function mintFrom(
 		byReference?: ReadonlySet<string> | undefined
 		keyset: KeysetKind
 	},
-): string {
+): () => string {
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
 	const read = row as Record<string, unknown>
-	return fitCursor(typedKeys(read, parsedSort), parsedSort, {
+	return fittedCursor(typedKeys(read, parsedSort), parsedSort, {
 		...options,
 		carried: carriedTexts(read, parsedSort),
 		idField: COMB_ID,
@@ -201,13 +205,15 @@ function paginate<T extends object>(
 	const sliced = hasMore ? items.slice(0, pagination.limit) : items
 	/* a key no cursor bound as read places is refused on the page that serves it, wherever its row lands */
 	for (const item of sliced) refuseUnheld(item as Record<string, unknown>, pagination.parsedSort)
-	/* minted from the fat row, under the sort the builder ordered by, so the next request's signature matches */
-	const last = sliced.at(-1)
+	/* every row served is one a cursor resumes after, checked from the fat row, under the sort the builder
+	   ordered by, so the next request's signature matches; the last one's is sealed (AB4-3 of area B) */
+	const fitted = pagination.cursorable ? sliced.map((item) => pagination.fit(item)) : []
+	const last = fitted.at(-1)
 	const meta: PaginationResponse = {
 		count: countOf(items, pagination),
 		hasMore,
 		limit: pagination.limit,
-		nextCursor: hasMore && pagination.cursorable && last !== undefined ? pagination.mint(last) : null,
+		nextCursor: hasMore && last !== undefined ? last() : null,
 		page: pagination.cursor ? null : (pagination.page ?? 1),
 	}
 	/* projected after the slice, so count, hasMore and the cursor still see the fat row */

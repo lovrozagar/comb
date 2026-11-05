@@ -103,11 +103,17 @@ describe("paginateMerged", () => {
 	})
 
 	it("breaks a tie by the tiebreak in the first key's direction, and places nulls as the order says", () => {
-		const shards = [[{ id: 1, k: 5 }], [{ id: 2, k: 5 }], [{ id: 3, k: null }], [{ id: 4, k: undefined }]]
+		const shards = [[{ id: 1, k: 5 }], [{ id: 2, k: 5 }], [{ id: 3, k: null }], [{ id: 4, k: null }]]
 		expect(ids(shards, { limit: "10", order: "k.desc" })).toEqual([4, 3, 2, 1])
 		expect(ids(shards, { limit: "10", order: "k.desc.nullslast" })).toEqual([2, 1, 4, 3])
 		expect(ids(shards, { limit: "10", order: "k.asc.nullsfirst" })).toEqual([3, 4, 1, 2])
 		expect(ids(shards.slice(0, 2), { limit: "10", order: "k.asc" })).toEqual([1, 2])
+		/* a key a row lacks sorts as a null, and is refused once served: no cursor resumes after it (AB4-3 of area B) */
+		const unread = [...shards.slice(0, 3), [{ id: 4, k: undefined }]]
+		expect(ids(unread, { limit: "3", order: "k.asc" })).toEqual([1, 2, 3])
+		expect(() => ids(unread, { limit: "10", order: "k.asc" })).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
+		)
 	})
 
 	it("orders by the tiebreak alone, descending, under an empty sort, as orderByKeys does", () => {

@@ -7,12 +7,9 @@ import { SEALED } from "./__fixtures__/cursor-secret.ts"
 import { built } from "./__fixtures__/built.ts"
 import { queryHelpers } from "./drizzle.ts"
 
-/** An offset page of up to ten rows, by created_at descending */
+/** An offset page of up to ten rows, by id descending, which every row carries */
 const offset = () =>
-	built(
-		{ limit: 10, parsedSort: [{ direction: "desc" as const, field: "createdAt" }], validated: true as const },
-		SEALED,
-	)
+	built({ limit: 10, parsedSort: [{ direction: "desc" as const, field: "id" }], validated: true as const }, SEALED)
 
 /* r18 Q4: an extra rendered by hand as its own alias string reaches paginate as a value; each is held to its kind */
 describe("queryHelpers.paginate — an extra's value, as well as its presence", () => {

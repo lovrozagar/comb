@@ -85,26 +85,24 @@ declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): So
 declare function sortSignature(parsedSort: readonly SortField[]): string;
 /** A sealed cursor for `payload`, opened only under the same `cursorSecret` and `cursorScope` */
 declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
-/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
-declare const lossy: (value: unknown) => value is number;
-/**
- * Throw a 500 for a tiebreak id a JS number rounds, which cannot find its own row, so the keyset
- * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
- */
-declare function refuseRoundedId(record: Record<string, unknown>, idField: string): void;
-/** The cause of `cursor_pagination_unsupported` for an order no keyset can resume: a computed sort, or no tiebreak column */
-declare const NO_KEYSET_CAUSE = "Cursor pagination needs every sort key to be a column; use page instead";
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
  * the row as the driver read it, whose value readCursor returns for a key `record` binds otherwise
  */
-declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
+declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & MintOptions): string;
+/** What a mint is told beside the seal's options: the carried keys, the id's field, and the row as read */
+type MintOptions = {
     carried?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
     read?: Record<string, unknown> | undefined;
-}): string;
+};
+/**
+ * What mintCursor seals for `record`, every refusal of it run: the cursor's length, which the bytes'
+ * count alone sets (sealedLength), is known before any seal, so a page checks each row it serves
+ */
+declare function cursorBytes(record: Record<string, unknown>, parsedSort: readonly SortField[], options: MintOptions | undefined): Uint8Array;
 /**
  * Why `cursor` cannot be one, or null when its shape can: the list schema's check, a 400 at
  * validation. What it holds, and the sort it was minted under, only readCursor can open.
@@ -122,7 +120,7 @@ declare function readKeyset(cursor: string, parsedSort: readonly SortField[], op
  * cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, NO_KEYSET_CAUSE, readCursor, readKeyset, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorBytes, cursorProblem, effectiveNulls, encodeCursor, mintCursor, readCursor, readKeyset, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, };
 
 // query/pagination.d.ts
 /**
@@ -183,8 +181,11 @@ type ListPagination = {
     parsedSort: readonly SortField[];
     /** the most rows the built query reads: one past the page, so paginate can tell there is more, or on a merged page by number each shard's rows to the page's end and one more */
     window: number;
-    /** the cursor for the page after `row`, sealed under the builder's options */
-    mint(row: object): string;
+    /**
+     * Every check the cursor for the page after `row` passes, run now, so a row no cursor holds is a 500
+     * on the page that serves it; and what seals that cursor under the builder's options
+     */
+    fit(row: object): () => string;
     /** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
     read(cursor: string): DecodedCursor;
 };
@@ -228,7 +229,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
 export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, totalOf, };
 
 // query/cursor-mint.d.ts
-import type { CursorOptions } from "./cursor-seal.ts";
+import { type CursorOptions } from "./cursor-seal.ts";
 import type { SortField } from "./types.ts";
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
 type KeysetKind = "derived" | "merged" | "table";
@@ -257,7 +258,12 @@ declare function createCursor(row: Record<string, unknown>, sort: readonly SortF
 declare function fitCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof createCursor>[2] & {
     read?: Record<string, unknown> | undefined;
 }): string;
-export { createCursor, fitCursor, type KeysetKind };
+/**
+ * fitCursor's every refusal of `row`, run with no seal, and what seals its cursor: the cap is measured
+ * on the plaintext (sealedLength), so a page checks each row it serves and seals the last alone
+ */
+declare function fittedCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof fitCursor>[2]): () => string;
+export { createCursor, fitCursor, fittedCursor, type KeysetKind };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
@@ -280,6 +286,8 @@ declare const MIN_CURSOR_SECRET_BYTES = 32;
 declare function cursorKey(secret: string): Uint8Array;
 /** Throw the 500 sealing throws when `options` cannot seal a cursor */
 declare function assertCursorWired(options: CursorOptions): void;
+/** The length of the cursor seal makes of `length` bytes of plaintext, which their count alone sets */
+declare const sealedLength: (length: number) => number;
 /**
  * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
  * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
@@ -290,7 +298,7 @@ declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
 declare const isSealedShape: (cursor: string) => boolean;
 /** What `cursor` holds, opened under `options`; null when it was not sealed under both */
 declare function openSealed(cursor: string, options: CursorOptions): Uint8Array | null;
-export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal };
+export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal, sealedLength };
 
 // query/drizzle.d.ts
 /**

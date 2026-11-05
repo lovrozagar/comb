@@ -84,6 +84,13 @@ function assertCursorWired(options: CursorOptions): void {
 /* the size a plaintext is padded up to a multiple of, so a cursor's length tells no value's length within it */
 const BUCKET_BYTES = 256
 
+/** The bytes seal encrypts for `length` bytes of plaintext: at least one bucket, whole buckets */
+const paddedLength = (length: number): number => Math.ceil(Math.max(length, 1) / BUCKET_BYTES) * BUCKET_BYTES
+
+/** The length of the cursor seal makes of `length` bytes of plaintext, which their count alone sets */
+const sealedLength = (length: number): number =>
+	Math.ceil(((1 + NONCE_BYTES + paddedLength(length) + TAG_BYTES) * 4) / 3)
+
 /**
  * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
  * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
@@ -92,7 +99,7 @@ const BUCKET_BYTES = 256
 function seal(plaintext: Uint8Array, options: CursorOptions): string {
 	const { aad, key } = sealing(options)
 	const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
-	const padded = new Uint8Array(Math.ceil(Math.max(plaintext.length, 1) / BUCKET_BYTES) * BUCKET_BYTES).fill(0x20)
+	const padded = new Uint8Array(paddedLength(plaintext.length)).fill(0x20)
 	padded.set(plaintext)
 	const sealed = xchacha20poly1305(key, nonce, aad).encrypt(padded)
 	return encodeBase64Url(new Uint8Array([VERSION, ...nonce, ...sealed]))
@@ -124,4 +131,13 @@ function openSealed(cursor: string, options: CursorOptions): Uint8Array | null {
 	}
 }
 
-export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal }
+export {
+	assertCursorWired,
+	cursorKey,
+	type CursorOptions,
+	isSealedShape,
+	MIN_CURSOR_SECRET_BYTES,
+	openSealed,
+	seal,
+	sealedLength,
+}

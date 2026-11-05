@@ -8,6 +8,7 @@ import {
 	MIN_CURSOR_SECRET_BYTES,
 	openSealed,
 	seal,
+	sealedLength,
 } from "./cursor-seal.ts"
 
 const KEYS = { cursorScope: "members:org_a", cursorSecret: "a-test-secret-of-at-least-32-bytes!!" }
@@ -155,5 +156,10 @@ describe("seal: the plaintext padded to a bucket", () => {
 
 	it("opens to the plaintext, its padding stripped", () => {
 		expect(text(openSealed(seal(bytes('{"v":[1]}'), KEYS), KEYS))).toBe('{"v":[1]}')
+	})
+	/* AB4-3 of area B: a page measures each row's cursor against the cap without sealing it */
+	it("tells a seal's length from the plaintext's byte count alone, empty and on every bucket edge", () => {
+		for (const n of [0, 1, 255, 256, 257, 511, 512, 513, 6000, 8192])
+			expect(sealedLength(n), String(n)).toBe(seal(bytes("x".repeat(n)), KEYS).length)
 	})
 })
