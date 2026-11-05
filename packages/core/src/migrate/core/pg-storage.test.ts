@@ -61,6 +61,7 @@ describe("staysPut", () => {
 		expect(staysPut(commandOf("ALTER TABLE t SET TABLESPACE slow"), where)).toBe(false)
 		expect(staysPut(commandOf("ALTER TABLE t SET TABLESPACE fast"), undefined)).toBe(false)
 		expect(staysPut(commandOf("ALTER TABLE t SET ACCESS METHOD DEFAULT"), where)).toBe(false)
+		expect(staysPut(commandOf("ALTER TABLE t SET ACCESS METHOD DEFAULT"), { logged: true })).toBe(false)
 		expect(staysPut(commandOf("ALTER TABLE t ADD COLUMN x int"), where)).toBe(false)
 		expect(staysPut(commandOf("ALTER TABLE t SET UNLOGGED"), { logged: undefined })).toBe(false)
 	})

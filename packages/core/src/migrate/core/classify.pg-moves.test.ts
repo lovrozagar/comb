@@ -75,6 +75,7 @@ describe("a move the history does not show is a no-op (siblings of PA17 of r22b)
 		["ALTER MATERIALIZED VIEW mv_plain SET TABLESPACE pg_default;", ""],
 		["ALTER INDEX plain_id SET TABLESPACE fast;", ""],
 		["ALTER TABLE placed SET ACCESS METHOD DEFAULT;", ""],
+		["ALTER TABLE plain SET ACCESS METHOD DEFAULT;", ""],
 		/* a move elsewhere */
 		["ALTER TABLE placed SET TABLESPACE slow;", ""],
 		["ALTER TABLE placed SET ACCESS METHOD other;", ""],

@@ -22,6 +22,9 @@ export const SCANS = "scans o under an exclusive lock to check its bound"
 
 const plain = `${PARENT}CREATE TABLE o (id int, at date NOT NULL);\n`
 
+/** `n` distinct text constants, past the 100 a list proof of Postgres's (MAX_SAOP_ARRAY_SIZE) reads */
+const values = (n: number): string[] => Array.from({ length: n }, (_, i) => `'v${i}'`)
+
 export const IMPLIED: readonly AttachCase[] = [
 	["the recipe: a CHECK added NOT VALID, then validated", `${PARENT}${PARTITION}`, ATTACH],
 	[
@@ -298,5 +301,35 @@ export const SCANNED: readonly AttachCase[] = [
 		"a list CHECK past the bound's values",
 		"CREATE TABLE l (c text NOT NULL) PARTITION BY LIST (c);\nCREATE TABLE o (c text NOT NULL CHECK (c IN ('a', 'z')));\n",
 		"ALTER TABLE l ATTACH PARTITION o FOR VALUES IN ('a', 'b');",
+	],
+	[
+		"a list bound of more values than Postgres's proof reads",
+		"CREATE TABLE l (c text NOT NULL) PARTITION BY LIST (c);\nCREATE TABLE o (c text NOT NULL CHECK (c IN ('v0', 'v1')));\n",
+		`ALTER TABLE l ATTACH PARTITION o FOR VALUES IN (${values(101).join(", ")});`,
+	],
+	[
+		"a list CHECK of more values than Postgres's proof reads, one value repeated",
+		`CREATE TABLE l (c text NOT NULL) PARTITION BY LIST (c);\nCREATE TABLE o (c text NOT NULL CHECK (c IN (${Array.from({ length: 101 }, () => "'a'").join(", ")})));\n`,
+		"ALTER TABLE l ATTACH PARTITION o FOR VALUES IN ('a', 'b');",
+	],
+	[
+		"the partition's key and another column swapped by renames",
+		"CREATE TABLE ev (at date NOT NULL, x date NOT NULL) PARTITION BY RANGE (at);\nCREATE TABLE o (at date NOT NULL, x date NOT NULL, CHECK (at >= '2026-01-01' AND at < '2027-01-01'));\nALTER TABLE o RENAME COLUMN at TO t;\nALTER TABLE o RENAME COLUMN x TO at;\nALTER TABLE o RENAME COLUMN t TO x;\n",
+		ATTACH,
+	],
+	[
+		"the parent's key and another column swapped by renames",
+		"CREATE TABLE ev (at date NOT NULL, x date NOT NULL) PARTITION BY RANGE (at);\nALTER TABLE ev RENAME COLUMN at TO t;\nALTER TABLE ev RENAME COLUMN x TO at;\nALTER TABLE ev RENAME COLUMN t TO x;\nCREATE TABLE o (at date NOT NULL, x date NOT NULL, CHECK (at >= '2026-01-01' AND at < '2027-01-01'));\n",
+		ATTACH,
+	],
+	[
+		"a parent attached to its own parent by an ATTACH",
+		"CREATE TABLE g (at date NOT NULL, k int NOT NULL) PARTITION BY RANGE (k);\nCREATE TABLE ev (at date NOT NULL, k int NOT NULL) PARTITION BY RANGE (at);\nALTER TABLE g ATTACH PARTITION ev FOR VALUES FROM (0) TO (10);\nCREATE TABLE o (at date NOT NULL, k int NOT NULL, CHECK (at >= '2026-01-01' AND at < '2027-01-01'));\n",
+		ATTACH,
+	],
+	[
+		"a key with an operator class",
+		"CREATE TABLE l (c text NOT NULL) PARTITION BY RANGE (c text_pattern_ops);\nCREATE TABLE o (c text NOT NULL CHECK (c >= 'a' AND c < 'm'));\n",
+		"ALTER TABLE l ATTACH PARTITION o FOR VALUES FROM ('a') TO ('m');",
 	],
 ]
