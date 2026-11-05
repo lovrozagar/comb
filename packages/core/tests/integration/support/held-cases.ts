@@ -3,6 +3,7 @@
  * held warnings to Postgres 17's pg_locks with, and check-held.test.ts holds check's replay to:
  * each statement with what Postgres holds blocked at its file's end.
  */
+import type { Unnamed } from "./pg-locks.ts"
 
 export const HISTORY = [
 	"CREATE TABLE users (id int PRIMARY KEY, n int);",
@@ -28,6 +29,9 @@ export const HISTORY = [
 	"CREATE SEQUENCE seq;",
 	"CREATE TABLE ids (id bigint DEFAULT nextval('seq'));",
 	"CREATE SEQUENCE seq_free;",
+	"CREATE TABLE serials (id serial, n int);",
+	"CREATE TYPE pr AS (a int, b int);",
+	"CREATE TABLE typed OF pr;",
 	"ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;",
 ].join("\n")
 
@@ -110,6 +114,14 @@ export const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, stri
 	/* a CASCADE drops ids's default, which calls seq, and locks ids, which the history's text does not show */
 	["DROP SEQUENCE seq CASCADE;", { ids: READS, seq: READS }],
 	["CREATE SEQUENCE seq_new;\nALTER SEQUENCE seq_new RESTART;", {}],
+	/* a DROP of a table, or of its column, drops the sequence a serial or identity column owns, without CASCADE */
+	["DROP TABLE serials;", { serials: READS, serials_id_seq: READS }],
+	["ALTER TABLE serials DROP COLUMN id;", { serials: READS, serials_id_seq: READS }],
+	["ALTER TABLE serials DROP COLUMN n;", { serials: READS }],
+	/* an ALTER TYPE … CASCADE rewrites each table of the type, made OF it, which the history's facts do not show */
+	["ALTER TYPE pr RENAME ATTRIBUTE a TO c CASCADE;", { typed: READS }],
+	["ALTER TYPE pr ADD ATTRIBUTE x int CASCADE;", { typed: READS }],
+	["ALTER TYPE pr DROP ATTRIBUTE b CASCADE;", { typed: READS }],
 	/* what blocks nothing */
 	["COMMENT ON TABLE orders IS 'x';", {}],
 	["GRANT SELECT ON orders TO PUBLIC;", {}],
@@ -120,12 +132,33 @@ export const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, stri
 
 /**
  * What pg-held.ts's map of a case's file warns of where it is not what Postgres holds: what it names,
- * and the objects a DROP … CASCADE dropped, whose dependents' tables it cannot name
+ * and what it says it locks that it cannot name, the objects a DROP … CASCADE dropped among them
  */
-type Mapped = { cascades: readonly string[]; held: Readonly<Record<string, string>> }
+type Mapped = Unnamed & { held: Readonly<Record<string, string>> }
 
-// lookup-table: the CASES whose map warns of a DROP … CASCADE, by statement
+// lookup-table: the CASES whose map warns of what it cannot name, by statement
 export const MAPPED: Readonly<Record<string, Mapped>> = {
+	"ALTER TABLE serials DROP COLUMN id;": { held: { serials: READS }, others: ["the sequences serials owns"] },
+	"ALTER TYPE pr ADD ATTRIBUTE x int CASCADE;": { held: {}, others: ["the tables of type pr"] },
+	"ALTER TYPE pr DROP ATTRIBUTE b CASCADE;": { cascades: ["pr.b"], held: {}, others: ["the tables of type pr"] },
+	"ALTER TYPE pr RENAME ATTRIBUTE a TO c CASCADE;": { held: {}, others: ["the tables of type pr"] },
 	"DROP DOMAIN posint CASCADE;": { cascades: ["posint"], held: { dm: READS } },
 	"DROP SEQUENCE seq CASCADE;": { cascades: ["seq"], held: { seq: READS } },
+	"DROP TABLE orders;": { held: { orders: READS }, others: ["the sequences orders owns"] },
+	"DROP TABLE serials;": { held: { serials: READS }, others: ["the sequences serials owns"] },
 }
+
+/**
+ * The history's addition that leaves a table `role` owns, for a DROP or REASSIGN OWNED BY it, which
+ * locks each, and the map's warning of one: what Postgres holds, and what it cannot name
+ */
+export const owning = (role: string): { history: string; mapped: Mapped } => ({
+	history: `CREATE TABLE owned (n int);\nALTER TABLE owned OWNER TO ${role};`,
+	mapped: { held: {}, owners: [`everything ${role} owns`] },
+})
+
+// lookup-table: each statement on the role `owning` names, with what Postgres 17 holds blocked at the file's end
+export const OWNING: ReadonlyArray<readonly [(role: string) => string, Readonly<Record<string, string>>]> = [
+	[(role) => `DROP OWNED BY ${role};`, { owned: READS }],
+	[(role) => `REASSIGN OWNED BY ${role} TO CURRENT_USER;`, { owned: READS }],
+]

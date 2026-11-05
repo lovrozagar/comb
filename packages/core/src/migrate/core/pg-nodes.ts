@@ -76,10 +76,16 @@ const emptyFacts = (schema: string): Facts => ({
 
 /**
  * A column's type, keyed as typeOf keys it: its modifiers, none for one unbounded, its array
- * dimensions, 0 for a scalar (`int[]` and `int ARRAY` have 1), and its collation, undefined for its
- * type's default
+ * dimensions, 0 for a scalar (`int[]` and `int ARRAY` have 1), its collation, undefined for its
+ * type's default, and whether it owns a sequence (pg-owned.ts)
  */
-type ColumnType = { collation: string | undefined; dims: number; mods: readonly number[]; type: string }
+type ColumnType = {
+	collation: string | undefined
+	dims: number
+	mods: readonly number[]
+	owns?: true | undefined
+	type: string
+}
 
 /** Whether a column of `columns` has the type `type` */
 const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean =>

@@ -13,9 +13,11 @@ import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { replayPending } from "../../../src/migrate/core/pg-check-replay.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { CASES, HISTORY, VALIDATE } from "../support/held-cases.ts"
+import { CASES, HISTORY, OWNING, owning, VALIDATE } from "../support/held-cases.ts"
 import { pgCheck, T } from "../support/pg-check.ts"
 import { warningOf } from "../support/pg-locks.ts"
+import { pgUrl } from "../support/pg.ts"
+import { query, testRoles } from "../support/pg-roles.ts"
 
 const { checked, devUrl, files, options, targetUrl } = pgCheck()
 
@@ -33,28 +35,48 @@ const heldOf = (out: readonly string[], validate: string, said: "as said" | "bar
 		.map((line) => line.slice(WARNING.length))
 		.map((line) => (said === "bare" ? line.replaceAll(CALLS, "") : line))
 
-/* what the map says of a DROP … CASCADE, whose dependents it cannot name, after what it names */
+/*
+ * what the map says it locks that it cannot name, after what it names: the objects a DROP … CASCADE
+ * dropped, and the rest the replay measures, a dropped table's sequences, a type's tables; then
+ * what a DROP or REASSIGN OWNED's roles own, which the replay leaves out
+ */
+const OWNERS = /(?:^|, and )this file (?:also )?locks (everything .*), which comb cannot name$/
 const UNNAMED =
-	/(?:^|, and )this file's DROP … CASCADE locks what depends on (.*), which only check on a postgres:\/\/ devUrl names$/
+	/(?:^|, and )(?:this file's DROP … CASCADE locks what depends on (.*?)(?:, and this file also locks (.*))?|this file locks (.*)), which only check on a postgres:\/\/ devUrl names$/
 
-/** What the file holds: each relation named, with what it blocks, and the objects a DROP … CASCADE dropped */
-type Said = { cascades: string[]; held: Record<string, string> }
+/** What the file holds: each relation named, with what it blocks, and what it locks that it cannot name */
+type Said = { cascades: string[]; held: Record<string, string>; others: string[]; owners: string[] }
+
+/** The items of a list as listed writes them */
+const items = (list: string | undefined): string[] => (list === undefined ? [] : list.split(/, | and /))
+
+/** What a warning says its file locks that it cannot name, and what it says before that */
+function unnamedIn(all: string): Omit<Said, "held"> & { holding: string } {
+	const owned = OWNERS.exec(all)
+	const said = owned === null ? all : all.slice(0, owned.index)
+	const unnamed = UNNAMED.exec(said)
+	return {
+		cascades: items(unnamed?.[1]),
+		holding: (unnamed === null ? said : said.slice(0, unnamed.index)).replace(/^this file holds /, ""),
+		others: items(unnamed?.[2] ?? unnamed?.[3]),
+		owners: items(owned?.[1]),
+	}
+}
 
 /** What a warning of `validate`, a VALIDATE on `table`, says its file holds, read so warningOf writes it back */
 function heldIn(lines: readonly string[], { table, validate }: { table: string; validate: string }): Said {
 	const held: Record<string, string> = {}
-	const said = /scans \S+ while (.*); those locks/.exec(lines[0] ?? "")?.[1] ?? ""
-	const unnamed = UNNAMED.exec(said)
-	const cascades = unnamed === null ? [] : String(unnamed[1]).split(/, | and /)
-	const holding = (unnamed === null ? said : said.slice(0, unnamed.index)).replace(/^this file holds /, "")
+	const { cascades, holding, others, owners } = unnamedIn(
+		/scans \S+ while (.*); those locks/.exec(lines[0] ?? "")?.[1] ?? "",
+	)
 	if (holding.startsWith("it locked against ")) held[table] = holding.slice("it locked against ".length)
 	else
 		for (const part of holding === "" ? [] : holding.split(", and ")) {
 			const [, names, blocks] = /^(.*?)(?: locked)? against (reads and writes|writes)$/.exec(part) ?? []
 			for (const name of String(names).split(/, | and /)) held[name] = String(blocks)
 		}
-	expect(warningOf({ table, validate }, held, cascades)).toEqual(lines)
-	return { cascades, held }
+	expect(warningOf({ table, validate }, held, { cascades, others, owners })).toEqual(lines)
+	return { cascades, held, others, owners }
 }
 
 /** What pg-held.ts's map of `two` after `one` holds at `validate`, a VALIDATE on `table`, as apply warns of it */
@@ -71,10 +93,12 @@ function mapped(one: string, two: string, at: { table: string; validate: string 
 
 /**
  * Whether `map` holds each relation `measured` does, as strongly: reads and writes, or writes at
- * least; a DROP … CASCADE, whose dependents the map cannot name, covers any relation the replay measures
+ * least; what it says it locks that it cannot name covers any relation the replay measures
  */
-const holdsAll = ({ cascades, held }: Said, measured: Readonly<Record<string, string>>): boolean =>
+const holdsAll = ({ cascades, held, others, owners }: Said, measured: Readonly<Record<string, string>>): boolean =>
 	cascades.length > 0 ||
+	others.length > 0 ||
+	owners.length > 0 ||
 	Object.entries(measured).every(([name, blocks]) => held[name] === blocks || held[name] === "reads and writes")
 
 // lookup-table: what the replay measures and pg-held.ts's map cannot, by why; apply warns without it, so run check first
@@ -189,6 +213,24 @@ describe("check's held warnings of a lock no CASE takes, measured on devUrl (Are
 		])
 		mapHolds({ one, out, two }, AT_T)
 	})
+
+	it.each(OWNING)(
+		"after %s on a role, warns of what the role owns, which the replay leaves out and comb cannot name",
+		async (statement) => {
+			const [role] = testRoles("comb_t_own")
+			await query(pgUrl(), `CREATE ROLE ${role}`)
+			const one = `${NOT_VALID}${owning(role).history}\n`
+			const two = `${ALLOW}${statement(role)}\n${VALIDATE_T}\n`
+			const { out, refused } = await checked(one, two)
+			expect(refused).toBeUndefined()
+			/* the replay leaves the statement out, as it reaches past its database, so the map's clause stands */
+			const left = `Check left ${JSON.stringify(statement(role).slice(0, -1))} in 20260102000000_two.sql out of its replay`
+			expect(out.filter((line) => line.startsWith(left))).toHaveLength(1)
+			expect(heldOf(out, VALIDATE_T)).toEqual(warningOf(AT_T, {}, owning(role).mapped))
+			mapHolds({ one, out, two }, AT_T)
+		},
+		60_000,
+	)
 
 	it("leaves out a temp table the file made in an earlier transaction, which no other session sees", async () => {
 		const two = `-- atlas:txmode none\n\n${ALLOW}CREATE TEMP TABLE tt (id int);\nBEGIN;\nLOCK tt IN ACCESS EXCLUSIVE MODE;\n${VALIDATE_T}\nCOMMIT;\n`

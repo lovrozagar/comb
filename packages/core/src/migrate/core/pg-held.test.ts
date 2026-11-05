@@ -49,9 +49,15 @@ function holds(first: string): string {
 	return said.replace(/^this file holds /, "")
 }
 
-/** What comb says of a DROP … CASCADE of `objects`, whose dependents the history's text does not show */
-const unnamed = (objects: string): string =>
-	`this file's DROP … CASCADE locks what depends on ${objects}, which only check on a postgres:// devUrl names`
+/* what comb says of a lock it cannot name, which only the replay measures */
+const ONLY_CHECK = "which only check on a postgres:// devUrl names"
+
+/** What comb says of a DROP … CASCADE of `objects`, whose dependents the history's text does not show, and of `others` */
+const unnamed = (objects: string, others?: string): string =>
+	`this file's DROP … CASCADE locks what depends on ${objects}${others === undefined ? "" : `, and this file also locks ${others}`}, ${ONLY_CHECK}`
+
+/** What comb says of `others`, what the file locks that the history's text does not name, with no DROP … CASCADE */
+const locks = (others: string): string => `this file locks ${others}, ${ONLY_CHECK}`
 
 /* each statement before the VALIDATE, and what comb says the file then holds */
 const HOLDS: Array<[string, string]> = [
@@ -72,7 +78,7 @@ const HOLDS: Array<[string, string]> = [
 	/* a partitioned table's index, built and dropped through it */
 	["CREATE INDEX ev_at ON ev (at);", "ev, ev_old and ev_rest locked against writes"],
 	["CREATE INDEX ev_at ON ONLY ev (at);", "ev locked against writes"],
-	["DROP TABLE ev;", "ev, ev_old and ev_rest locked against reads and writes"],
+	["DROP TABLE ev;", `ev, ev_old and ev_rest locked against reads and writes, and ${locks("the sequences ev owns")}`],
 	/* a view's options, any of them, and a table's user_catalog_table alone */
 	["ALTER VIEW v_users SET (security_barrier = true);", "v_users locked against reads and writes"],
 	["ALTER TABLE orders RESET (fillfactor);", ""],
@@ -144,7 +150,10 @@ const HOLDS: Array<[string, string]> = [
 	 * expression among them, and locks their tables, which the history's text does not show
 	 */
 	["DROP SEQUENCE IF EXISTS s CASCADE;", `s locked against reads and writes, and ${unnamed("s")}`],
-	["DROP TABLE orders CASCADE;", `orders locked against reads and writes, and ${unnamed("orders")}`],
+	[
+		"DROP TABLE orders CASCADE;",
+		`orders locked against reads and writes, and ${unnamed("orders", "the sequences orders owns")}`,
+	],
 	["DROP FUNCTION trg() CASCADE;", unnamed("trg")],
 	["DROP SCHEMA s, s9 CASCADE;", unnamed("s and s9")],
 	[
@@ -157,6 +166,64 @@ const HOLDS: Array<[string, string]> = [
 		`orders locked against reads and writes, and ${unnamed("orders.user_id")}`,
 	],
 	["ALTER TABLE users DROP CONSTRAINT k CASCADE;", `it locked against reads and writes, and ${unnamed("k on users")}`],
+	/*
+	 * a DROP of a table, or of a column that owns a sequence, serial, identity or OWNED BY, drops the
+	 * sequence without CASCADE, and a column the history does not show may own one
+	 */
+	[
+		"DROP TABLE IF EXISTS notes, s.a;",
+		`notes and s.a locked against reads and writes, and ${locks("the sequences notes owns and the sequences s.a owns")}`,
+	],
+	[
+		"ALTER TABLE stamps DROP COLUMN id;",
+		`stamps locked against reads and writes, and ${locks("the sequences stamps owns")}`,
+	],
+	["ALTER TABLE stamps DROP COLUMN at;", "stamps locked against reads and writes"],
+	[
+		"ALTER FOREIGN TABLE ghost DROP COLUMN x;",
+		`ghost locked against reads and writes, and ${locks("the sequences ghost owns")}`,
+	],
+	[
+		"ALTER TABLE notes ADD COLUMN k int GENERATED ALWAYS AS IDENTITY;\nALTER TABLE notes DROP COLUMN k;",
+		`notes locked against reads and writes, and ${locks("the sequences notes owns")}`,
+	],
+	[
+		"ALTER TABLE notes ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;\nALTER TABLE notes DROP COLUMN id;",
+		`notes locked against reads and writes, and ${locks("the sequences notes owns")}`,
+	],
+	[
+		"CREATE SEQUENCE os OWNED BY notes.id;\nALTER TABLE notes DROP COLUMN id;",
+		`notes locked against reads and writes, and ${locks("the sequences notes owns")}`,
+	],
+	[
+		"ALTER TABLE stamps ALTER COLUMN id TYPE bigint;\nALTER TABLE stamps RENAME COLUMN id TO sid;\nALTER TABLE stamps DROP COLUMN sid;",
+		`stamps locked against reads and writes, and ${locks("the sequences stamps owns")}`,
+	],
+	[
+		"ALTER SEQUENCE nowhere OWNED BY NONE;\nALTER TABLE notes DROP COLUMN body;",
+		"notes locked against reads and writes, and nowhere against writes",
+	],
+	[
+		"CREATE TABLE fresh (id serial);\nDROP TABLE fresh;\nALTER TABLE notes DROP COLUMN body;",
+		"notes locked against reads and writes",
+	],
+	/* a DROP or REASSIGN OWNED drops or alters every object its roles own, which neither the history nor check's replay shows */
+	[
+		"DROP OWNED BY app, CURRENT_USER;",
+		"this file locks everything CURRENT_USER owns and everything app owns, which comb cannot name",
+	],
+	["REASSIGN OWNED BY app TO CURRENT_USER;", "this file locks everything app owns, which comb cannot name"],
+	[
+		"DROP TABLE ev_loose;\nDROP OWNED BY app;",
+		`ev_loose locked against reads and writes, and ${locks("the sequences ev_loose owns")}, and this file also locks everything app owns, which comb cannot name`,
+	],
+	/* an ALTER TYPE … CASCADE rewrites each table made OF the type, which the history does not show */
+	["ALTER TYPE pair RENAME ATTRIBUTE a TO c CASCADE;", locks("the tables of type pair")],
+	[
+		"ALTER TYPE pair ADD ATTRIBUTE z int CASCADE, ALTER ATTRIBUTE a TYPE bigint CASCADE;",
+		locks("the tables of type pair"),
+	],
+	["ALTER TYPE s.pair DROP ATTRIBUTE z CASCADE;", unnamed("s.pair.z", "the tables of type s.pair")],
 ]
 
 /* statements that leave nothing held */
@@ -176,6 +243,7 @@ const NOTHING: string[] = [
 	"ALTER FUNCTION trg() SET SCHEMA s;",
 	"ALTER TYPE posint SET SCHEMA s;",
 	"ALTER TYPE pair ADD ATTRIBUTE z int;",
+	"ALTER TYPE pair RENAME ATTRIBUTE a TO c;",
 	/* a temporary table, and a relation the file made, which no other session sees */
 	"CREATE TEMP TABLE tt (id int);\nALTER TABLE tt ADD COLUMN x int;",
 	"LOCK TABLE pg_temp.tt;",

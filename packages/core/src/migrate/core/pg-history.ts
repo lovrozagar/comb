@@ -16,6 +16,7 @@ import { followBounds } from "./pg-bounds.ts"
 import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
+import { followIdentity, followSequence, owned } from "./pg-owned.ts"
 import { followForeign } from "./pg-foreign.ts"
 import { followIndexes } from "./pg-indexes.ts"
 import { followPartitioned } from "./pg-partitioned.ts"
@@ -48,7 +49,7 @@ type Typed = { def: Node; runs?: string | undefined }
 /** The column `def` defines on `table`, and what it runs: `runs` when given, else its type's code */
 function followType(table: string, { def, runs }: Typed, facts: Facts): void {
 	const column = String(def["colname"])
-	const columnType = columnTypeOf(def, facts.schema)
+	const columnType = owned(def, columnTypeOf(def, facts.schema), facts.columnTypes.get(table)?.get(column))
 	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Map()).set(column, columnType))
 	const code = runs ?? typeCode(columnType.type, facts)
 	if (code !== undefined && !facts.code.has(table)) facts.code.set(table, code)
@@ -147,7 +148,7 @@ function followAlter(node: Node, facts: Facts): void {
 		} else if (cmd["subtype"] === "AT_AlterColumnType") {
 			/* a column retyped to a domain runs the domain's CHECK on every later write */
 			followType(table, { def: { ...(def["ColumnDef"] as Node), colname: cmd["name"] } }, facts)
-		} else {
+		} else if (!followIdentity(table, cmd, facts)) {
 			const runs = callIn(def, facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
 		}
@@ -156,7 +157,7 @@ function followAlter(node: Node, facts: Facts): void {
 
 /** An operator, an aggregate or a cast with the function it runs */
 function followDefinition(type: string, node: Node, facts: Facts): void {
-	if (followDomain(type, node, facts)) return
+	if (followDomain(type, node, facts) || followSequence(type, node, facts)) return
 	if (type === "DefineStmt" && node["kind"] === "OBJECT_AGGREGATE") {
 		facts.defined.add(keyOf(names(node["defnames"]), facts.schema))
 	} else if (type === "DefineStmt" && node["kind"] === "OBJECT_OPERATOR") {

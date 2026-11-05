@@ -206,6 +206,7 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.parents.delete(table)
 		facts.triggers.delete(table)
 		facts.tables.delete(table)
+		facts.columnTypes.delete(table)
 		facts.views.delete(table)
 		facts.reads.delete(table)
 		facts.storage.delete(table)

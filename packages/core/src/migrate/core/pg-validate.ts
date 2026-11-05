@@ -47,15 +47,28 @@ function named({ calls, locks }: Held, key: string): string {
 	return groups.join(", and ")
 }
 
-/** What the file holds by `held`: what it names, and what depends on each object a DROP … CASCADE dropped */
+/**
+ * What the file holds by `held`: what it names, what depends on each object a DROP … CASCADE
+ * dropped, and what else it locks that no fact names, which only the replay measures, and what a
+ * DROP or REASSIGN OWNED locks, which the replay leaves out
+ */
 function holding(held: Held, key: string): string {
-	const objects = [...held.cascades].toSorted()
+	const [objects, others, owners] = [held.cascades, held.unseen, held.owners].map((set) => [...set].toSorted()) as [
+		string[],
+		string[],
+		string[],
+	]
+	const unnamed = [
+		...(objects.length > 0 ? [`this file's DROP … CASCADE locks what depends on ${listed(objects)}`] : []),
+		...(others.length > 0 ? [`this file ${objects.length > 0 ? "also " : ""}locks ${listed(others)}`] : []),
+	]
 	return [
 		...(held.locks.size > 0 ? [`this file holds ${named(held, key)}`] : []),
-		...(objects.length > 0
-			? [
-					`this file's DROP … CASCADE locks what depends on ${listed(objects)}, which only check on a postgres:// devUrl names`,
-				]
+		...unnamed.map((clause, i) =>
+			i === unnamed.length - 1 ? `${clause}, which only check on a postgres:// devUrl names` : clause,
+		),
+		...(owners.length > 0
+			? [`this file ${unnamed.length > 0 ? "also " : ""}locks ${listed(owners)}, which comb cannot name`]
 			: []),
 	].join(", and ")
 }
@@ -70,7 +83,7 @@ function heldScans(node: Node, { facts, held }: { facts: Facts; held: Held }): F
 		const cmd = each["AlterTableCmd"] as Node
 		const scans = node["objtype"] === "OBJECT_TABLE" && cmd["subtype"] === "AT_ValidateConstraint"
 		const found: Finding[] =
-			scans && (held.locks.size > 0 || held.cascades.size > 0)
+			scans && (held.locks.size > 0 || held.cascades.size > 0 || held.unseen.size > 0 || held.owners.size > 0)
 				? [
 						{
 							level: "lock",

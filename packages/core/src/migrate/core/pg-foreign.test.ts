@@ -62,6 +62,10 @@ function holds(first: string): string {
 const cascading = (named: string, object: string): string =>
 	`${named}, and this file's DROP … CASCADE locks what depends on ${object}, which only check on a postgres:// devUrl names`
 
+/** What comb says the file holds of `named`, and of a dropped table's sequences, which no fact names */
+const owning = (named: string, table: string): string =>
+	`${named}, and this file locks the sequences ${table} owns, which only check on a postgres:// devUrl names`
+
 /* each statement before the VALIDATE, and what comb says the file then holds */
 const HOLDS: Array<[string, string]> = [
 	/* the names Postgres chose: the longer of table and columns cut first to 63 bytes, a character never split, a taken name numbered */
@@ -118,7 +122,7 @@ const HOLDS: Array<[string, string]> = [
 		"ALTER TABLE orders SET SCHEMA s;\nALTER TABLE s.orders DROP CONSTRAINT o_fk;",
 		"s.orders and users locked against reads and writes",
 	],
-	["ALTER SCHEMA s RENAME TO s2;\nDROP TABLE s2.b;", "s2.a and s2.b locked against reads and writes"],
+	["ALTER SCHEMA s RENAME TO s2;\nDROP TABLE s2.b;", owning("s2.a and s2.b locked against reads and writes", "s2.b")],
 	/* a key the file adds, and one a CREATE IF NOT EXISTS of a table the history holds leaves */
 	[
 		"ALTER TABLE audit ADD COLUMN u int REFERENCES users (id);\nALTER TABLE audit DROP COLUMN u;",
@@ -133,7 +137,10 @@ const HOLDS: Array<[string, string]> = [
 		"ALTER TABLE orders DROP CONSTRAINT o_fk;\nALTER TABLE users ALTER COLUMN n TYPE bigint;",
 		"orders and users locked against reads and writes",
 	],
-	["DROP TABLE t2;\nTRUNCATE orders CASCADE;", "items, orders, t2 and users locked against reads and writes"],
+	[
+		"DROP TABLE t2;\nTRUNCATE orders CASCADE;",
+		owning("items, orders, t2 and users locked against reads and writes", "t2"),
+	],
 	[
 		"ALTER TABLE orders DROP CONSTRAINT orders_pkey CASCADE;\nALTER TABLE orders ADD PRIMARY KEY (user_id);\nALTER TABLE orders ALTER COLUMN id TYPE bigint;",
 		cascading("items, orders and t2 locked against reads and writes", "orders_pkey on orders"),

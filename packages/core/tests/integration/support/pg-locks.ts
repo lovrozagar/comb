@@ -78,17 +78,42 @@ const listed = (names: readonly string[]): string =>
 	names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) as string}`
 
 /**
+ * What a map says its file locks that it cannot name: the objects a DROP … CASCADE dropped, the rest
+ * check's replay measures, by what owns or types them, and what a DROP or REASSIGN OWNED's roles own
+ */
+type Unnamed = {
+	cascades?: readonly string[] | undefined
+	others?: readonly string[] | undefined
+	owners?: readonly string[] | undefined
+}
+
+/** What comb says of what `unnamed` says the file locks that it cannot name, clause by clause */
+function unnamedSaid({ cascades = [], others = [], owners = [] }: Unnamed): string[] {
+	const measures = [
+		...(cascades.length > 0 ? [`this file's DROP … CASCADE locks what depends on ${listed(cascades.toSorted())}`] : []),
+		...(others.length > 0 ? [`this file ${cascades.length > 0 ? "also " : ""}locks ${listed(others.toSorted())}`] : []),
+	]
+	return [
+		...(measures.length > 0 ? [`${measures.join(", and ")}, which only check on a postgres:// devUrl names`] : []),
+		...(owners.length > 0
+			? [`this file ${measures.length > 0 ? "also " : ""}locks ${listed(owners.toSorted())}, which comb cannot name`]
+			: []),
+	]
+}
+
+/**
  * comb's warning of `validate`, a VALIDATE of a constraint on `table`, when its file holds `held`, as
- * Postgres reports it, and, from the file's text alone, has dropped `cascades` with CASCADE, whose
- * dependents it cannot name; none when it holds nothing
+ * Postgres reports it, and, from the file's text alone, locks what `unnamed` says it cannot name; none
+ * when it holds nothing
  */
 function warningOf(
 	{ table, validate }: { table: string; validate: string },
 	held: Readonly<Record<string, string>>,
-	cascades: readonly string[] = [],
+	unnamed: Unnamed = {},
 ): string[] {
 	const names = Object.keys(held).toSorted()
-	if (names.length === 0 && cascades.length === 0) return []
+	const unseen = unnamedSaid(unnamed)
+	if (names.length === 0 && unseen.length === 0) return []
 	const by = (blocks: string) => names.filter((name) => held[name] === blocks)
 	const [reads, writes] = [by("reads and writes"), by("writes")]
 	const holding =
@@ -98,11 +123,10 @@ function warningOf(
 					...(reads.length > 0 ? [`${listed(reads)} locked against reads and writes`] : []),
 					...(writes.length > 0 ? [`${listed(writes)}${reads.length > 0 ? "" : " locked"} against writes`] : []),
 				].join(", and ")
-	const unnamed = `this file's DROP … CASCADE locks what depends on ${listed(cascades)}, which only check on a postgres:// devUrl names`
-	const says = [...(names.length > 0 ? [`this file holds ${holding}`] : []), ...(cascades.length > 0 ? [unnamed] : [])]
+	const says = [...(names.length > 0 ? [`this file holds ${holding}`] : []), ...unseen]
 	return [
 		`${validate.slice(0, -1)} (scans ${table} while ${says.join(", and ")}; those locks last to the file's COMMIT; validate in a later file)`,
 	]
 }
 
-export { heldBy, warningOf }
+export { heldBy, type Unnamed, warningOf }

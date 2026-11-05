@@ -11,7 +11,7 @@ import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { withScratchDb } from "../support/pg.ts"
-import { heldBy, warningOf } from "../support/pg-locks.ts"
+import { heldBy, type Unnamed, warningOf } from "../support/pg-locks.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -80,13 +80,16 @@ const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> 
 	["ALTER TABLE ev DETACH PARTITION ev_old;", { ev: READS, ev_old: READS, users: WRITES }],
 ]
 
-// lookup-table: the CASES that drop with CASCADE, whose dependents the map names no table of, by the objects it names
-const CASCADED: Readonly<Record<string, readonly string[]>> = {
-	"ALTER TABLE users DROP COLUMN id CASCADE;": ["users.id"],
-	"ALTER TABLE users DROP CONSTRAINT users_pkey CASCADE;": ["users_pkey on users"],
-	"ALTER TABLE users_copy DROP CONSTRAINT users_copy_pkey CASCADE;": ["users_copy_pkey on users_copy"],
-	"DROP TABLE orders CASCADE;": ["orders"],
-	"DROP TABLE users CASCADE;": ["users"],
+// lookup-table: the CASES whose map says it locks what it cannot name: the objects a DROP … CASCADE dropped, and a dropped table's sequences
+const UNNAMED: Readonly<Record<string, Unnamed>> = {
+	"ALTER TABLE users DROP COLUMN id CASCADE;": { cascades: ["users.id"] },
+	"ALTER TABLE users DROP CONSTRAINT users_pkey CASCADE;": { cascades: ["users_pkey on users"] },
+	"ALTER TABLE users_copy DROP CONSTRAINT users_copy_pkey CASCADE;": { cascades: ["users_copy_pkey on users_copy"] },
+	"DROP TABLE ev;": { others: ["the sequences ev owns"] },
+	"DROP TABLE ev_old;": { others: ["the sequences ev_old owns"] },
+	"DROP TABLE items;": { others: ["the sequences items owns"] },
+	"DROP TABLE orders CASCADE;": { cascades: ["orders"], others: ["the sequences orders owns"] },
+	"DROP TABLE users CASCADE;": { cascades: ["users"], others: ["the sequences users owns"] },
 }
 
 describe("a VALIDATE after a statement that locks through a foreign key on Postgres 17 (gaps 1–4 of 0005)", () => {
@@ -96,7 +99,7 @@ describe("a VALIDATE after a statement that locks through a foreign key on Postg
 			await withScratchDb(async (url) => {
 				expect(await heldBy(url, [HISTORY], `${first}\n${VALIDATE}\n`)).toEqual(held)
 			})
-			expect(validateWarnings(first)).toEqual(warningOf({ table: "audit", validate: VALIDATE }, held, CASCADED[first]))
+			expect(validateWarnings(first)).toEqual(warningOf({ table: "audit", validate: VALIDATE }, held, UNNAMED[first]))
 		},
 		60_000,
 	)

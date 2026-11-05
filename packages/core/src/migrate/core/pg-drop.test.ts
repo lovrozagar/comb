@@ -39,6 +39,8 @@ const COMMANDS: Array<[string, string | undefined]> = [
 	["ALTER TABLE app.orders DROP COLUMN x CASCADE", "app.orders.x"],
 	["ALTER TABLE orders DROP CONSTRAINT k CASCADE", "k on orders"],
 	["ALTER TYPE pair DROP ATTRIBUTE z CASCADE", "pair.z"],
+	["ALTER TYPE pair ADD ATTRIBUTE z int CASCADE", undefined],
+	["ALTER TYPE pair ALTER ATTRIBUTE z TYPE bigint CASCADE", undefined],
 	["ALTER TABLE orders DROP COLUMN x", undefined],
 	["ALTER TABLE orders ADD COLUMN y int", undefined],
 ]

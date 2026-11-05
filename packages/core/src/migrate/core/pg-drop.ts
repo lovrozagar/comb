@@ -4,7 +4,9 @@
  * policy's, a CHECK's or a view's expression among them, and locks its table. The history's facts
  * hold no sequence, default or expression's dependencies, so no reading of the file's text names
  * those tables; the map names the object dropped in their place (pg-held.ts), and check on a
- * postgres:// devUrl names what Postgres holds (pg-replay-held.ts).
+ * postgres:// devUrl names what Postgres holds (pg-replay-held.ts). So with what else a statement
+ * locks that no fact names: the sequences a dropped table or column owns, the tables made OF a type
+ * an ALTER TYPE … CASCADE alters, and everything a DROP or REASSIGN OWNED's roles own.
  */
 import { EXCLUSIVE_ALL, keyLocks, type Lock, reachLocks } from "./pg-lock.ts"
 import { type Facts, keyOf, names, type Node, tableOf, typed, typeOf } from "./pg-nodes.ts"
@@ -83,9 +85,65 @@ const cascaded = (node: Node, schema: string): string[] =>
 
 /** The column or constraint an ALTER's DROP … CASCADE command drops, as the file names it; undefined for any other */
 function commandCascaded(node: Node, cmd: Node, schema: string): string | undefined {
-	if (cmd["behavior"] !== "DROP_CASCADE") return undefined
+	if (cmd["behavior"] !== "DROP_CASCADE" || !/^AT_Drop(?:Column|Constraint)$/.test(cmd["subtype"] as string))
+		return undefined
 	const { key } = tableOf(node["relation"], schema)
 	return cmd["subtype"] === "AT_DropConstraint" ? `${String(cmd["name"])} on ${key}` : `${key}.${String(cmd["name"])}`
 }
 
-export { cascaded, commandCascaded, dropLocks, RELATIONS, typedTables }
+/* the relations whose columns own a sequence, serial, identity or OWNED BY, which their DROP drops */
+const OWNING = /^OBJECT_(?:TABLE|FOREIGN_TABLE)$/
+
+/** What a DROP of the relation keyed `key`, or of a column of it, locks that no fact names */
+const owned = (key: string): string => `the sequences ${key} owns`
+
+/** What an ALTER TYPE … CASCADE of the type a node's relation names locks that no fact names */
+const ofType = (node: Node, schema: string): string => `the tables of type ${tableOf(node["relation"], schema).key}`
+
+/** A role a DROP or REASSIGN OWNED names, as the file writes it: its name, or its keyword */
+const roleOf = ({ RoleSpec: role }: { RoleSpec: Node }): string =>
+	role["roletype"] === "ROLESPEC_CSTRING" ? String(role["rolename"]) : String(role["roletype"]).slice(9)
+
+/** The facts, and the relations the file made, which no other session sees */
+type Seen = { facts: Facts; made: ReadonlySet<string> }
+
+/**
+ * What a DROP or REASSIGN OWNED locks, everything its roles own, which no fact names and check's
+ * replay leaves out, as it reaches past the database the replay runs in; none for any other statement
+ */
+const ownedBy = (type: string, node: Node): string[] =>
+	type === "DropOwnedStmt" || type === "ReassignOwnedStmt"
+		? (node["roles"] as Array<{ RoleSpec: Node }>).map((role) => `everything ${roleOf(role)} owns`)
+		: []
+
+/**
+ * What a statement other than an ALTER locks that no fact names: a dropped table's sequences, and
+ * the tables of a type a RENAME ATTRIBUTE … CASCADE alters; none for any other
+ */
+function unseen(type: string, node: Node, { facts, made }: Seen): string[] {
+	if (type === "RenameStmt")
+		return node["renameType"] === "OBJECT_ATTRIBUTE" && node["behavior"] === "DROP_CASCADE"
+			? [ofType(node, facts.schema)]
+			: []
+	if (type !== "DropStmt" || !OWNING.test(node["removeType"] as string)) return []
+	return dropped(node)
+		.map((parts) => keyOf(parts, facts.schema))
+		.filter((key) => !made.has(key))
+		.map(owned)
+}
+
+/**
+ * What an ALTER's command locks that no fact names: the sequences of a dropped column that owns one,
+ * or that the history does not show, and the tables of a type an ALTER TYPE … CASCADE alters;
+ * undefined for any other
+ */
+function commandUnseen(node: Node, cmd: Node, { facts, made }: Seen): string | undefined {
+	if (node["objtype"] === "OBJECT_TYPE")
+		return cmd["behavior"] === "DROP_CASCADE" ? ofType(node, facts.schema) : undefined
+	const { key } = tableOf(node["relation"], facts.schema)
+	if (cmd["subtype"] !== "AT_DropColumn" || !OWNING.test(node["objtype"] as string) || made.has(key)) return undefined
+	const column = facts.columnTypes.get(key)?.get(String(cmd["name"]))
+	return column === undefined || column.owns === true ? owned(key) : undefined
+}
+
+export { cascaded, commandCascaded, commandUnseen, dropLocks, ownedBy, RELATIONS, typedTables, unseen }

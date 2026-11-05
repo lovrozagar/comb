@@ -21,19 +21,44 @@ import {
 	SHARE_ALL,
 	truncateLocks,
 } from "./pg-lock.ts"
-import { cascaded, commandCascaded, dropLocks, RELATIONS, typedTables } from "./pg-drop.ts"
+import {
+	cascaded,
+	commandCascaded,
+	commandUnseen,
+	dropLocks,
+	ownedBy,
+	RELATIONS,
+	typedTables,
+	unseen,
+} from "./pg-drop.ts"
 import type { Calls, Locked } from "./pg-held-types.ts"
 import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf } from "./pg-nodes.ts"
 
 /**
  * The relations the open transaction holds locked, by key, each with whether reads wait too, the
- * relations it made, the tables that call each sequence it holds, as Postgres said it last, and the
- * objects a DROP … CASCADE of it dropped, whose dependents' tables no fact names (pg-drop.ts)
+ * relations it made, the tables that call each sequence it holds, as Postgres said it last, the
+ * objects a DROP … CASCADE of it dropped, whose dependents' tables no fact names, what else it locks
+ * that no fact names, and what a DROP or REASSIGN OWNED locks, which check's replay leaves out, so its
+ * measure does not replace it (pg-drop.ts)
  */
-type Held = { calls: Map<string, Calls>; cascades: Set<string>; locks: Map<string, boolean>; made: Set<string> }
+type Held = {
+	calls: Map<string, Calls>
+	cascades: Set<string>
+	locks: Map<string, boolean>
+	made: Set<string>
+	owners: Set<string>
+	unseen: Set<string>
+}
 
 /** A transaction's start: nothing held, nothing made */
-const heldStart = (): Held => ({ calls: new Map(), cascades: new Set(), locks: new Map(), made: new Set() })
+const heldStart = (): Held => ({
+	calls: new Map(),
+	cascades: new Set(),
+	locks: new Map(),
+	made: new Set(),
+	owners: new Set(),
+	unseen: new Set(),
+})
 
 /** `held` at a COMMIT, which releases every lock and shows what the file made to other sessions */
 function clearHeld(held: Held): void {
@@ -41,13 +66,16 @@ function clearHeld(held: Held): void {
 	held.cascades.clear()
 	held.locks.clear()
 	held.made.clear()
+	held.owners.clear()
+	held.unseen.clear()
 }
 
-/** `held` as Postgres held it, `locked` read from pg_locks, in place of what the file's text says */
+/** `held` as Postgres held it, `locked` read from pg_locks, in place of what the file's text says but what the replay left out */
 function measured(held: Held, locked: Locked): void {
 	held.locks.clear()
 	held.calls.clear()
 	held.cascades.clear()
+	held.unseen.clear()
 	for (const [key, reads] of locked.locks) held.locks.set(key, reads)
 	for (const [key, calls] of locked.calls) held.calls.set(key, calls)
 }
@@ -102,11 +130,13 @@ function alterLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	return RELATIONS.test(node["objtype"] as string) ? commandLocks(node, cmd, facts) : []
 }
 
-/** `held` after one command of an ALTER: its locks, and the column or constraint a DROP … CASCADE of it drops */
+/** `held` after one command of an ALTER: its locks, the column or constraint a DROP … CASCADE of it drops, and what else it locks unnamed */
 function holdCommand(node: Node, cmd: Node, { facts, held }: { facts: Facts; held: Held }): void {
 	hold(held, alterLocks(node, cmd, facts))
 	const dropped = commandCascaded(node, cmd, facts.schema)
 	if (dropped !== undefined) held.cascades.add(dropped)
+	const other = commandUnseen(node, cmd, { facts, made: held.made })
+	if (other !== undefined) held.unseen.add(other)
 }
 
 /** The locks a LOCK takes by its mode, on a view's every relation through its query too */
@@ -254,6 +284,8 @@ function holdStatement(type: string, node: Node, { facts, held }: { facts: Facts
 	if (made !== undefined) held.made.add(made)
 	hold(held, STATEMENTS[type]?.(node, facts) ?? [])
 	if (type === "DropStmt") for (const object of cascaded(node, facts.schema)) held.cascades.add(object)
+	for (const other of unseen(type, node, { facts, made: held.made })) held.unseen.add(other)
+	for (const owned of ownedBy(type, node)) held.owners.add(owned)
 	/* what the file holds, and what it made, which no other session sees, follow a rename or a move */
 	const to = movedTo(type, node, facts)
 	if (to !== undefined) carry(held, tableOf(node["relation"], facts.schema).key, to)

@@ -11,16 +11,17 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { withScratchDb } from "../support/pg.ts"
-import { CASES, HISTORY, MAPPED, VALIDATE } from "../support/held-cases.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { CASES, HISTORY, MAPPED, OWNING, owning, VALIDATE } from "../support/held-cases.ts"
+import { query, testRoles } from "../support/pg-roles.ts"
 import { heldBy, warningOf } from "../support/pg-locks.ts"
 
 beforeAll(loadPostgresParser)
 
-/** comb's warnings of the VALIDATE after `first`, in its file */
-const validateWarnings = (first: string): string[] =>
+/** comb's warnings of the VALIDATE after `first`, in its file, after `history` */
+const validateWarnings = (first: string, history = HISTORY): string[] =>
 	classifyMigration(`${first}\n${VALIDATE}\n`, {
-		before: extractSchema(HISTORY, undefined, "postgres"),
+		before: extractSchema(history, undefined, "postgres"),
 		dialect: "postgres",
 	}).lockWarnings.filter((warning) => warning.startsWith(`${VALIDATE.slice(0, -1)} (`))
 
@@ -32,8 +33,23 @@ describe("a VALIDATE after a statement of its file that holds a strong lock on P
 				expect(await heldBy(url, [HISTORY], `${first}\n${VALIDATE}\n`)).toEqual(held)
 			})
 			const map = MAPPED[first]
-			expect(validateWarnings(first)).toEqual(
-				warningOf({ table: "users", validate: VALIDATE }, map?.held ?? held, map?.cascades),
+			expect(validateWarnings(first)).toEqual(warningOf({ table: "users", validate: VALIDATE }, map?.held ?? held, map))
+		},
+		60_000,
+	)
+
+	it.each(OWNING)(
+		"after %s on a role, warns of what the role owns, which only Postgres names",
+		async (statement, held) => {
+			const [role] = testRoles("comb_t_own")
+			await query(pgUrl(), `CREATE ROLE ${role}`)
+			const { history, mapped } = owning(role)
+			const first = statement(role)
+			await withScratchDb(async (url) => {
+				expect(await heldBy(url, [HISTORY, history], `${first}\n${VALIDATE}\n`)).toEqual(held)
+			})
+			expect(validateWarnings(first, `${HISTORY}\n${history}`)).toEqual(
+				warningOf({ table: "users", validate: VALIDATE }, mapped.held, mapped),
 			)
 		},
 		60_000,
