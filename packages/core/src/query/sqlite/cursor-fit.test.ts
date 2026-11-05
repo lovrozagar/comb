@@ -321,3 +321,43 @@ describe("a SQLite numeric() key's cursor value (B2-4 of area B; sibling: libsql
 		for (const value of [2n, 0.1]) expect(fits("name", value), String(value)).toBe(false)
 	})
 })
+
+/* B2-3 of area B: a SQLite timestamp holding TEXT carries that text on a list that reads the key back */
+describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's carried text)", () => {
+	const post = sqliteTable("post", {
+		m: integer("m", { mode: "timestamp_ms" }),
+		n: integer("n"),
+		s: integer("s", { mode: "timestamp" }),
+	})
+	const flagged = (column: Parameters<typeof assertCursorFits>[0][number], value: unknown, flag: boolean) => {
+		try {
+			assertCursorFits([column], [value], { carried: () => flag, table: post })
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	it("refers back on either mode of a timestamp the row supplies, and on no other integer", () => {
+		expect(refersBack(post.s, post)).toBe(true)
+		expect(refersBack(post.m, post)).toBe(true)
+		expect(refersBack(post.n, post)).toBe(false)
+	})
+
+	it("fits a TEXT the cursor flags as carried on a timestamp it reads back, and no unflagged text, bound as read, or other column", () => {
+		expect(flagged(post.s, "a-text", true)).toBe(true)
+		expect(flagged(post.m, "b,text", true)).toBe(true)
+		expect(flagged(post.s, "a-text", false)).toBe(false)
+		expect(flagged(post.n, "a-text", true)).toBe(false)
+		expect(() =>
+			assertCursorFits([post.s], ["a-text"], { asRead: () => true, carried: () => true, table: post }),
+		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
+	})
+
+	it("binds a carried TEXT as itself, past the Date mapper, and an unflagged value as before", () => {
+		expect(shown(boundCarried(post.s, "1970-01-01T00:00:01Z", true))).toEqual(["1970-01-01T00:00:01Z"])
+		expect(shown(boundCarried(post.m, "a-text", true))).toEqual(["a-text"])
+		expect(boundCarried(post.s, "a-text", false)).toBe("a-text")
+		expect(boundCarried(post.n, "a-text", true)).toBe("a-text")
+	})
+})

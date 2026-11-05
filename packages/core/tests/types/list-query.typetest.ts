@@ -135,6 +135,7 @@ type Listed = {
 	_combId?: unknown
 	_combKeyTexts?: string
 	_combKeyTypes?: string
+	_combTextKeys?: string
 	_total?: number
 	id: number
 	title: string | null

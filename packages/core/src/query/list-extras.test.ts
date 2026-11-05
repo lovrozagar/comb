@@ -150,3 +150,39 @@ describe("carriedTexts (comb-9d's AB2 ruling; sibling: typedKeys' carried text)"
 		expect(carriedTexts({ _combId: 1, k: "12", name: "x" }, SORT)).toEqual(new Set())
 	})
 })
+
+/* B2-3 of area B: a SQLite timestamp key holding TEXT, which drizzle reads as a Date and SQLite orders after every number */
+describe("typedKeys, carriedTexts and malformed: _combTextKeys (B2-3 of area B; sibling: _combKeyTexts)", () => {
+	const invalid = new Date(Number.NaN)
+
+	it("puts a read-back key's TEXT in place of the Date, and flags it as carried, a comma in it included", () => {
+		const row = { _combId: 1, _combTextKeys: JSON.stringify(["b,text", null]), k: invalid, name: "a" }
+		expect(typedKeys(row, SORT)).toEqual({ ...row, k: "b,text" })
+		expect(carriedTexts(row, SORT)).toEqual(new Set(["k"]))
+		const numbered = { _combId: 1, _combTextKeys: JSON.stringify([null, null]), k: new Date(2000), name: "a" }
+		expect(typedKeys(numbered, SORT)).toEqual(numbered)
+		expect(carriedTexts(numbered, SORT)).toEqual(new Set())
+	})
+
+	it("answers a 500 naming the key where an as-read list marked a TEXT, under the classes or none", () => {
+		const cause = expect.stringContaining("k stores TEXT")
+		for (const row of [
+			{ _combId: 1, _combKeyTexts: "!,", k: invalid, name: "a" },
+			{ _combId: 1, _combKeyTexts: "!,", _combKeyTypes: "text,text,integer", k: invalid, name: "a" },
+		])
+			expect(() => typedKeys(row, SORT)).toThrow(
+				expect.objectContaining({ cause, errorKey: "sort_not_wired", status: 500 }),
+			)
+	})
+
+	it("takes a JSON array of a TEXT or null a sort key, or none empty, and names any other value or one rendered by hand as its alias", () => {
+		expect(malformed({ _combId: 1, _combTextKeys: '["a,b",null]' }, SORT)).toBeUndefined()
+		/* listOptions selects it empty on a table with no key that holds TEXT */
+		expect(malformed({ _combId: 1, _combTextKeys: "" }, SORT)).toBeUndefined()
+		const none = { _combId: 1, _combTextKeys: "", k: new Date(2000), name: "a" }
+		expect(typedKeys(none, SORT)).toBe(none)
+		expect(carriedTexts(none, SORT)).toEqual(new Set())
+		for (const texts of ['["a"]', '["a",1]', '{"0":"a","1":null}', "[a,b]", "_combTextKeys", 7])
+			expect(malformed({ _combId: 1, _combTextKeys: texts }, SORT)).toBe(`_combTextKeys ${JSON.stringify(texts)}`)
+	})
+})

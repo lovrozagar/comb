@@ -22,7 +22,7 @@ import type * as z from "zod"
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
  * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
-type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_total"
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_combTextKeys" | "_total"
 
 /**
  * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
@@ -31,7 +31,14 @@ type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyType
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never
 
 /** The columns a builder selects for paginate alone, stripped from every row it returns */
-const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTexts", "_combKeyTypes", "_total"]
+const EXTRAS: readonly ListExtra[] = [
+	COMB_ID,
+	"_combAnchorGone",
+	"_combKeyTexts",
+	"_combKeyTypes",
+	"_combTextKeys",
+	"_total",
+]
 
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationResponse = z.output<typeof paginationResponseSchema>

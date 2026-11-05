@@ -82,6 +82,8 @@ type ListExtras = Partial<{
 	_combKeyTypes: SQL.Aliased<string>
 	/** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds (QL2 of r22b) */
 	_combKeyTexts: SQL.Aliased<string>
+	/** each SQLite timestamp key's TEXT where the list reads it back and the row holds TEXT, a JSON array with null for any other key, never comma-joined (B2-3 of area B) */
+	_combTextKeys: SQL.Aliased<string>
 	/** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
 	_total: SQL.Aliased<number>
 }>

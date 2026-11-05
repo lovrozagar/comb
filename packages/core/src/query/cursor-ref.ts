@@ -32,7 +32,8 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { CursorRef, effectiveNulls, lossy } from "./cursor.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
-import { inSeconds, readsBack } from "./sqlite/cursor-fit.ts"
+import { readsBack } from "./sqlite/cursor-fit.ts"
+import { inSeconds } from "./sqlite/timestamp-column.ts"
 import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlite/keyset.ts"
 
 /* drizzle's own keys for a table's name before any alias, and its schema */

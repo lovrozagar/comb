@@ -52,9 +52,10 @@ function cursorWhere({ cursor: given, dialect, keys, merged, options, sort, tabl
 	   every key of a merged list, whose row is on one shard alone and which carries a seconds key's seconds (AB3) */
 	const asRead = (i: number) =>
 		i < columns.length && (merged === true || table === undefined || !readsBack(columns[i] as SQLWrapper, table))
-	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], { asRead, table })
+	const carriedAt = (i: number) => cursor.carried[i] === true
+	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], { asRead, carried: carriedAt, table })
 	const id = bindableIn(dialect, tiebreak.column, cursor.id) as CursorId
-	const carried = cursor.values.map((value, i) => boundCarried(columns[i], value, cursor.carried[i] === true))
+	const carried = cursor.values.map((value, i) => boundCarried(columns[i], value, carriedAt(i)))
 	const bound = boundForKeys(dialect, columns, carried).map((value, i) =>
 		asRead(i) ? boundAsRead(columns[i], value) : value,
 	)

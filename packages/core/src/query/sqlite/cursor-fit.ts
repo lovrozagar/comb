@@ -12,6 +12,7 @@ import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
+import { carriedText, holdsText, inSeconds } from "./timestamp-column.ts"
 
 /**
  * What a column of each drizzle `dataType` family holds, given its full `dataType`. Keyed by drizzle's
@@ -127,7 +128,7 @@ function readsBack(column: SQLWrapper, table: object | undefined): boolean {
  * no list mints a cursor it then refuses.
  */
 const refersBack = (column: SQLWrapper, table: object | undefined): boolean =>
-	readsBack(column, table) && (!is(column, Column) || column.dataType.startsWith("string"))
+	readsBack(column, table) && (!is(column, Column) || column.dataType.startsWith("string") || holdsText(column))
 
 /**
  * Whether `value` is a time key's stored value as a list that binds the key as read carries it (QL2
@@ -143,18 +144,20 @@ const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
  * (`asRead`) its stored value too (carriedTime); a key declared as time, a Date or the epoch
  * milliseconds its row selected; any other SQL expression (a derived sort) only what every driver
  * binds: a string, a number, a bigint or a boolean (bun:sqlite and D1 refuse a Date that libsql would
- * bind); a value carried by reference, a key that reads it back (refersBack)
+ * bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite timestamp
+ * the list reads back the TEXT it carried (`carried`), which the row held (B2-3 of area B)
  */
 function fits(
 	column: SQLWrapper,
 	value: unknown,
-	{ asRead, table }: { asRead: boolean; table: object | undefined },
+	{ asRead, carried, table }: { asRead: boolean; carried: boolean; table: object | undefined },
 ): boolean {
 	if (value === null) return true
 	if (value instanceof CursorRef) return refersBack(column, table)
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (asRead && carriedTime(column, value)) return true
 	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
+	if (carriedText(column, value, { asRead, carried })) return true
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
 	return (
 		typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
@@ -199,16 +202,11 @@ const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
  * like a number included; a cursor with no flag, as every released comb minted, holds only those
  */
 function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
+	if (carriedText(column, value, { asRead: false, carried })) return sql`${value}`
 	if (!carried || typeof value !== "string" || !NUMERIC_TEXT.test(value)) return value
 	if (readsRounded(column)) return sql`${value}::numeric`
 	return carriesOpaque(column) ? sql`${value}` : value
 }
-
-/** Whether `column` is a seconds-mode SQLite timestamp: drizzle binds a Date there floored to the second */
-const inSeconds = (column: SQLWrapper | undefined): boolean =>
-	is(column, SQLiteColumn) &&
-	column.columnType === "SQLiteTimestamp" &&
-	(column as unknown as { mode?: unknown }).mode === "timestamp"
 
 /**
  * A Date on a seconds-mode timestamp key as the seconds it holds, to the millisecond (U10): drizzle
@@ -259,15 +257,22 @@ const boundForKeys = (dialect: ListDialect, columns: readonly SQLWrapper[], valu
 
 /**
  * Throw a 400 unless every cursor value, the tiebreak id last, fits its column, a reference read back
- * from `at.table`; `at.asRead` says which keys bind as read, where a time key may carry its stored value
+ * from `at.table`; `at.asRead` says which keys bind as read, where a time key may carry its stored value,
+ * and `at.carried` which the cursor flags as the stored text the list carried
  */
 function assertCursorFits(
 	columns: readonly SQLWrapper[],
 	values: readonly unknown[],
-	at: { asRead?: ((index: number) => boolean) | undefined; table?: object | undefined } = {},
+	at: {
+		asRead?: ((index: number) => boolean) | undefined
+		carried?: ((index: number) => boolean) | undefined
+		table?: object | undefined
+	} = {},
 ): void {
-	const { asRead = () => false, table } = at
-	if (columns.every((column, index) => fits(column, values[index], { asRead: asRead(index), table }))) return
+	const { asRead = () => false, carried = () => false, table } = at
+	const each = (column: SQLWrapper, index: number) =>
+		fits(column, values[index], { asRead: asRead(index), carried: carried(index), table })
+	if (columns.every(each)) return
 	throw new CombError({ cause: "Invalid cursor", errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 }
 
@@ -286,7 +291,6 @@ export {
 	boundForKeys,
 	carriesOpaque,
 	DateKey,
-	inSeconds,
 	readsBack,
 	readsRounded,
 	refersBack,

@@ -14,7 +14,7 @@ import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { assertCursorFits, bindableOn, boundCarried } from "./sqlite/cursor-fit.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
-import { keyTextsSQL } from "./sqlite/list-finish.ts"
+import { keyTextsSQL, textKeysSQL } from "./sqlite/key-texts.ts"
 import { applySelect, type ListExtra, type ListPagination, paginate, paginationOf } from "./pagination.ts"
 import { assertLimitWithin, assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
@@ -36,6 +36,8 @@ type DrizzleListOptions = {
 		_combAnchorGone: (table: RelationalTable) => SQL<number>
 		/* each sort key's stored text where its read rounds it (QL3 of r22b); on every list with a sort */
 		_combKeyTexts: (table: RelationalTable) => SQL<string>
+		/* each SQLite timestamp key's TEXT, which the next cursor binds as itself (B2-3 of area B); on every list with a sort */
+		_combTextKeys: (table: RelationalTable) => SQL<string>
 		_total: (table: RelationalTable) => SQL<number>
 	}>
 	/** How `paginate` pages the rows these options read (pagination.ts) */
@@ -95,6 +97,18 @@ function tiebreakOf(table: RelationalTable): SQL {
 const countOver = (): SQL<number> => sql<number>`cast(count(*) over() as integer)`
 
 /**
+ * The extras that carry a key's text where its read rounds it, and a SQLite timestamp's TEXT, which
+ * the next cursor binds (QL3 of r22b, B2-3 of area B); none on a list with no sort
+ */
+function textsOf(sort: readonly SortField[]) {
+	if (sort.length === 0) return {}
+	return {
+		_combKeyTexts: (table: RelationalTable) => keyTextsSQL(keysOn(table, sort).keys, "postgres"),
+		_combTextKeys: (table: RelationalTable) => textKeysSQL(keysOn(table, sort).keys),
+	}
+}
+
+/**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
  * list query schema's output, the cursor opened under `options`: the app's secret and the list's
  * scope. The limit is one over the page so `paginate` can tell there is more.
@@ -111,11 +125,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		return orderByKeys(keys, tiebreak)
 	}
 	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3); the return checks `extras` */
-	/* a key whose read rounds it carries its text, which the next cursor binds (QL3 of r22b) */
-	const texts =
-		sort.length === 0
-			? {}
-			: { _combKeyTexts: (table: RelationalTable) => keyTextsSQL(keysOn(table, sort).keys, "postgres") }
+	const texts = textsOf(sort)
 	const base = <E extends object>(given: E) => {
 		const extras = { ...given, ...texts }
 		return {
@@ -139,7 +149,9 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	const positionOn = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
-		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
+		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id], {
+			carried: (i) => cursor.carried[i] === true,
+		})
 		const id = bindableOn(tiebreak.column, cursor.id) as CursorId
 		/* a value the keyset reads from the row is anchored; the others bind as their keys compare them */
 		const values = anchored(

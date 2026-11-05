@@ -111,6 +111,8 @@ type ListExtras = Partial<{
     _combKeyTypes: SQL.Aliased<string>;
     /** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds (QL2 of r22b) */
     _combKeyTexts: SQL.Aliased<string>;
+    /** each SQLite timestamp key's TEXT where the list reads it back and the row holds TEXT, a JSON array with null for any other key, never comma-joined (B2-3 of area B) */
+    _combTextKeys: SQL.Aliased<string>;
     /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
     _total: SQL.Aliased<number>;
 }>;
@@ -404,7 +406,7 @@ import type * as z from "zod";
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
  * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
-type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_total";
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_combTextKeys" | "_total";
 /**
  * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
  * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
@@ -852,11 +854,6 @@ declare function openSealed(cursor: string, options: CursorOptions): Uint8Array 
 export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal };
 
 // query/list-extras.d.ts
-/**
- * The values of the extras a builder selects for paginate, as a SQLite or Postgres driver reads them:
- * a number, a bigint, or a decimal string (libsql's intMode "string", Q2 of r19). An extra rendered
- * by hand as its own alias reads as that string, which no value of it is (Q4 of r18).
- */
 import type { SortField } from "./types.ts";
 /** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
 declare const COMB_ID: "_combId";
@@ -883,12 +880,13 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
  * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b). A text key that looks like a number stays
+ * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite timestamp holding TEXT the TEXT
+ * `_combTextKeys` carries (B2-3 of area B). A text key that looks like a number stays
  * text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
 /**
- * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` carried in
+ * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` or `_combTextKeys` carried in
  * place of the value as read (comb-9d's AB2 ruling), which a cursor binds as itself, past the
  * column's mapper; every other key binds through it, a text key that looks like a number included
  */

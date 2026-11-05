@@ -13,9 +13,11 @@ import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { carriesOpaque, DateKey, inSeconds, readsBack, readsRounded, refersBack } from "./cursor-fit.ts"
+import { DateKey, readsBack, refersBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
+import { familyOf, keyTextsSQL, storageOf, storedTextOf, textKeysSQL } from "./key-texts.ts"
 import type { SortKey } from "./keyset.ts"
+import { holdsText } from "./timestamp-column.ts"
 
 type Keyset = {
 	/** Present only when every key is a real column a predicate can compare. */
@@ -120,77 +122,6 @@ function withExtras<E extends object>(list: Finish, extras: E, window = list.par
 const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} : { _combId: combId(tiebreak.column) })
 
 /**
- * The storage class SQLite holds a key in, a REAL ±Infinity as `+inf` or `-inf`, which D1's JSON
- * transport reads as null (Q3 of r20)
- */
-const storageOf = (column: SQLWrapper): SQL =>
-	sql`case typeof(${column}) when 'real' then case ${column} when 9e999 then '+inf' when -9e999 then '-inf' else 'real' end else typeof(${column}) end`
-
-/* whether `column`'s Postgres type is one a driver reads as a JS Date, which keeps milliseconds where it keeps microseconds */
-const isTime = (column: SQLWrapper): SQL =>
-	sql`pg_typeof(${column}) in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype)`
-
-const floatTypes = () => sql`'double precision'::regtype, 'real'::regtype`
-const fixedTypes = () => sql`'smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype`
-
-/**
- * Whether a key's type is a domain whose base, through domains of domains, is one of `types`: none is
- * built in (below 16384, FirstNormalObjectId), so the domains are read only for a key of another type
- */
-const isDomainOver = (column: SQLWrapper, types: SQL): SQL =>
-	sql`(pg_typeof(${column})::oid >= 16384 and pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in (${types}))))`
-
-/**
- * Postgres's family of a key: `float` for a double precision or real, a double the driver reads
- * exactly; `fixed` for an integer or numeric, which a driver reading it as a number past 2^53
- * rounds; `other` for any other type (Q2 of r21). A domain is its base's family, followed through
- * domains of domains (Q1 of r22; a domain over an integer or numeric is `fixed`, AB1 of area B).
- * `time` for a timestamp, timestamptz or date, whose stored value a list bound as read carries as
- * text (QL2 of r22b)
- */
-const familyOf = (column: SQLWrapper): SQL =>
-	sql`case when pg_typeof(${column}) in (${floatTypes()}) then 'float' when pg_typeof(${column}) in (${fixedTypes()}) then 'fixed' when ${isTime(column)} then 'time' when ${isDomainOver(column, floatTypes())} then 'float' when ${isDomainOver(column, fixedTypes())} then 'fixed' else 'other' end`
-
-/**
- * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
- * time: Postgres's own text of a timestamp, timestamptz or date, which it reads back as that type
- * (a column in string mode reads as that text already); SQLite's REAL seconds of a seconds-mode
- * timestamp at 17 significant digits, which a double reads back exactly (its integer seconds are
- * exact in a Date); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2)
- */
-function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean): SQL | null {
-	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
-	if (dialect === "sqlite")
-		return asRead && inSeconds(column)
-			? sql`case when typeof(${column}) in ('integer', 'real') then printf('%!.17g', ${column}) else '' end`
-			: null
-	if (column instanceof DateKey) return null
-	if (is(column, Column) && !carriesOpaque(column))
-		return asRead && column.dataType === "object date" ? sql`coalesce((${column})::text, '')` : null
-	const carried =
-		asRead && !carriesOpaque(column) ? sql`${isTime(column)} or ${roundsOnRead(column)}` : roundsOnRead(column)
-	return sql`coalesce(case when ${carried} then (${column})::text end, '')`
-}
-
-/**
- * Whether a Postgres expression's type is a number no driver reads exactly: a numeric or a domain over
- * one (QL3 of r22b). No other type carries its text, so none holds the comma keyTextsSQL joins on (AB1
- * of area B): a numeric's is digits, a sign, a point, NaN or Infinity; a time's is ISO in every DateStyle
- */
-const roundsOnRead = (column: SQLWrapper): SQL =>
-	sql`(pg_typeof(${column}) = 'numeric'::regtype or ${isDomainOver(column, sql`'numeric'::regtype`)})`
-
-/** Each of `keys`' stored text, comma-joined, empty for one no list carries; asRead keys carry their time too */
-function keyTextsSQL(
-	keys: readonly SortKey[],
-	dialect: ListDialect,
-	asRead: (column: SQLWrapper) => boolean = () => false,
-): SQL<string> {
-	const each = keys.map(({ column }) => storedTextOf(dialect, column, asRead(column)) ?? sql`''`)
-	return sql<string>`${sql.join(each, sql` || ',' || `)}`
-}
-
-/**
  * The extra that carries each sort key's stored time, comma-joined, empty for a key the list reads
  * from its anchor row or that is no time; none where no key is one. A merged list carries it too, and
  * compares a seconds key by the seconds each row stored, which its Date rounds (AB3 of area B)
@@ -199,6 +130,13 @@ function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	const asRead = (column: SQLWrapper) => boundAsRead(list, column)
 	if (keys.every(({ column }) => storedTextOf(list.dialect, column, asRead(column)) === null)) return {}
 	return { _combKeyTexts: keyTextsSQL(keys, list.dialect, asRead).as("_combKeyTexts") }
+}
+
+/** The extra that carries each SQLite timestamp key's TEXT the list reads back (textKeysSQL); none where no key is one */
+function textKeysOf(list: Finish, keys: readonly SortKey[]): ListExtras {
+	const held = (column: SQLWrapper) => holdsText(column) && !boundAsRead(list, column)
+	if (list.dialect !== "sqlite" || !keys.some(({ column }) => held(column))) return {}
+	return { _combTextKeys: textKeysSQL(keys, held).as("_combTextKeys") }
 }
 
 /** The extra that carries `classes`, one a sort key and the tiebreak's last, comma-joined */
@@ -229,10 +167,12 @@ function keyTypesOf(list: Finish): ListExtras {
 				}
 			: keyTextsOf(list, keys)
 	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
-	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return keyTextsOf(list, keys)
+	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn)))
+		return { ...keyTextsOf(list, keys), ...textKeysOf(list, keys) }
 	return {
 		...keyTypes([...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`]),
 		...keyTextsOf(list, keys),
+		...textKeysOf(list, keys),
 	}
 }
 
@@ -296,4 +236,4 @@ function finish(given: Finish): Finished {
 	return given.parsed.cursor ? finishCursor(given, given.parsed.cursor) : finishOffset(given)
 }
 
-export { finish, type Keyset, keyTextsSQL }
+export { finish, type Keyset }

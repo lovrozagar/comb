@@ -3,13 +3,14 @@
  * pagination a list with no keyset refuses. The builders' own behavior is build-list-query.test.ts's.
  */
 import { type SQL, sql } from "drizzle-orm"
-import { customType, numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
+import { numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { createCursor } from "../cursor-mint.ts"
 import { DateKey } from "./cursor-fit.ts"
-import { finish, keyTextsSQL } from "./list-finish.ts"
+import { keyTextsSQL } from "./key-texts.ts"
+import { finish } from "./list-finish.ts"
 
 const t = sqliteTable("t", { id: integer("id").primaryKey() })
 const tiebreak = { column: t.id, direction: "desc" as const }
@@ -56,6 +57,7 @@ const ev = sqliteTable("ev", {
 	n: integer("n"),
 })
 const side = sqliteTable("side", { at: integer("at", { mode: "timestamp" }) })
+const evMs = sqliteTable("ev_ms", { at: integer("at", { mode: "timestamp_ms" }), id: integer("id").primaryKey() })
 const pgEv = pgTable("pg_ev", {
 	at: timestamp("at", { precision: 6 }),
 	id: pgText("id").primaryKey(),
@@ -96,7 +98,7 @@ describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)"
 			{ column: ev.at, direction: "asc" },
 			{ column: ev.n, direction: "asc" },
 		])
-		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') then printf('%!.17g', "ev"."at") else '' end`
+		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') then printf('%!.17g', "ev"."at") when typeof("ev"."at") = 'text' then '!' else '' end`
 		expect(anchorless["_combKeyTexts"]).toBe(`${SECONDS} || ',' || ''`)
 		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }])["_combKeyTexts"]).toBeUndefined()
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })["_combKeyTexts"]).toBe(SECONDS)
@@ -117,6 +119,39 @@ describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)"
 		)
 		expect(joined["_combKeyTypes"]).toContain("typeof")
 		expect(joined["_combKeyTexts"]).toMatch(/^'' \|\| ',' \|\| case when typeof\("side"\."at"\)/)
+	})
+})
+
+describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
+	it("carries a read-back key's TEXT apart, a JSON array never comma-joined, and on an as-read list only its mark", () => {
+		const table = extrasOf(
+			"sqlite",
+			[
+				{ column: ev.at, direction: "asc" },
+				{ column: ev.n, direction: "asc" },
+			],
+			{ table: ev },
+		)
+		expect(table["_combTextKeys"]).toBe(`json_array(case when typeof("ev"."at") = 'text' then "ev"."at" end, null)`)
+		expect(table).not.toHaveProperty("_combKeyTexts")
+		const ms = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }], { table: evMs })
+		expect(ms["_combTextKeys"]).toBe(`json_array(case when typeof("ev_ms"."at") = 'text' then "ev_ms"."at" end)`)
+		/* bound as read: no text, only the mark a 500 names it by */
+		const anchorless = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }])
+		expect(anchorless).not.toHaveProperty("_combTextKeys")
+		expect(anchorless["_combKeyTexts"]).toBe(`case when typeof("ev_ms"."at") = 'text' then '!' else '' end`)
+		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
+			"_combTextKeys",
+		)
+		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }], { table: ev })).not.toHaveProperty("_combTextKeys")
+		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv })).not.toHaveProperty(
+			"_combTextKeys",
+		)
+		/* a Postgres derived list, anchored or not, selects none either */
+		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }])).not.toHaveProperty("_combTextKeys")
+		expect(extrasOf("postgres", [{ column: sql`${pgEv.at}`, direction: "asc" }], { table: pgEv })).not.toHaveProperty(
+			"_combTextKeys",
+		)
 	})
 })
 
@@ -165,73 +200,5 @@ describe("finish's carried numeric texts (QL3 of r22b; sibling: the stored times
 	it("carries an anchored Postgres expression's text only where its type may read rounded, not as a time", () => {
 		const own = extrasOf("postgres", [{ column: sql`${pgEv.at}`, direction: "asc" }], { table: pgEv as never })
 		expect(own["_combKeyTexts"]).toMatch(/^coalesce\(case when \(pg_typeof\("pg_ev"\."at"\) = 'numeric'::regtype or /)
-	})
-})
-
-/** keyTextsSQL of `column` alone on SQLite, bound as read, rendered */
-const render = (column: Parameters<typeof keyTextsSQL>[0][number]["column"]) =>
-	new SQLiteDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "sqlite", () => true)).sql
-
-/*
- * AB1 of area B: keyTextsSQL joins the carried texts on a comma, so a carried text must never hold
- * one. Only a numeric's text (digits, a sign, a point, NaN, Infinity), a time's (ISO under every
- * DateStyle) and SQLite's REAL seconds are carried; any other key is read exactly and carries ''.
- */
-describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area B; sibling: QL3's carriage)", () => {
-	const kinds = pgTable("kinds", {
-		amount: customType<{ data: number; driverData: string }>({ dataType: () => "amount" })("amount"),
-		at: timestamp("at", { mode: "string", precision: 6 }),
-		id: pgText("id").primaryKey(),
-		label: pgText("label"),
-		n: pgNumeric("n", { mode: "number" }),
-		when: timestamp("when", { precision: 6 }),
-	})
-	const sqliteKinds = sqliteTable("sqlite_kinds", {
-		at: integer("at", { mode: "timestamp" }),
-		label: integer("label"),
-	})
-	const pgKeys: Array<[string, Parameters<typeof keyTextsSQL>[0][number]["column"], boolean]> = [
-		["a numeric in number mode", kinds.n, true],
-		["a date-mode timestamp", kinds.when, true],
-		["a string-mode timestamp", kinds.at, false],
-		["a text column", kinds.label, false],
-		["an expression", sql`${kinds.label}`, true],
-		["a customType column", kinds.amount, true],
-	]
-	const TYPES_ALLOWED = ["numeric", "timestamp without time zone", "timestamp with time zone", "date"]
-
-	it.each([false, true])("names no type but a numeric or a time in a Postgres key's guard (as read: %s)", (asRead) => {
-		const rendered = new PgDialect().sqlToQuery(
-			keyTextsSQL(
-				pgKeys.map(([, column]) => ({ column, direction: "asc" as const })),
-				"postgres",
-				() => asRead,
-			),
-		).sql
-		const named = [...rendered.matchAll(/'([^']+)'::regtype/g)].map((match) => match[1])
-		expect(named.length).toBeGreaterThan(0)
-		expect(named.filter((type) => !TYPES_ALLOWED.includes(type as string))).toEqual([])
-	})
-
-	it.each(pgKeys)("carries %s's text or nothing, by its type", (_, column, carries) => {
-		const rendered = new PgDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "postgres", () => true)).sql
-		expect(rendered === "''").toBe(!carries)
-	})
-
-	/* AB2 of area B: its mapper may read a numeric as a number; a time binds through that mapper, so it carries none */
-	it("carries a Postgres customType column's text where it is a numeric alone, bound as read or not", () => {
-		for (const asRead of [false, true]) {
-			const rendered = new PgDialect().sqlToQuery(
-				keyTextsSQL([{ column: kinds.amount, direction: "asc" }], "postgres", () => asRead),
-			).sql
-			expect(rendered).toMatch(/^coalesce\(case when \(pg_typeof\("kinds"\."amount"\) = 'numeric'::regtype or /)
-			expect(rendered).not.toContain("timestamp")
-		}
-	})
-
-	it("carries SQLite's REAL seconds of a seconds-mode timestamp alone, as a number's digits", () => {
-		expect(render(sqliteKinds.at)).toContain("printf('%!.17g', ")
-		expect(render(sqliteKinds.label)).toBe("''")
-		expect(render(sql`${sqliteKinds.label}`)).toBe("''")
 	})
 })

@@ -33,6 +33,7 @@ export const OFF_UTC_UNIT = [
 	"src/query/cursor-ref.test.ts",
 	"src/query/cursor.test.ts",
 	"src/query/drizzle.test.ts",
+	"src/query/drizzle.text-keys.test.ts",
 	"src/query/keyset-budget.test.ts",
 	"src/query/list-extras.test.ts",
 	"src/query/merged.test.ts",
@@ -42,7 +43,9 @@ export const OFF_UTC_UNIT = [
 	"src/query/sqlite/cursor-fit.test.ts",
 	"src/query/sqlite/cursor-where.test.ts",
 	"src/query/sqlite/executor.test.ts",
+	"src/query/sqlite/key-texts.test.ts",
 	"src/query/sqlite/list-finish.test.ts",
+	"src/query/sqlite/timestamp-column.test.ts",
 	"src/sqlite/columns.meta.test.ts",
 	"src/sqlite/columns.test.ts",
 ]

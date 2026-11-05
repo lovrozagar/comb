@@ -52,6 +52,7 @@ function request(mix: readonly Kind[], order: readonly string[]) {
 	const row: Record<string, unknown> = {
 		_combId: 7,
 		_combKeyTexts: ",,",
+		_combTextKeys: "",
 		_total: 2,
 		id: 7,
 		r1: 1,

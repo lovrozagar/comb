@@ -3,6 +3,8 @@
  * a number, a bigint, or a decimal string (libsql's intMode "string", Q2 of r19). An extra rendered
  * by hand as its own alias reads as that string, which no value of it is (Q4 of r18).
  */
+import { CombError } from "../error.ts"
+import { combErrorKeys } from "../types.ts"
 import type { SortField } from "./types.ts"
 
 /** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
@@ -81,21 +83,66 @@ function storedValue(value: unknown, stored: KeyClass | undefined): unknown {
 	return stored === "real" && String(Number(value)) === value ? Number(value) : value
 }
 
+/** Whether `value` is the anchor-gone flag as a driver reads it: 0 or 1, as a number, a bigint, a decimal string or a boolean */
+function isFlag(value: unknown): boolean {
+	const read = unencoded(value)
+	return read === 0 || read === 1 || read === 0n || read === 1n || typeof read === "boolean"
+}
+
+/** Each extra a builder selects, and whether a value of it is one, in the order malformed names them */
+const EXTRA_CHECKS: ReadonlyArray<readonly [string, (value: unknown, sort: readonly SortField[]) => boolean]> = [
+	["_total", isCount],
+	[COMB_ID, (id) => id !== COMB_ID],
+	["_combKeyTypes", isKeyTypes],
+	["_combKeyTexts", isKeyTexts],
+	["_combTextKeys", isTextKeys],
+	["_combAnchorGone", isFlag],
+]
+
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
  * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
  */
 function malformed(row: object, sort: readonly SortField[]): string | undefined {
-	const { _combAnchorGone: gone, _combId: id, _combKeyTypes: types, _total: total } = row as Record<string, unknown>
-	if (Object.hasOwn(row, "_total") && !isCount(total)) return `_total ${shown(total)}`
-	if (Object.hasOwn(row, COMB_ID) && id === COMB_ID) return `${COMB_ID} ${shown(id)}`
-	if (Object.hasOwn(row, "_combKeyTypes") && !isKeyTypes(types, sort)) return `_combKeyTypes ${shown(types)}`
-	const times = (row as Record<string, unknown>)["_combKeyTexts"]
-	if (Object.hasOwn(row, "_combKeyTexts") && !isKeyTexts(times, sort)) return `_combKeyTexts ${shown(times)}`
-	const read = unencoded(gone)
-	const flag = read === 0 || read === 1 || read === 0n || read === 1n || typeof read === "boolean"
-	return Object.hasOwn(row, "_combAnchorGone") && !flag ? `_combAnchorGone ${shown(gone)}` : undefined
+	const values = row as Record<string, unknown>
+	const wrong = EXTRA_CHECKS.find(([extra, valid]) => Object.hasOwn(row, extra) && !valid(values[extra], sort))
+	return wrong === undefined ? undefined : `${wrong[0]} ${shown(values[wrong[0]])}`
 }
+
+/* what a SQLite timestamp key holding TEXT carries in `_combKeyTexts` on a list that binds it as read (B2-3 of area B) */
+const TEXT_MARK = "!"
+
+/**
+ * Whether `value` is `_combTextKeys` as a builder selects it for `sort`: a JSON array, a TEXT or null
+ * a key, or empty where listOptions' table has no key that holds TEXT
+ */
+function isTextKeys(value: unknown, sort: readonly SortField[]): boolean {
+	if (typeof value !== "string") return false
+	if (value === "") return true
+	try {
+		const keys: unknown = JSON.parse(value)
+		return (
+			Array.isArray(keys) && keys.length === sort.length && keys.every((key) => key === null || typeof key === "string")
+		)
+	} catch {
+		// reason: a value that is no JSON, such as the alias rendered by hand, is no _combTextKeys, which malformed names
+		return false
+	}
+}
+
+/** Each sort key's TEXT from the row's `_combTextKeys`, null for a key holding none; none where no key holds any */
+const textKeysOf = (row: Record<string, unknown>): readonly (string | null)[] | undefined =>
+	typeof row["_combTextKeys"] === "string" && row["_combTextKeys"] !== ""
+		? (JSON.parse(row["_combTextKeys"]) as (string | null)[])
+		: undefined
+
+/** The 500 for a SQLite timestamp key holding TEXT on a list that binds it as read: no cursor binds a Date past it */
+const storesText = (field: string): CombError =>
+	new CombError({
+		cause: `${field} stores TEXT, which no Date cursor binds: store the epoch time as a number, as unixepoch() does, not CURRENT_TIMESTAMP's text`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
 
 /**
  * A time key's value as the row stores it, where the builder carried it (QL2 of r22b): the Date the
@@ -114,16 +161,22 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
  * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b). A text key that looks like a number stays
+ * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite timestamp holding TEXT the TEXT
+ * `_combTextKeys` carries (B2-3 of area B). A text key that looks like a number stays
  * text. The merge compares rows through it (Q2 of r20).
  */
 function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown> {
 	const stored = storedClasses(row)
 	const texts = row["_combKeyTexts"]
-	if (stored === undefined && typeof texts !== "string") return row
+	const held = textKeysOf(row)
+	if (stored === undefined && typeof texts !== "string" && held === undefined) return row
 	const carried = typeof texts === "string" ? texts.split(",") : []
+	const text = sort.find((_, i) => carried[i] === TEXT_MARK)
+	if (text !== undefined) throw storesText(text.field)
 	const typed = [...sort.map(({ field }) => field), COMB_ID]
 		.map((field, i) => {
+			const own = held?.[i]
+			if (typeof own === "string") return [field, own] as const
 			const value = stored === undefined ? row[field] : storedValue(row[field], stored[i])
 			return [field, storedText(value, stored?.[i], carried[i])] as const
 		})
@@ -132,17 +185,22 @@ function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Re
 }
 
 /**
- * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` carried in
+ * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` or `_combTextKeys` carried in
  * place of the value as read (comb-9d's AB2 ruling), which a cursor binds as itself, past the
  * column's mapper; every other key binds through it, a text key that looks like a number included
  */
 function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]): Set<string> {
 	const texts = row["_combKeyTexts"]
-	if (typeof texts !== "string") return new Set()
-	const carried = texts.split(",")
+	const held = textKeysOf(row)
+	if (typeof texts !== "string" && held === undefined) return new Set()
+	const carried = typeof texts === "string" ? texts.split(",") : []
 	const typed = typedKeys(row, sort)
 	return new Set(
-		sort.map(({ field }) => field).filter((field, i) => typed[field] !== row[field] && typed[field] === carried[i]),
+		sort
+			.map(({ field }) => field)
+			.filter(
+				(field, i) => typeof held?.[i] === "string" || (typed[field] !== row[field] && typed[field] === carried[i]),
+			),
 	)
 }
 
