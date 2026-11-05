@@ -44,9 +44,9 @@ describe("makeDatabase", () => {
 
 describe("copyExtensions", () => {
 	const held = [
-		{ name: "plpgsql", schema: "pg_catalog", version: "1.0" },
-		{ name: "citext", schema: "public", version: "1.6" },
-		{ name: "pg_trgm", schema: "ext", version: "1'5" },
+		{ name: "plpgsql", requires: [], schema: "pg_catalog", version: "1.0" },
+		{ name: "citext", requires: [], schema: "public", version: "1.6" },
+		{ name: "pg_trgm", requires: [], schema: "ext", version: "1'5" },
 	]
 
 	it("makes each extension in its schema at its version, making a schema of its own first", async () => {
@@ -76,6 +76,56 @@ describe("copyExtensions", () => {
 		await copyExtensions(fake(() => held).sql, to.sql, { makes: new Set(["citext"]), refused: () => new Error("x") })
 		expect(to.sent.some((sent) => sent.includes("citext"))).toBe(false)
 		expect(to.sent).toHaveLength(3)
+	})
+})
+
+/* PR1 of r22b: an extension that requires one the history makes waits for it, and chains wait in order */
+describe("copyExtensions beside an extension the history makes", () => {
+	const chain = [
+		{ name: "cube", requires: [], schema: "public", version: "1.5" },
+		{ name: "earthdistance", requires: ["cube"], schema: "geo", version: "1.1" },
+		{ name: "far", requires: ["earthdistance", "plpgsql"], schema: "public", version: "1" },
+		{ name: "plpgsql", requires: [], schema: "pg_catalog", version: "1.0" },
+	]
+
+	it("makes one that waits on an extension the history makes only once `to` holds what it requires", async () => {
+		const to = fake()
+		const waits = await copyExtensions(fake(() => chain).sql, to.sql, {
+			makes: new Set(["cube"]),
+			refused: () => new Error("x"),
+		})
+		expect(to.sent).toEqual([`CREATE EXTENSION IF NOT EXISTS "plpgsql" WITH SCHEMA "pg_catalog" VERSION '1.0'`])
+		const before = fake((query) => (query.startsWith("SELECT extname") ? [{ extname: "plpgsql" }] : []))
+		await waits(before.sql)
+		expect(before.sent).toEqual(["SELECT extname FROM pg_extension"])
+		const after = fake((query) =>
+			query.startsWith("SELECT extname") ? [{ extname: "plpgsql" }, { extname: "cube" }] : [],
+		)
+		await waits(after.sql)
+		expect(after.sent).toEqual([
+			"SELECT extname FROM pg_extension",
+			'CREATE SCHEMA IF NOT EXISTS "geo"',
+			`CREATE EXTENSION IF NOT EXISTS "earthdistance" WITH SCHEMA "geo" VERSION '1.1'`,
+			`CREATE EXTENSION IF NOT EXISTS "far" WITH SCHEMA "public" VERSION '1'`,
+		])
+		const done = fake()
+		await waits(done.sql)
+		expect(done.sent).toEqual([])
+	})
+
+	it("refuses a waiting extension it cannot make, naming it", async () => {
+		const waits = await copyExtensions(fake(() => chain.slice(0, 2)).sql, fake().sql, {
+			makes: new Set(["cube"]),
+			refused: (name) => new Error(`cannot make ${name}`),
+		})
+		const to = fake((query) =>
+			query.startsWith("SELECT extname")
+				? [{ extname: "cube" }]
+				: query.includes("earthdistance")
+					? coded("42501")
+					: [],
+		)
+		await expect(waits(to.sql)).rejects.toThrow("cannot make earthdistance")
 	})
 })
 

@@ -147,42 +147,86 @@ async function makeDatabase(admin: Sql, owner: string, refused: () => Error): Pr
 	return name
 }
 
-/* the extensions a database holds, in the order they were made, so one another needs comes first */
+/*
+ * the extensions a database holds, in the order they were made, so one another needs comes first,
+ * each with the extensions its version requires
+ */
 const EXTENSIONS =
-	"SELECT e.extname AS name, n.nspname AS schema, e.extversion AS version FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY e.oid"
+	"SELECT e.extname AS name, n.nspname AS schema, e.extversion AS version, coalesce(v.requires, '{}')::text[] AS requires FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace LEFT JOIN pg_available_extension_versions v ON v.name = e.extname AND v.version = e.extversion ORDER BY e.oid"
 
-/** The extensions the history `texts` create, which the replay leaves them to make */
+/**
+ * The extensions the history `texts` create with a plain CREATE EXTENSION, the one statement that
+ * needs its extension absent, which the replay leaves them to make (P5 of r21); one a file creates IF
+ * NOT EXISTS is copied, as a platform installs it on the target (PR1 of r22b)
+ */
 const extensionsOf = (texts: readonly string[]): Set<string> =>
 	new Set(
 		texts.flatMap((text) =>
 			pgRead(text).statements.flatMap(({ tree }) => {
 				const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
-				return type === "CreateExtensionStmt" ? [String(node["extname"])] : []
+				return type === "CreateExtensionStmt" && node["if_not_exists"] !== true ? [String(node["extname"])] : []
 			}),
 		),
 	)
 
+/** An extension of devUrl's database, as the replay makes it */
+type Extension = { name: string; requires: string[]; schema: string; version: string }
+
+/** `extension` made in `to`, in its schema at its version, or `refused` */
+async function makeExtension(
+	to: Sql,
+	{ name, schema, version }: Extension,
+	refused: (name: string, error: unknown) => Error,
+): Promise<void> {
+	const [extension, home] = [sqlIdentifier(name), sqlIdentifier(schema)]
+	try {
+		if (schema !== "pg_catalog" && schema !== "public") await to.unsafe(`CREATE SCHEMA IF NOT EXISTS ${home}`, [])
+		await to.unsafe(`CREATE EXTENSION IF NOT EXISTS ${extension} WITH SCHEMA ${home} VERSION ${literal(version)}`, [])
+	} catch (error) {
+		throw refused(name, error)
+	}
+}
+
 /**
  * Every extension `from` holds made in `to`, in its schema at its version, but those the history
- * `makes`; one `to` cannot make is `refused`
+ * `makes`; one `to` cannot make is `refused`. One that requires an extension the history makes waits
+ * for it (PR1 of r22b): what is returned makes, in a later session, each waiting extension whose every
+ * requirement that session's database now holds, so the replay calls it after each CREATE EXTENSION
  */
 async function copyExtensions(
 	from: Sql,
 	to: Sql,
 	{ makes, refused }: { makes: ReadonlySet<string>; refused: (name: string, error: unknown) => Error },
-): Promise<void> {
-	for (const { name, schema, version } of await from.unsafe(EXTENSIONS, [])) {
-		if (makes.has(String(name))) continue
-		const [extension, home] = [sqlIdentifier(String(name)), sqlIdentifier(String(schema))]
-		try {
-			if (schema !== "pg_catalog" && schema !== "public") await to.unsafe(`CREATE SCHEMA IF NOT EXISTS ${home}`, [])
-			await to.unsafe(
-				`CREATE EXTENSION IF NOT EXISTS ${extension} WITH SCHEMA ${home} VERSION ${literal(String(version))}`,
-				[],
-			)
-		} catch (error) {
-			throw refused(String(name), error)
+): Promise<(to: Sql) => Promise<void>> {
+	let waiting: Extension[] = []
+	for (const row of await from.unsafe(EXTENSIONS, [])) {
+		const extension: Extension = {
+			name: String(row["name"]),
+			requires: row["requires"] as string[],
+			schema: String(row["schema"]),
+			version: String(row["version"]),
 		}
+		if (makes.has(extension.name)) continue
+		if (extension.requires.some((name) => makes.has(name) || waiting.some((each) => each.name === name)))
+			waiting.push(extension)
+		else await makeExtension(to, extension, refused)
+	}
+	return async (sql) => {
+		if (waiting.length === 0) return
+		const held = new Set(
+			(await sql.unsafe("SELECT extname FROM pg_extension", [])).map((row) => String(row["extname"])),
+		)
+		const left: Extension[] = []
+		/* in the order they were made, so one waiting on another follows it */
+		for (const extension of waiting) {
+			if (!extension.requires.every((name) => held.has(name))) {
+				left.push(extension)
+				continue
+			}
+			await makeExtension(sql, extension, refused)
+			held.add(extension.name)
+		}
+		waiting = left
 	}
 }
 

@@ -81,11 +81,14 @@ type Replay = {
 	stops: string
 }
 
+/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes (PR1 of r22b) */
+type Replaying = Replay & { refused: Refuse; waits: (sql: Sql) => Promise<void> }
+
 /** `sent` run on the replay's connection, comb's own CREATE ROLE and GRANT of a role it made as comb runs them */
 async function runStatement(
 	run: Run,
 	{ name, node, sent, type }: { name: string; node: Record<string, unknown>; sent: string; type: string },
-	replay: Replay & { refused: Refuse },
+	replay: Replaying,
 ): Promise<void> {
 	try {
 		if (type === "CreateRoleStmt") {
@@ -95,6 +98,8 @@ async function runStatement(
 	} catch (error) {
 		throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
 	}
+	/* an extension devUrl's database holds that requires the one just made follows it, as on the target */
+	if (type === "CreateExtensionStmt") await replay.waits(run.sql)
 }
 
 /**
@@ -103,7 +108,7 @@ async function runStatement(
  * it only so; the file's own BEGIN, COMMIT and SAVEPOINT, a LOCK and a cursor not held, and all its
  * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses
  */
-async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
+async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replaying) {
 	const inFile = !outsideTransaction(text)
 	const file = {
 		adopted: (role: string) => replay.adopted?.(name, role),
@@ -135,7 +140,7 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 async function replayEach(
 	run: Run,
 	files: readonly HistoryFile[],
-	{ open, ...replay }: Replay & { open: () => Sql; refused: Refuse },
+	{ open, ...replay }: Replaying & { open: () => Sql },
 ): Promise<void> {
 	for (const file of files) {
 		await run.sql.end()
@@ -148,14 +153,17 @@ async function replayEach(
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
 
-/** The replay's database made ready: counted, holding devUrl's extensions the `files` do not make, and `schema` made */
+/**
+ * The replay's database made ready: counted, holding devUrl's extensions the `files` do not make, and
+ * `schema` made; what makes those waiting on one a file makes
+ */
 async function prepare(
 	run: Run,
 	schema: string,
 	{ files, refused, stops }: { files: readonly HistoryFile[]; refused: Refuse; stops: string },
-) {
+): Promise<(sql: Sql) => Promise<void>> {
 	await refuseUncounted(run.sql, stops)
-	await copyExtensions(run.admin, run.sql, {
+	const waits = await copyExtensions(run.admin, run.sql, {
 		makes: extensionsOf(files.map(({ sql: text }) => text)),
 		refused: (name, error) =>
 			refused(
@@ -164,6 +172,7 @@ async function prepare(
 			),
 	})
 	if (schema !== "public") await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(schema)}`, [])
+	return waits
 }
 
 /** A refusal: what failed, with devUrl's error, and what that stops */
@@ -231,10 +240,10 @@ async function onDev<T>(
 			const { open, run } = await opening(admin, target, { connect, stops: replay.stops })
 			cleanup.set(() => cleanUp(run, leave))
 			try {
-				await prepare(run, target.schema, { files, refused, stops: replay.stops })
+				const waits = await prepare(run, target.schema, { files, refused, stops: replay.stops })
 				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
-				await replayEach(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused })
+				await replayEach(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused, waits })
 				return await after(run.sql)
 			} finally {
 				await cleanup.run()
