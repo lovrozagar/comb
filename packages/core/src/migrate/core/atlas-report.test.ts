@@ -131,6 +131,28 @@ describe("applyWithAtlas: a file run outside a transaction that failed (P10)", (
 	})
 })
 
+/* Atlas v1.3.0 names no statement then: a file that ran SET ROLE leaves it no right to its own schema (.tmp/grunt/p21/areas/pg/pr5/group.log) */
+const revisionFailed = (Name: string, Applied: string[]) => {
+	const Text = "sql/migrate: write revision: pq: permission denied for schema atlas_schema_revisions (42501)"
+	return fail("", JSON.stringify({ applied: [{ Applied, Error: { Text }, Name }], error: Text, target: "2" }))
+}
+
+describe("applyWithAtlas: a file whose statements ran, and Atlas then could not write its revision", () => {
+	it("says Atlas's error and that the file was rolled back, when it ran in a transaction", async () => {
+		const apply = revisionFailed("1_a.sql", ['CREATE TABLE "a" ("id" int);'])
+		await expect(applyWithAtlas(options(fakeAtlas({ apply, status: PENDING })))).rejects.toThrow(
+			"1_a.sql failed once its statements ran, as Atlas wrote its revision: sql/migrate: write revision: pq: permission denied for schema atlas_schema_revisions (42501). It was rolled back; the files before it stay applied",
+		)
+	})
+
+	it("counts each statement it ran as staying applied, when it ran outside a transaction", async () => {
+		const apply = revisionFailed("2_b.sql", ['CREATE TABLE "h1" ("id" int);', 'CREATE TABLE "h2" ("id" int);'])
+		await expect(applyWithAtlas(options(fakeAtlas({ apply, status: PENDING })))).rejects.toThrow(
+			"It ran outside a transaction, so the 2 statements it ran before that stay applied, as do the files before it",
+		)
+	})
+})
+
 describe("the last version a database records (P20)", () => {
 	/* Atlas's current, when it holds its placeholder for no version, as a history it could not place leaves it */
 	const placed = status({
