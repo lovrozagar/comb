@@ -1,7 +1,7 @@
 /**
- * The 0.21 API item names what changed beyond declaration names (G1-1) and the fields it made
- * required (G1-2). Sibling: upgrade-exports.test.ts, which holds the section's export lists to the
- * exports.
+ * The 0.21 API item names what changed beyond declaration names (G1-1), the fields it made required
+ * (G1-2) and both keys a list's extras gain (G1-3). Sibling: upgrade-exports.test.ts, which holds
+ * the section's export lists to the exports.
  */
 import { describe, expect, it } from "vitest"
 import { section } from "./support/readme.ts"
@@ -38,5 +38,9 @@ describe("the 0.21 API item", () => {
 		const cursor = paragraph(upgrade, "`DecodedCursor.carried`")
 		expect(cursor).toContain("fails to compile (TS2741)")
 		expect(cursor).toContain("**Fix:** a `DecodedCursor` you build sets `carried`, one boolean per sort value")
+	})
+
+	it("names both keys ListExtra and ListExtras gain (G1-3)", () => {
+		expect(upgrade).toContain("`ListExtra` and `ListExtras` gain `_combKeyTexts` and `_combTextKeys` (steps 60, 63)")
 	})
 })
