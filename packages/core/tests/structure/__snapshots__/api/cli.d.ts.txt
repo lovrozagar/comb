@@ -405,16 +405,22 @@ declare function replayOptions(devUrl: string, at?: {
 }): Record<string, unknown>;
 /** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
 declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
-/** The extensions the history `texts` create, which the replay leaves them to make */
+/**
+ * The extensions the history `texts` create with a plain CREATE EXTENSION, the one statement that
+ * needs its extension absent, which the replay leaves them to make (P5 of r21); one a file creates IF
+ * NOT EXISTS is copied, as a platform installs it on the target (PR1 of r22b)
+ */
 declare const extensionsOf: (texts: readonly string[]) => Set<string>;
 /**
  * Every extension `from` holds made in `to`, in its schema at its version, but those the history
- * `makes`; one `to` cannot make is `refused`
+ * `makes`; one `to` cannot make is `refused`. One that requires an extension the history makes waits
+ * for it (PR1 of r22b): what is returned makes, in a later session, each waiting extension whose every
+ * requirement that session's database now holds, so the replay calls it after each CREATE EXTENSION
  */
 declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
-}): Promise<void>;
+}): Promise<(to: Sql) => Promise<void>>;
 export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, type Sql, STALE_MS, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
