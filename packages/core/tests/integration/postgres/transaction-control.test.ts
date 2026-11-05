@@ -16,7 +16,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { withScratchDb } from "../support/pg.ts"
-import { dropRoles, query, roleOf, unique } from "../support/pg-roles.ts"
+import { query, roleOf, testRoles } from "../support/pg-roles.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -52,21 +52,17 @@ const tables = async (url: string): Promise<string[]> =>
 
 describe("a transactional file holds no transaction control (PA2; sibling: PA13's inside-only statements)", () => {
 	it("is refused at check before the replay runs a statement of it, so a later DO's role stays off devUrl's server", async () => {
-		const made = unique("comb_t_commit")
-		try {
-			await write([
-				"CREATE TABLE a (id int PRIMARY KEY);\n",
-				`${UNSAFE}CREATE TABLE b (id int);\nCOMMIT;\nDO $$ BEGIN CREATE ROLE ${made}; END $$;\n`,
-			])
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					await expect(applyWithAtlas(options(dev, url, true))).rejects.toThrow(REFUSAL)
-					expect(await roleOf(made)).toEqual([])
-				}),
-			)
-		} finally {
-			await dropRoles(made)
-		}
+		const [made] = testRoles("comb_t_commit")
+		await write([
+			"CREATE TABLE a (id int PRIMARY KEY);\n",
+			`${UNSAFE}CREATE TABLE b (id int);\nCOMMIT;\nDO $$ BEGIN CREATE ROLE ${made}; END $$;\n`,
+		])
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				await expect(applyWithAtlas(options(dev, url, true))).rejects.toThrow(REFUSAL)
+				expect(await roleOf(made)).toEqual([])
+			}),
+		)
 	}, 60_000)
 
 	it("is refused at apply before Atlas runs it, so nothing of it stays", async () => {

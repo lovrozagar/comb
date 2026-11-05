@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { SERVER_CALLS } from "../../../src/migrate/core/pg-server-calls.ts"
 import { pgCheck, T } from "../support/pg-check.ts"
 import { pgUrl } from "../support/pg.ts"
-import { dropRoles, LOOPBACK, query, roleOf, unique } from "../support/pg-roles.ts"
+import { LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply } = pgCheck()
 
@@ -71,24 +71,20 @@ describe("a dblink connection's every call is left out with it (PR2; sibling: a 
 	}, 60_000)
 
 	it("leaves dblink_exec's CREATE ROLE out, names it, and apply runs it", async () => {
-		const role = unique("comb_t_call")
+		const [role] = testRoles("comb_t_call")
 		const sent = `SELECT dblink_exec(${LOOPBACK}, 'CREATE ROLE ${role}')`
 		const out: string[] = []
-		try {
-			const history = `${T}-- comb:allow-unsafe: the test's history\nCREATE EXTENSION IF NOT EXISTS dblink;\n`
-			const { refused: check } = await checked(history, `${NONE}${sent};\n`)
-			const afterCheck = await roleOf(role)
-			const { apply } = await checkThenApply(history, `${NONE}${sent};\n`, out)
-			expect({ afterCheck, apply, check, role: await roleOf(role) }).toEqual({
-				afterCheck: [],
-				apply: undefined,
-				check: undefined,
-				role: [{ rolconnlimit: -1, rolname: role }],
-			})
-			expect(out).toContain(left(sent, "dblink_exec"))
-		} finally {
-			await dropRoles(role)
-		}
+		const history = `${T}-- comb:allow-unsafe: the test's history\nCREATE EXTENSION IF NOT EXISTS dblink;\n`
+		const { refused: check } = await checked(history, `${NONE}${sent};\n`)
+		const afterCheck = await roleOf(role)
+		const { apply } = await checkThenApply(history, `${NONE}${sent};\n`, out)
+		expect({ afterCheck, apply, check, role: await roleOf(role) }).toEqual({
+			afterCheck: [],
+			apply: undefined,
+			check: undefined,
+			role: [{ rolconnlimit: -1, rolname: role }],
+		})
+		expect(out).toContain(left(sent, "dblink_exec"))
 	}, 60_000)
 })
 

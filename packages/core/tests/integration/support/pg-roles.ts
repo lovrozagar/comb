@@ -6,7 +6,7 @@
  */
 import { randomBytes } from "node:crypto"
 import pg from "pg"
-import { afterAll, beforeAll } from "vitest"
+import { afterAll, beforeAll, onTestFinished } from "vitest"
 import { pgUrl } from "./pg.ts"
 
 /** The rows `sql` returns on the database at `url` */
@@ -36,8 +36,43 @@ export async function asRole(devUrl: string, role: string, attributes: string): 
 export const LOOPBACK =
 	"format('host=%s port=%s dbname=%s user=%s', split_part(current_setting('unix_socket_directories'), ',', 1), current_setting('port'), current_database(), current_user)"
 
-export const dropRoles = (...roles: string[]): Promise<unknown> =>
-	query(pgUrl(), `DROP ROLE IF EXISTS ${roles.join(", ")}`)
+/**
+ * `roles` dropped, with every replay database that holds one of them, by a grant of CONNECT or as its
+ * owner, as a replay in flight does when its test timed out. A replay's role that its cleanup left is
+ * stale to every other check in the run, whose sweep may drop it first: two sessions dropping one
+ * role race in Postgres's catalog, and the loser fails (XX000, "could not find tuple for role"), so
+ * each role drops on its own, and a role gone after a failed drop is dropped
+ */
+export async function dropRoles(...roles: string[]): Promise<void> {
+	const holds = roles.map(
+		(role) => `datacl::text LIKE '%${role}=%' OR datdba = (SELECT oid FROM pg_roles WHERE rolname = '${role}')`,
+	)
+	const held = await query(
+		pgUrl(),
+		`SELECT datname FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%' AND (${holds.join(" OR ")})`,
+	)
+	for (const { datname } of held) await query(pgUrl(), `DROP DATABASE IF EXISTS ${String(datname)} WITH (FORCE)`)
+	for (const role of roles) {
+		try {
+			await query(pgUrl(), `DROP ROLE IF EXISTS ${role}`)
+		} catch (error) {
+			if ((await roleOf(role)).length > 0) throw error
+		}
+	}
+}
+
+/**
+ * A role name per prefix that no other run holds, each dropped with dropRoles once the calling test
+ * ends, by a pass, a failure or a timeout alike: a timeout ends the test without running its body's
+ * `finally`, so a drop there leaves the role on the server
+ */
+export function testRoles<const Prefixes extends readonly string[]>(
+	...prefixes: Prefixes
+): { [K in keyof Prefixes]: string } {
+	const names = prefixes.map((prefix) => unique(prefix))
+	onTestFinished(() => dropRoles(...names))
+	return names as { [K in keyof Prefixes]: string }
+}
 
 /** `role` on the server, with its connection limit, if it exists */
 export const roleOf = (role: string): Promise<Array<Record<string, unknown>>> =>

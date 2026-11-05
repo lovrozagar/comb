@@ -1,12 +1,11 @@
 /**
  * A dev replay's check run in a child process, for the suites that signal it mid-replay (P2 of r21),
- * and what they read of the server around it: the role it made, the replay databases that hold it,
- * and their drop as a test's own cleanup.
+ * and what they read of the server around it: the role it made and the replay databases that hold it.
  */
 import { spawn } from "node:child_process"
 import { join } from "node:path"
 import { pgUrl } from "./pg.ts"
-import { dropRoles as dropOnly, query, roleOf } from "./pg-roles.ts"
+import { query, roleOf } from "./pg-roles.ts"
 
 /** Until the server holds `role`, at most 30 s */
 export async function untilRole(role: string): Promise<void> {
@@ -77,26 +76,5 @@ export async function endedWithin(child: ReturnType<typeof childCheck>): Promise
 		return await Promise.race([child.ended, late])
 	} finally {
 		clearTimeout(timer)
-	}
-}
-
-/**
- * `roles` dropped, with any replay database a failed run left that grants one of them CONNECT, which
- * holds it. A replay's role that its cleanup left is stale to every other check in the run, whose
- * sweep may drop it first: two sessions dropping one role race in Postgres's catalog, and the loser
- * fails (XX000, "could not find tuple for role"), so a role gone after a failed drop is dropped
- */
-export async function dropRoles(...roles: string[]): Promise<void> {
-	const held = await query(
-		pgUrl(),
-		`SELECT datname FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%' AND (${roles.map((role) => `datacl::text LIKE '%${role}=%'`).join(" OR ")})`,
-	)
-	for (const { datname } of held) await query(pgUrl(), `DROP DATABASE IF EXISTS ${String(datname)} WITH (FORCE)`)
-	for (const role of roles) {
-		try {
-			await dropOnly(role)
-		} catch (error) {
-			if ((await roleOf(role)).length > 0) throw error
-		}
 	}
 }

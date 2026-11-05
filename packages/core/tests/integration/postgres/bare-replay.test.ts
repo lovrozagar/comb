@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { pgCheck, T, tempDir } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
-import { dropRoles, LOOPBACK, query, roleOf, unique } from "../support/pg-roles.ts"
+import { dropRoles, LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply, devUrl, dir, files, options } = pgCheck()
 
@@ -70,22 +70,18 @@ describe("a txmode none file replays bare, as Atlas sends it (P1; sibling: r21 P
 describe("a txmode none file's statement runs in a transaction of its own first (P1 amendment; sibling: a DO's ALTER ROLE)", () => {
 	/* P5 of r22: a role the statement adds is the replay's to adopt, a change to one the server held is not */
 	it("adopts a role a DO makes and leaves none, and refuses a DO that changes a role the server held, naming it", async () => {
-		const [made, held] = [unique("comb_t_bare"), unique("comb_t_held")]
-		try {
-			await query(pgUrl(), `CREATE ROLE ${held} NOLOGIN`)
-			const { refused: adopted } = await checked(T, `${NONE}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`)
-			const { refused } = await checked(T, `${NONE}DO $$ BEGIN ALTER ROLE ${held} CONNECTION LIMIT 4; END $$;\n`)
-			expect({ adopted, refused, role: await roleOf(made) }).toEqual({
-				adopted: undefined,
-				refused: expect.stringContaining(`role ${held} changed (rolconnlimit)`),
-				role: [],
-			})
-			expect(await query(pgUrl(), `SELECT rolconnlimit FROM pg_roles WHERE rolname = '${held}'`)).toEqual([
-				{ rolconnlimit: -1 },
-			])
-		} finally {
-			await dropRoles(made, held)
-		}
+		const [made, held] = testRoles("comb_t_bare", "comb_t_held")
+		await query(pgUrl(), `CREATE ROLE ${held} NOLOGIN`)
+		const { refused: adopted } = await checked(T, `${NONE}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`)
+		const { refused } = await checked(T, `${NONE}DO $$ BEGIN ALTER ROLE ${held} CONNECTION LIMIT 4; END $$;\n`)
+		expect({ adopted, refused, role: await roleOf(made) }).toEqual({
+			adopted: undefined,
+			refused: expect.stringContaining(`role ${held} changed (rolconnlimit)`),
+			role: [],
+		})
+		expect(await query(pgUrl(), `SELECT rolconnlimit FROM pg_roles WHERE rolname = '${held}'`)).toEqual([
+			{ rolconnlimit: -1 },
+		])
 	}, 60_000)
 })
 
@@ -129,34 +125,28 @@ describe("another session's change is its own (P2; sibling: two checks on one se
 	])(
 		"%s",
 		async (_, named) => {
-			const other = unique("comb_t_other")
+			const [other] = testRoles("comb_t_other")
 			const spelled = named ? `-- comb:allow-unsafe: the test's name\nSELECT '${other}';\n` : ""
 			const pending = `-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's sleep\nSELECT pg_sleep(1.5);\n${spelled}`
-			try {
-				const check = checked(T, pending)
-				/* the other session's change lands while the replay's bare statement runs */
-				for (let i = 0; i < 200; i++) {
-					const [sleeping] = await query(
-						pgUrl(),
-						"SELECT 1 AS n FROM pg_stat_activity WHERE query = 'SELECT pg_sleep(1.5)' AND datname LIKE 'comb\\_replay\\_%'",
-					)
-					if (sleeping !== undefined) break
-					await new Promise((tick) => setTimeout(tick, 25))
-				}
-				await query(pgUrl(), `CREATE ROLE ${other}`)
-				const { refused } = await check
-				expect(refused === undefined ? undefined : refused.includes(`role ${other} added`)).toBe(
-					named ? true : undefined,
+			const check = checked(T, pending)
+			/* the other session's change lands while the replay's bare statement runs */
+			for (let i = 0; i < 200; i++) {
+				const [sleeping] = await query(
+					pgUrl(),
+					"SELECT 1 AS n FROM pg_stat_activity WHERE query = 'SELECT pg_sleep(1.5)' AND datname LIKE 'comb\\_replay\\_%'",
 				)
-			} finally {
-				await dropRoles(other)
+				if (sleeping !== undefined) break
+				await new Promise((tick) => setTimeout(tick, 25))
 			}
+			await query(pgUrl(), `CREATE ROLE ${other}`)
+			const { refused } = await check
+			expect(refused === undefined ? undefined : refused.includes(`role ${other} added`)).toBe(named ? true : undefined)
 		},
 		60_000,
 	)
 
 	it("passes two checks on one server at once, each making a role and running bare statements", async () => {
-		const roles = [unique("comb_t_one"), unique("comb_t_two")]
+		const roles = testRoles("comb_t_one", "comb_t_two")
 		const dirs = [dir(), tempDir()]
 		try {
 			const both = roles.map(async (role, i) => {
@@ -176,7 +166,6 @@ describe("another session's change is its own (P2; sibling: two checks on one se
 			expect(await Promise.all(both)).toEqual([undefined, undefined])
 		} finally {
 			rmSync(dirs[1] as string, { force: true, recursive: true })
-			await dropRoles(...roles)
 		}
 	}, 60_000)
 })

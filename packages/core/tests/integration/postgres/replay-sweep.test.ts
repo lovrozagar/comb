@@ -19,8 +19,8 @@ import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { pauses, waitFor } from "../support/pg-pause.ts"
-import { childCheck, dropRoles, replayDatabases, untilRole } from "../support/replay-check.ts"
-import { query, roleOf, unique } from "../support/pg-roles.ts"
+import { childCheck, replayDatabases, untilRole } from "../support/replay-check.ts"
+import { query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
 import { leavesStale, needsNothingStale } from "../support/stale-replay.ts"
 
 beforeAll(loadPostgresParser)
@@ -112,24 +112,21 @@ describe("a check killed mid-replay", () => {
 	] as const)(
 		"by %s cleans up once and ends as the signal would, leaving nothing",
 		async (signal, code) => {
-			const [made, resume] = [unique("comb_t_killed"), unique("comb_t_resume")]
-			try {
-				await withScratchDb((dev) =>
-					withScratchDb(async (url) => {
-						await write(paused(made, resume))
-						const child = childCheck(dev, url, dir)
-						await untilRole(made)
-						await child.kill(signal)
-						const said = await child.ended
-						expect(said.at(-1)).toBe(`exit ${code}`)
-						expect(said.filter((line) => line.startsWith("drop "))).toHaveLength(1)
-						expect(await roleOf(made)).toEqual([])
-						expect(await replayDatabases(made)).toEqual([])
-					}),
-				)
-			} finally {
-				await dropRoles(made)
-			}
+			const [made] = testRoles("comb_t_killed")
+			const resume = unique("comb_t_resume")
+			await withScratchDb((dev) =>
+				withScratchDb(async (url) => {
+					await write(paused(made, resume))
+					const child = childCheck(dev, url, dir)
+					await untilRole(made)
+					await child.kill(signal)
+					const said = await child.ended
+					expect(said.at(-1)).toBe(`exit ${code}`)
+					expect(said.filter((line) => line.startsWith("drop "))).toHaveLength(1)
+					expect(await roleOf(made)).toEqual([])
+					expect(await replayDatabases(made)).toEqual([])
+				}),
+			)
 		},
 		60_000,
 	)
@@ -139,34 +136,28 @@ describe("a check killed by SIGKILL mid-replay", () => {
 	leavesStale()
 
 	it("is swept by the next check at once", async () => {
-		const [made, resume] = [unique("comb_t_killed"), unique("comb_t_resume")]
-		try {
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					const left = await killedHard(dev, url, { made, resume })
-					expect((await check(dev, url)).refused).toBeUndefined()
-					expect([await holds(left), await roleOf(made)]).toEqual([false, []])
-				}),
-			)
-		} finally {
-			await dropRoles(made)
-		}
+		const [made] = testRoles("comb_t_killed")
+		const resume = unique("comb_t_resume")
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				const left = await killedHard(dev, url, { made, resume })
+				expect((await check(dev, url)).refused).toBeUndefined()
+				expect([await holds(left), await roleOf(made)]).toEqual([false, []])
+			}),
+		)
 	}, 60_000)
 
 	it("is swept by an apply, whose CREATE ROLE of its role then passes", async () => {
-		const [made, resume] = [unique("comb_t_killed"), unique("comb_t_resume")]
-		try {
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					const left = await killedHard(dev, url, { made, resume })
-					await write([`${UNSAFE}CREATE ROLE ${made};\n`])
-					await withScratchDb((target) => applyWithAtlas(options(dev, target)))
-					expect(await holds(left)).toBe(false)
-				}),
-			)
-		} finally {
-			await dropRoles(made)
-		}
+		const [made] = testRoles("comb_t_killed")
+		const resume = unique("comb_t_resume")
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				const left = await killedHard(dev, url, { made, resume })
+				await write([`${UNSAFE}CREATE ROLE ${made};\n`])
+				await withScratchDb((target) => applyWithAtlas(options(dev, target)))
+				expect(await holds(left)).toBe(false)
+			}),
+		)
 	}, 60_000)
 })
 
@@ -215,7 +206,7 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 	it(
 		"leaves nothing that stops the next apply's CREATE ROLE of its role, which passes at once",
 		async () => {
-			const made = unique("comb_t_orphan")
+			const [made] = testRoles("comb_t_orphan")
 			try {
 				await withScratchDb((dev) =>
 					withScratchDb(async (url) => {
@@ -243,7 +234,6 @@ describe("a check killed by SIGKILL mid-statement (P4 of r22)", () => {
 					pgUrl(),
 					`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%${SLEEP}%' AND pid <> pg_backend_pid()`,
 				)
-				await dropRoles(made)
 			}
 		},
 		3 * HALF_SLEEP_MS,
@@ -277,7 +267,7 @@ describe("an apply whose devUrl does not answer (PR7 of r22b)", () => {
 describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () => {
 	leavesStale()
 	it("drops that replay's database and role, so apply's CREATE ROLE of it passes", async () => {
-		const [made, other] = [unique("comb_t_left"), unique("comb_t_ci")]
+		const [made, other] = testRoles("comb_t_left", "comb_t_ci")
 		/* pid 1 is no backend, so the replay that made it is over */
 		const left = `comb_replay_1_1_${unique("pr8").slice(-8)}`
 		try {
@@ -296,7 +286,6 @@ describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () =
 		} finally {
 			await release(left)
 			await query(pgUrl(), `DROP DATABASE IF EXISTS ${left}`)
-			await dropRoles(made, other)
 		}
 	}, 60_000)
 })
@@ -304,29 +293,26 @@ describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () =
 describe("a sweep beside a live replay and a database someone is in", () => {
 	leavesStale()
 	it("leaves a live replay's database and role, which then passes", async () => {
-		const [made, resume] = [unique("comb_t_live"), unique("comb_t_resume")]
-		try {
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					await write(paused(made, resume))
-					const long = check(dev, url)
-					await untilRole(made)
-					const live = await replayDatabases(made)
-					const other = mkdtempSync(join(tmpdir(), "comb-pg-replay-sweep-b-"))
-					try {
-						await write(["CREATE TABLE u (id int PRIMARY KEY);\n"], other)
-						await applyWithAtlas({ ...options(dev, url), checkOnly: true, dir: other })
-					} finally {
-						rmSync(other, { force: true, recursive: true })
-					}
-					expect([await holds(live[0] as string), (await roleOf(made)).length]).toEqual([true, 1])
-					await pause.go(resume)
-					expect((await long).refused).toBeUndefined()
-				}),
-			)
-		} finally {
-			await dropRoles(made)
-		}
+		const [made] = testRoles("comb_t_live")
+		const resume = unique("comb_t_resume")
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				await write(paused(made, resume))
+				const long = check(dev, url)
+				await untilRole(made)
+				const live = await replayDatabases(made)
+				const other = mkdtempSync(join(tmpdir(), "comb-pg-replay-sweep-b-"))
+				try {
+					await write(["CREATE TABLE u (id int PRIMARY KEY);\n"], other)
+					await applyWithAtlas({ ...options(dev, url), checkOnly: true, dir: other })
+				} finally {
+					rmSync(other, { force: true, recursive: true })
+				}
+				expect([await holds(live[0] as string), (await roleOf(made)).length]).toEqual([true, 1])
+				await pause.go(resume)
+				expect((await long).refused).toBeUndefined()
+			}),
+		)
 	}, 60_000)
 
 	it("skips a stale replay database with a session in it, keeps the verdict, and the next run takes it", async () => {
@@ -361,7 +347,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 
 describe("two live replays under one role (P4 of r22)", () => {
 	it("leaves two live replays under one role each other's, and a third check's sweep leaves both, which then pass", async () => {
-		const [a, b] = [unique("comb_t_live_a"), unique("comb_t_live_b")]
+		const [a, b] = testRoles("comb_t_live_a", "comb_t_live_b")
 		const [resumeA, resumeB] = [unique("comb_t_resume_a"), unique("comb_t_resume_b")]
 		const [dirB, dirC] = [
 			mkdtempSync(join(tmpdir(), "comb-pg-replay-sweep-b-")),
@@ -391,37 +377,33 @@ describe("two live replays under one role (P4 of r22)", () => {
 			)
 		} finally {
 			for (const at of [dirB, dirC]) rmSync(at, { force: true, recursive: true })
-			await dropRoles(a, b)
 		}
 	}, 90_000)
 })
 
 describe("a history's role the replay makes", () => {
 	it("cannot log in during the check, whatever the history says, and check names it once", async () => {
-		const [ops, resume] = [unique("comb_t_ops"), unique("comb_t_resume")]
-		try {
-			await withScratchDb((dev) =>
-				withScratchDb(async (url) => {
-					await write(paused(ops, resume, `CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb';`))
-					const running = check(dev, url)
-					await untilRole(ops)
-					const login = new pg.Client({
-						connectionString: Object.assign(new URL(pgUrl()), { password: "comb", username: ops }).toString(),
-					})
-					await expect(login.connect()).rejects.toThrow(/is not permitted to log in|password authentication failed/)
-					expect(await query(pgUrl(), `SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = '${ops}'`)).toEqual([
-						{ rolcanlogin: false, rolsuper: false },
-					])
-					await pause.go(resume)
-					const { out, refused } = await running
-					expect(refused).toBeUndefined()
-					expect(out.filter((line) => line.startsWith("Check made the role") && line.includes(ops))).toEqual([
-						`Check made the role of "CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb'" in 20260101000000_f0.sql NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS, in no role the replay did not make, on devUrl: the replay needs only its name, so apply alone gives it the rest`,
-					])
-				}),
-			)
-		} finally {
-			await dropRoles(ops)
-		}
+		const [ops] = testRoles("comb_t_ops")
+		const resume = unique("comb_t_resume")
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				await write(paused(ops, resume, `CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb';`))
+				const running = check(dev, url)
+				await untilRole(ops)
+				const login = new pg.Client({
+					connectionString: Object.assign(new URL(pgUrl()), { password: "comb", username: ops }).toString(),
+				})
+				await expect(login.connect()).rejects.toThrow(/is not permitted to log in|password authentication failed/)
+				expect(await query(pgUrl(), `SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = '${ops}'`)).toEqual([
+					{ rolcanlogin: false, rolsuper: false },
+				])
+				await pause.go(resume)
+				const { out, refused } = await running
+				expect(refused).toBeUndefined()
+				expect(out.filter((line) => line.startsWith("Check made the role") && line.includes(ops))).toEqual([
+					`Check made the role of "CREATE ROLE ${ops} LOGIN SUPERUSER PASSWORD 'comb'" in 20260101000000_f0.sql NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS, in no role the replay did not make, on devUrl: the replay needs only its name, so apply alone gives it the rest`,
+				])
+			}),
+		)
 	}, 60_000)
 })

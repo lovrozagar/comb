@@ -14,8 +14,8 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { waitFor } from "../support/pg-pause.ts"
-import { asRole, unique } from "../support/pg-roles.ts"
-import { childCheck, dropRoles, endedWithin, replayDatabases, untilRole } from "../support/replay-check.ts"
+import { asRole, testRoles, unique } from "../support/pg-roles.ts"
+import { childCheck, endedWithin, replayDatabases, untilRole } from "../support/replay-check.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -41,7 +41,8 @@ const paused = (made: string, resume: string, role = `CREATE ROLE ${made};`): st
 
 describe("a check killed mid-replay whose database a session holds across the drop", () => {
 	it("says the database and the role it could not drop, and ends as the signal would", async () => {
-		const [made, resume, mgr] = [unique("comb_t_killed"), unique("comb_t_resume"), unique("comb_t_holdmgr")]
+		const [made, mgr] = testRoles("comb_t_killed", "comb_t_holdmgr")
+		const resume = unique("comb_t_resume")
 		let holder: pg.Client | undefined
 		try {
 			await withScratchDb((dev) =>
@@ -68,7 +69,6 @@ describe("a check killed mid-replay whose database a session holds across the dr
 			)
 		} finally {
 			await holder?.end().catch(() => undefined)
-			await dropRoles(made, mgr)
 		}
 	}, 60_000)
 })
