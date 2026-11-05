@@ -180,8 +180,8 @@ const ELSEWHERE: Record<string, readonly Elsewhere[]> = {
 	"./sqlite/constraint-handler": [
 		{
 			from: ".",
-			names: ["CombError", "ConstraintMap", "ConstraintMapEntry", "StatusKey"],
-			why: "the error every handler throws and the constraint map every classifier reads; the root exports them once for all",
+			names: ["CombDatabaseErrorKey", "CombError", "ConstraintMap", "ConstraintMapEntry", "StatusKey", "combErrorKeys"],
+			why: "the error every handler throws, the keys it answers with and the constraint map every classifier reads; the root exports them once for all",
 		},
 	],
 	"./sqlite/d1/bookmark": [

@@ -5,7 +5,7 @@
  */
 import { CombError } from "./error.ts"
 import { warnOnError } from "./log.ts"
-import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts"
+import type { CombDatabaseErrorKey, ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts"
 
 export type TableMap = NonNullable<ConstraintMap[string]>
 
@@ -13,8 +13,8 @@ export type TableMap = NonNullable<ConstraintMap[string]>
 export type Fallback = {
 	/** the message safe to show the client, which the CombError carries as its `cause` */
 	cause: string
-	/** the key a client branches on, one of `combErrorKeys` */
-	errorKey: string
+	/** the key a client branches on */
+	errorKey: CombDatabaseErrorKey
 	/** the HTTP status the error answers with, by key: `conflict` is 409, `service_unavailable` 503 */
 	status: StatusKey
 }

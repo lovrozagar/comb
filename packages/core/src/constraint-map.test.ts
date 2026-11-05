@@ -21,7 +21,7 @@ const MAPS: ConstraintMap[] = [
 	},
 ]
 
-const FALLBACK = { cause: "generic", errorKey: "generic_key", status: "conflict" } as const
+const FALLBACK = { cause: "generic", errorKey: "constraint_violation", status: "conflict" } as const
 
 describe("own", () => {
 	it("reads own keys only", () => {
@@ -67,7 +67,7 @@ describe("toCombError", () => {
 	it("falls back to the generic error without an entry", () => {
 		expect(toCombError({ entry: undefined, fallback: FALLBACK, table: "a" }, null)).toMatchObject({
 			cause: "generic",
-			errorKey: "generic_key",
+			errorKey: "constraint_violation",
 			status: 409,
 			table: "a",
 		})
