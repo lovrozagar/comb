@@ -8,12 +8,16 @@
  * - Rows go to S, each table a trigger or view reached from S names (to a fixpoint), D (their FK descendants: a
  *   cascade reaches them) and A (the FK ancestors of all those: their keys must be met).
  * - The copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
- *   them on DROP COLUMN and RENAME COLUMN); then to a fixpoint each index and trigger on a created table or view
- *   (a view's INSTEAD OF triggers carry out a write through it), each table and view a created trigger or view
- *   names, and each created table's FK ancestors, which a write to it compiles checks against.
+ *   them on DROP COLUMN and RENAME COLUMN). When a pending file holds an ALTER TABLE, it creates every view and
+ *   trigger instead: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere fails
+ *   the file, and the copy carries them all rather than a list of which ALTER forms check. Then to a fixpoint each
+ *   index and trigger on a created table or view (a view's INSTEAD OF triggers carry out a write through it), each
+ *   table and view a created trigger or view names, and each created table's FK ancestors, which a write to it
+ *   compiles checks against. Only the seeded tables get rows.
  */
 import type { LiveObject } from "./proof-copy.ts"
-import { asciiFold, IDENT, sqliteNames } from "./sql-code.ts"
+import { asciiFold, codeOf, IDENT, sqliteNames } from "./sql-code.ts"
+import { splitSqlStatements } from "./sql-scan.ts"
 
 // lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again
 const SHADOWS: Readonly<Record<string, readonly string[]>> = {
@@ -27,6 +31,9 @@ const SHADOWS: Readonly<Record<string, readonly string[]>> = {
 }
 
 const isVirtual = (object: LiveObject): boolean => /^CREATE VIRTUAL TABLE\b/i.test(object.sql)
+
+/** Whether SQLite statement `stmt` is an ALTER TABLE, read as code (a comment or a string before it is not) */
+const isAlterTable = (stmt: string): boolean => /^ALTER\s+TABLE\b/i.test(codeOf(stmt, "sqlite"))
 
 /** The folded names of the shadow tables virtual table `object`'s module makes */
 function shadowsOf(object: LiveObject): string[] {
@@ -132,11 +139,13 @@ function observable(
 		written = new Set([...written, ...next])
 	}
 	const seeded = reach(reach(written, graph.childrenOf), graph.parentsOf)
-	/* SQLite checks each view and trigger naming a table on DROP COLUMN and RENAME COLUMN of it */
+	/* SQLite checks each view and trigger naming a table on DROP COLUMN and RENAME COLUMN of it, and every one of
+	   them on an ALTER TABLE that renames or drops a column, wherever it reads */
+	const altered = files.some(({ sql }) => splitSqlStatements(sql).some(isAlterTable))
 	const checked = objects.filter(
 		(object) =>
 			(object.type === "view" || object.type === "trigger") &&
-			[...(graph.names.get(object) as Set<string>)].some((name) => s.has(name)),
+			(altered || [...(graph.names.get(object) as Set<string>)].some((name) => s.has(name))),
 	)
 	/* a write to a created table compiles its keys' checks, which need each parent table */
 	let made = forward(graph, [...n, ...objectsOf(graph, seeded), ...checked])

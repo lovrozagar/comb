@@ -171,6 +171,27 @@ function viewTriggerCases(): ScopeCase[] {
 	}))
 }
 
+/* a view and a trigger left naming a table dropped after them, which DROP TABLE allows, beside a table they never name */
+const STALE_VIEW =
+	"CREATE TABLE gone (x);\nCREATE VIEW stale AS SELECT x FROM gone;\nDROP TABLE gone;\nCREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT);"
+const STALE_TRIGGER =
+	"CREATE TABLE gone (x);\nCREATE TABLE o (id INTEGER PRIMARY KEY);\nCREATE TRIGGER o_t AFTER INSERT ON o BEGIN INSERT INTO gone (x) VALUES (1); END;\nDROP TABLE gone;\nCREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);"
+
+/* an ALTER TABLE of a table no broken object names, which SQLite answers by checking every view and trigger */
+function brokenElsewhereCases(): ScopeCase[] {
+	return [
+		["a broken view, RENAME COLUMN", STALE_VIEW, "ALTER TABLE t RENAME COLUMN a TO a_2;"],
+		["a broken view, DROP COLUMN", STALE_VIEW, "ALTER TABLE t DROP COLUMN b;"],
+		["a broken view, RENAME TO", STALE_VIEW, "ALTER TABLE t RENAME TO t2;"],
+		["a broken view, ADD COLUMN", STALE_VIEW, "ALTER TABLE t ADD COLUMN c TEXT;"],
+		["a broken trigger, RENAME COLUMN", STALE_TRIGGER, "ALTER TABLE t RENAME COLUMN a TO a_2;"],
+	].map(([label, schema, file]) => ({
+		file: file as string,
+		label: `broken elsewhere: ${label as string}`,
+		schema: schema as string,
+	}))
+}
+
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
 	return [
@@ -178,6 +199,7 @@ export function scopeCorpus(): ScopeCase[] {
 		...triggerCases(),
 		...ftsCases(),
 		...viewTriggerCases(),
+		...brokenElsewhereCases(),
 		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
 	]
 }
