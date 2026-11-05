@@ -148,10 +148,6 @@ export type MigrationConfig = {
 	databases: Record<string, DatabaseConfig>
 }
 
-export type ResolvedMigrationConfig = {
-	databases: Record<string, ResolvedDatabaseConfig>
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    MIGRATION RESULT
    ═══════════════════════════════════════════════════════════════════════════ */

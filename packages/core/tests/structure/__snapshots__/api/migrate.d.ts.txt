@@ -8,7 +8,7 @@ export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCir
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
 export { DatabaseMissing } from "./drivers/missing.ts";
 export { TursoMissing } from "./drivers/sqlite.ts";
-export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationSafety, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 export type { ClassifyOptions } from "./core/classify.ts";
 export type { TargetKind } from "./core/classify-target.ts";
 export type { DatabaseShared, EnvironmentsDatabaseConfig, ForeignKey, SingleDatabaseConfig, TableInfo, TriggerEvent, } from "./types.ts";
@@ -410,9 +410,6 @@ export type ResolvedDatabaseConfig = {
 };
 export type MigrationConfig = {
     databases: Record<string, DatabaseConfig>;
-};
-export type ResolvedMigrationConfig = {
-    databases: Record<string, ResolvedDatabaseConfig>;
 };
 export type MigrationStatus = "success" | "already_applied" | "repaired" | "failed" | "skipped";
 export type MigrationResult = {
