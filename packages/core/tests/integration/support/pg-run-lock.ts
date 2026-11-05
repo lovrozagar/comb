@@ -16,7 +16,8 @@
  * Once it holds the lock, the run sweeps the scratch databases a timed-out or killed run left
  * (scratch-sweep.ts, plan 21 leaf 10.9): no other run's suites are running then, so none of theirs
  * is in use. And it resets each every-role `comb_t.*` setting a killed run left (probe-settings.ts),
- * and warns when the server runs with fsync on (pg-fsync.ts).
+ * drops each `comb_t_*` tablespace one left that holds nothing (tablespace-sweep.ts), and warns when
+ * the server runs with fsync on (pg-fsync.ts).
  */
 import { acquirePgRunLock } from "../../support/pg-lock.ts"
 import setupIntegration from "./global-setup.ts"
@@ -24,14 +25,16 @@ import { pgUrl } from "./pg.ts"
 import { fsyncWarning } from "./pg-fsync.ts"
 import { resetProbeSettings } from "./probe-settings.ts"
 import { sweepScratchDbs } from "./scratch-sweep.ts"
+import { sweepTablespaces } from "./tablespace-sweep.ts"
 
-/** The integration setup, then the run's lock, held until this project tears down, and the scratch and probe settings swept once it is taken */
+/** The integration setup, then the run's lock, held until this project tears down, and the scratch, probe settings and tablespaces swept once it is taken */
 export default async function setup(): Promise<() => Promise<void>> {
 	setupIntegration()
 	return acquirePgRunLock(pgUrl(), {
 		taken: async (session) => {
 			await sweepScratchDbs(session)
 			await resetProbeSettings(session)
+			await sweepTablespaces(session)
 			const warning = await fsyncWarning(session)
 			if (warning !== undefined) process.stderr.write(`${warning}\n`)
 		},
