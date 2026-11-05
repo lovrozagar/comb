@@ -4,6 +4,7 @@ import { rule as noConsole } from "./no-console.js"
 import { rule as noLocaleCompare } from "./no-locale-compare.js"
 import { rule as noModuleSideEffects } from "./no-module-side-effects.js"
 import { rule as noModuleState } from "./no-module-state.js"
+import { rule as noReviewLabel } from "./no-review-label.js"
 import { rule as noSilentCatch } from "./no-silent-catch.js"
 import { rule as noSpawnedKill } from "./no-spawned-kill.js"
 import { rule as noV8Ignore } from "./no-v8-ignore.js"
@@ -19,6 +20,7 @@ export default {
 		"no-locale-compare": noLocaleCompare,
 		"no-module-side-effects": noModuleSideEffects,
 		"no-module-state": noModuleState,
+		"no-review-label": noReviewLabel,
 		"no-silent-catch": noSilentCatch,
 		"no-spawned-kill": noSpawnedKill,
 		"no-v8-ignore": noV8Ignore,
