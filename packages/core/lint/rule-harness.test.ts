@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { oxlintJson, oxlintReports, reportsOf } from "./rule-harness.ts"
+import { oxlintJson, oxlintReports, repoReports, reportsOf } from "./rule-harness.ts"
 import { children } from "./scope.js"
 
 /** A rule that reports the comments the harness says touch every `debugger` statement. */
@@ -53,6 +53,21 @@ describe("oxlintReports", () => {
 	it("refuses a TMPDIR inside a git checkout, where oxlint would lint nothing", () => {
 		process.env["TMPDIR"] = import.meta.dirname
 		expect(() => oxlintReports("no-console", {})).toThrow("is inside a git checkout")
+	})
+})
+
+describe("repoReports", () => {
+	it("sorts two findings on one line by their message", () => {
+		const file = "packages/core/tests/integration/d1/both.test.ts"
+		const source = `import { spawnSync } from "node:child_process"
+
+export const both = (pid: number): unknown => spawnSync("kill", [String(pid)]) && process.kill(pid)
+`
+		const messages = repoReports({ [file]: source }).map((report) => [report.line, report.message.slice(0, 15)])
+		expect(messages).toEqual([
+			[3, "'process.kill' "],
+			[3, "a test spawns n"],
+		])
 	})
 })
 
