@@ -39,26 +39,35 @@ assume it can.
 
 ## Before you call it done
 
-From the repo root. CI runs `fmt:check` in place of `fmt`, and covers `test` via
-`test:coverage`.
+CI is the full gate. Locally, each commit runs only what its change reaches, from
+the package:
 
-    bun run fmt          # oxfmt, rewrites in place
-    bun run lint         # oxlint
-    bun run typecheck    # tsc --noEmit
-    bun run typecheck:strict  # + the flags a consumer might set
-    bun run test         # vitest
-    bun run test:coverage     # vitest at 100% per file, as CI enforces
-    bun run test:bun     # bun test — the bun:sqlite replay suite
+    cd packages/core && bun run test <paths>   # the touched tests and the tests of the code changed
+    bun run test:bun                           # when migrate/drivers/bun-sqlite.ts or tests/bun/ changed
+    bun run test tests/structure/api.test.ts   # when an export's signature changed
 
-`test`, `test:coverage`, `test:bun` and `verify` need `atlas` on `PATH` and
-`COMB_TEST_PG_URL` set; without either the run fails rather than skipping the
-Postgres and Atlas suites. On this machine a user-level PostgreSQL 17 serves
-`COMB_TEST_PG_URL='postgres://lovro:comb@localhost:55432/postgres?sslmode=disable'`;
-`node ~/.cache/pg17-embedded/start.mjs` starts it after a reboot. Do not bind
-55432 from docker here. Elsewhere, a `postgres:17` container on that port serves
-the same URL where docker is set up. The local server checks passwords over TCP
-(scram-sha-256, `lovro`'s is `comb`), as CI's does, so a test that depends on a
-password fails here as it fails there; only its Unix socket trusts.
+The pre-commit hook formats, lints and type-checks the staged files; pre-push runs
+`fmt:check` and `lint` over the tree and the standards check. The full
+`test:coverage`, `test:consumers`, `test:e2e` and `typecheck:strict` run in CI,
+not here. Push, then run `bun scripts/ci-wait.ts`: it waits for the push's ci.yml
+run and, on a failure, names the failed jobs and saves their logs under
+`.tmp/grunt/ci/`. Fix, commit, push and wait again until it passes. A push
+cancels the run before it, so batch commits and push once.
+
+A release's version bump rides in the final push, and the `v*` tag goes on that
+commit once ci-wait passes on it. The release workflow reruns no test: it waits
+for that commit's ci.yml push run and publishes on its success.
+
+The Postgres and Atlas suites need `atlas` on `PATH` and `COMB_TEST_PG_URL` set;
+without either the run fails rather than skipping them. On this machine a
+user-level PostgreSQL 17 serves
+`COMB_TEST_PG_URL='postgres://lovro:comb@localhost:55432/postgres?sslmode=disable'`
+in UTC, as CI's does. `node ~/.cache/pg17-embedded/start.mjs` starts it after a
+reboot, and `node .tmp/grunt/pg17/start.mjs` rebuilds it from nothing. Do not
+bind 55432 from docker here. Elsewhere, a `postgres:17` container on that port
+serves the same URL where docker is set up. The local server checks passwords
+over TCP (scram-sha-256, `lovro`'s is `comb`), as CI's does, so a test that
+depends on a password fails here as it fails there; only its Unix socket trusts.
 
 `typecheck:strict` exists because comb ships TypeScript source, so a consumer's
 strict flags apply to it. Must stay at zero — see
@@ -72,4 +81,4 @@ to make a build pass. Shell-outs to wrangler, atlas and drizzle-kit go through
 
 `test:bun` is separate because `packages/core/tests/bun/` imports `bun:sqlite`
 and `bun:test`, which vitest can't load; it holds `migrate/drivers/bun-sqlite.ts`
-at 100% (`packages/core/bunfig.toml`). `bun run test:all` runs both.
+at 100% (`packages/core/bunfig.toml`).

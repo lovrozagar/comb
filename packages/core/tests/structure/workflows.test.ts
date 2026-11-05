@@ -1,9 +1,8 @@
 /**
  * Every GitHub Action the workflows run is pinned to a full commit SHA, with the release it
  * names in a trailing comment. A tag can be moved to other code; a SHA cannot. And CI runs the
- * gates `bun run verify` runs, no more and no fewer, so a stamp vouches for what CI checks.
+ * gates standards lists for comb, no more and no fewer, so the rule every agent reads names what CI checks.
  */
-import { execFileSync } from "node:child_process"
 import { globSync, readdirSync, readFileSync } from "node:fs"
 import { availableParallelism, homedir } from "node:os"
 import { join } from "node:path"
@@ -130,11 +129,10 @@ export function ciJobs(yaml: string): Array<{ lines: string; name: string; runsO
 		}))
 }
 
-/** The gates `bun run verify` runs, in its order: verify's own gates() over package.json's standards.gates */
-function verifyGates(): string[] {
-	const script =
-		'const { gates } = await import("./scripts/verify.ts"); const pkg = await Bun.file("package.json").json(); console.log(JSON.stringify(gates(pkg.standards.gates).map((g) => g.name)))'
-	return JSON.parse(execFileSync("bun", ["-e", script], { cwd: ROOT, encoding: "utf8" })) as string[]
+/** The gates CI runs, in order: package.json's standards.ci, which standards' sync renders through its gates() */
+function ciGates(): string[] {
+	const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { standards: { ci: string[] } }
+	return pkg.standards.ci
 }
 
 /** The script a `bun run` step runs, through comb's package filter or the root */
@@ -160,19 +158,19 @@ const scriptsOf = (lines: string) =>
 		return script === undefined ? [] : [script]
 	})
 
-/* what a job off Linux runs: a part of a verify gate, never a gate of its own (4.19) */
+/* what a job off Linux runs: a part of a gate, never a gate of its own (4.19) */
 const OFF_LINUX = { "macos-latest": ["test:posix"] }
 
-describe("ci.yml and verify run the same gates", () => {
+describe("ci.yml runs the gates standards lists for comb", () => {
 	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
-	/* the 0.13 RC: CI ran test:coverage and verify ran test, so a stamp passed what CI failed */
-	it("every bun run step on Linux is a verify gate, every verify gate a Linux step, and every other step setup", () => {
+	/* the 0.13 RC: CI ran test:coverage and the local gate ran test, so a local pass hid what CI failed */
+	it("every bun run step on Linux is a listed gate, every listed gate a Linux step, and every other step setup", () => {
 		const linux = jobs.filter((job) => job.runsOn === "ubuntu-latest")
 		const steps = linux.flatMap((job) => ciSteps(job.lines))
-		const verified = verifyGates()
+		const listed = ciGates()
 		const ran = linux.flatMap((job) => scriptsOf(job.lines))
 		const other = steps.filter(({ command }) => command === undefined || scriptOf(command) === undefined)
-		expect([...new Set(ran)].toSorted()).toEqual([...verified].toSorted())
+		expect([...new Set(ran)].toSorted()).toEqual([...listed].toSorted())
 		expect(
 			other.filter(({ command, name }) =>
 				command === undefined ? !SETUP.names.includes(name ?? "") : !SETUP.commands.includes(command),
@@ -344,8 +342,8 @@ describe("the pass of the Date-key suites off UTC", () => {
 })
 
 /*
- * CI installs the bun package.json's packageManager pins, and verify refuses another (scripts/verify.ts): a stamp
- * from 1.4.4 passed a pack script and a failed import that 1.3.11 fails. The pin is the one source: every setup-bun
+ * CI installs the bun package.json's packageManager pins: a local run on 1.4.4 passed a pack script and a failed
+ * import that 1.3.11 fails. The pin is the one source: every setup-bun
  * step reads it by file, and mise reads it here through mise.toml, which names no version of its own.
  */
 describe("the bun every run uses", () => {
