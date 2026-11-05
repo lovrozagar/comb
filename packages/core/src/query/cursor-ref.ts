@@ -159,17 +159,17 @@ function pgInfinity(column: SQLWrapper, sign: "-" | "+"): SQL {
 
 /**
  * A Date no JS Date holds, which a date-mode Postgres `timestamptz` or `date` holding ±infinity
- * reads as, and so does a SQLite timestamp holding ±Infinity on bun:sqlite and libsql (3.24): the
- * row's own value while it is infinite, exact as the order compares it. Once the row is gone, or
- * finite, it may have held either infinity, so the list resumes from the direction's own end,
- * repeating rows and skipping none, as a date-mode `timestamp` does (U17).
+ * reads as, and so does a SQLite timestamp holding ±Infinity on bun:sqlite and libsql (3.24), or a
+ * finite value past a Date's range: the row's own value, exact as the order compares it, so the
+ * list resumes past the row, a finite one included (AB3-9 of area B). Once the row is gone it may
+ * have held either infinity, so the list resumes from the direction's own end, repeating rows and
+ * skipping none, as a date-mode `timestamp` does (U17).
  */
 function unheldBound({ column, direction }: SortKey, at: Anchor): SQL {
 	const sqlite = onSqlite(column, at.table)
-	const infinite = sqlite ? sql`${column} IN (9e999, -9e999)` : sql`NOT isfinite(${column})`
 	const sign = direction === "asc" ? "-" : "+"
 	const end = sqlite ? (sign === "-" ? sql`-9e999` : sql`9e999`) : pgInfinity(column, sign)
-	return sql`coalesce((SELECT CASE WHEN ${infinite} THEN ${column} END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${end})`
+	return sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${end})`
 }
 
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
