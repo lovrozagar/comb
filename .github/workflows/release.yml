@@ -219,7 +219,6 @@ jobs:
   github-release:
     name: GitHub Release
     needs: [npmjs, gh-pkg]
-    if: ${{ !cancelled() && needs.gh-pkg.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
