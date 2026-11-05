@@ -7,7 +7,18 @@
 import { drizzle } from "drizzle-orm/d1"
 import { afterEach, describe, expect, it } from "vitest"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
-import { JSON_OBJECT, LONG_BETWEEN, type OpenDb, refusedOnPage } from "../support/stored-keys.ts"
+import {
+	INTEGER_TEXT,
+	JSON_OBJECT,
+	JSON_TEXT,
+	LONG_BETWEEN,
+	type OpenDb,
+	REAL_TEXT,
+	refusedOnPage,
+	storedProblems,
+	TEXT_BLOB,
+	UNTYPED_TEXT,
+} from "../support/stored-keys.ts"
 
 const shards: D1Harness[] = []
 afterEach(async () => {
@@ -20,6 +31,24 @@ const open: OpenDb = async (statements, relations) => {
 	for (const statement of statements) await shard.CORE.prepare(statement).run()
 	return drizzle(shard.CORE, { relations: relations as never }) as never
 }
+
+describe("a cursor the list minted is never refused as invalid_cursor (AB4-1 of area B)", () => {
+	it("answers a JSON-mode key the 500 naming it on every list kind, never a 400", async () => {
+		expect(await storedProblems(open, JSON_TEXT, { limits: [1, 2], refusing: () => true })).toEqual([])
+	})
+
+	it.each([
+		["REAL", REAL_TEXT],
+		["INTEGER", INTEGER_TEXT],
+		["untyped", UNTYPED_TEXT],
+	] as const)("pages a %s key holding TEXT, never a 400", async (_, kase) => {
+		expect(await storedProblems(open, kase)).toEqual([])
+	})
+
+	it("answers a TEXT key holding a BLOB the 500 naming it, never a 400", async () => {
+		expect(await storedProblems(open, TEXT_BLOB, { refusing: () => true })).toEqual([])
+	})
+})
 
 describe("a row no cursor holds is refused on the page that serves it, at any page size (AB4-3 of area B)", () => {
 	it("answers the 500 on page 1 for a key past the cap the page serves before its last row", async () => {

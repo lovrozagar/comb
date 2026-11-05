@@ -33,7 +33,7 @@ import { combErrorKeys } from "../types.ts"
 import { CursorRef, effectiveNulls } from "./cursor.ts"
 import { lossy } from "./cursor-refusals.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
-import { readsBack } from "./sqlite/cursor-fit.ts"
+import { readsBack } from "./sqlite/reads-back.ts"
 import { holdsText, inSeconds } from "./sqlite/timestamp-column.ts"
 import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlite/keyset.ts"
 

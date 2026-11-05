@@ -39,11 +39,25 @@ const read = <T extends { id: unknown }>(rows: readonly T[], total: number | nul
 		...(total === null ? {} : { _total: total }),
 	}))
 
-/** The ids of the merged page of `shards` under `params` */
+/** A merged derived list under `params`, over rows with an id and a k */
+const derived = (params: Record<string, string>) =>
+	buildDerivedListQuery({
+		...SEALED,
+		dialect: "sqlite",
+		idColumn: sql`id`,
+		merged: {},
+		parsed: parse(params),
+		sortColumns: { k: sql`k` },
+	})
+
+/**
+ * The ids of the merged page of `shards` under `params`, on a derived list: its keys are expressions,
+ * which hold a value of any storage class, where a table's column refuses one its mode does not read (AB4-1)
+ */
 const ids = (shards: Array<Array<{ id: unknown; k?: unknown }>>, params: Record<string, string>) =>
 	paginateMerged(
 		shards.map((rows) => read(rows, params["cursor"] === undefined ? rows.length : null)),
-		merged(params),
+		derived(params),
 	)[0].map((row) => row.id)
 
 /* plan 14's 5.5: the parts tests/integration/d1/paginate-merged.test.ts does not reach on D1 */
@@ -84,7 +98,8 @@ describe("buildListQuery's merged list", () => {
 })
 
 describe("paginateMerged", () => {
-	it("orders each storage class as SQLite does: numbers, booleans and dates before text, text before a blob", () => {
+	/* a key's class mixes on an expression alone: a column's mode refuses the class it does not read (AB4-1 of area B) */
+	it("orders each storage class as SQLite does: numbers and booleans before text, text before a blob", () => {
 		const shards = [
 			/* each shard's rows in its own order, as its ORDER BY returns them */
 			[
@@ -93,13 +108,12 @@ describe("paginateMerged", () => {
 				{ id: "b", k: new Uint8Array([2]) },
 			],
 			[
-				{ id: "e", k: new Date(0) },
 				{ id: "d", k: true },
 				{ id: "g", k: new Uint8Array([1]) },
 				{ id: "f", k: new Uint8Array([1, 9]) },
 			],
 		]
-		expect(ids(shards, { limit: "10", order: "k.asc" })).toEqual(["e", "d", "c", "a", "g", "f", "b"])
+		expect(ids(shards, { limit: "10", order: "k.asc" })).toEqual(["d", "c", "a", "g", "f", "b"])
 	})
 
 	it("breaks a tie by the tiebreak in the first key's direction, and places nulls as the order says", () => {
@@ -119,17 +133,51 @@ describe("paginateMerged", () => {
 	it("orders by the tiebreak alone, descending, under an empty sort, as orderByKeys does", () => {
 		/* a hand-built query: the schema adds a default order to an empty one */
 		const unsorted = buildListQuery({ ...SEALED, merged: {}, parsed: { limit: 10, parsedSort: [] }, table: t })
-		const [rows] = paginateMerged([read([{ id: 3 }, { id: 1 }], 2, []), read([{ id: 2 }], 1, [])], unsorted)
-		expect(rows.map((row) => row.id)).toEqual([3, 2, 1])
+		const [rows] = paginateMerged([read([{ id: "c" }, { id: "a" }], 2, []), read([{ id: "b" }], 1, [])], unsorted)
+		expect(rows.map((row) => row.id)).toEqual(["c", "b", "a"])
+	})
+})
+
+describe("paginateMerged and a key's column (AB4-1 of area B)", () => {
+	/* AB4-1 of area B: the cursor after such a row is one the next page's open would refuse as a 400 */
+	it("answers the 500 naming the key for a row whose TEXT column holds a number, never minting its cursor", () => {
+		expect(() => paginateMerged([read([{ id: "a", k: 1 }])], merged({}))).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(/^the sort by k reads a value its column's mode does not hold/),
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
 	})
 
+	it("merges a key declared as time by its epoch milliseconds, where the rows read it as a Date", () => {
+		const built = buildDerivedListQuery({
+			...SEALED,
+			dialect: "sqlite",
+			idColumn: sql`id`,
+			merged: {},
+			parsed: parse({ order: "k.desc" }),
+			sortColumns: { k: { sql: sql`k`, type: "date" } },
+		})
+		const shards = [
+			read([{ id: "a", k: new Date(1) }]),
+			read([
+				{ id: "b", k: new Date(3) },
+				{ id: "c", k: new Date(2) },
+			]),
+		]
+		expect(paginateMerged(shards, built)[0].map(({ id }) => id)).toEqual(["b", "c"])
+	})
+})
+
+describe("paginateMerged's count and projection", () => {
 	it("sums each shard's count, and none of a shard that read no row", () => {
-		const counted = [read([{ id: "a", k: 1 }], 2), [], read([{ id: "b", k: 2 }], 1)]
+		const counted = [read([{ id: "a", k: "1" }], 2), [], read([{ id: "b", k: "2" }], 1)]
 		expect(paginateMerged(counted, merged({}))[1].count).toBe(3)
 	})
 
 	it("refuses a page past a gone anchor, and projects each row to the select", () => {
-		const gone = [[{ ...read([{ id: "a", k: 1 }])[0], _combAnchorGone: 1 }]]
+		const gone = [[{ ...read([{ id: "a", k: "1" }])[0], _combAnchorGone: 1 }]]
 		expect(() => paginateMerged(gone, merged({}))).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
 		const select = buildListQuery({
 			...SEALED,
@@ -137,7 +185,7 @@ describe("paginateMerged", () => {
 			parsed: { ...parse({}), parsedFields: { root: { relations: {}, scalars: ["id"] } } },
 			table: t,
 		})
-		expect(paginateMerged([read([{ id: "a", k: 1 }])], select)[0]).toEqual([{ id: "a" }])
+		expect(paginateMerged([read([{ id: "a", k: "1" }])], select)[0]).toEqual([{ id: "a" }])
 	})
 })
 
@@ -243,24 +291,13 @@ describe("paginateMerged on an integer sort key past 2^53", () => {
 	})
 
 	it("merges keys within the bound, and keys a driver read as bigint, by their values", () => {
-		const built = merged({ order: "k.asc" })
+		const built = merged({ order: "k.asc" }, undefined, numbered)
 		const exact = [read([{ id: "b", k: 2n ** 60n + 10n }]), read([{ id: "a", k: 2n ** 60n + 20n }])]
 		expect(paginateMerged(exact, built)[0].map(({ id }) => id)).toEqual(["b", "a"])
 		const safe = [read([{ id: "b", k: 2 ** 53 - 1 }]), read([{ id: "a", k: -(2 ** 53 - 1) }])]
 		expect(paginateMerged(safe, built)[0].map(({ id }) => id)).toEqual(["a", "b"])
 	})
 })
-
-/** A merged derived list under `params`, over rows with an id and a k */
-const derived = (params: Record<string, string>) =>
-	buildDerivedListQuery({
-		...SEALED,
-		dialect: "sqlite",
-		idColumn: sql`id`,
-		merged: {},
-		parsed: parse(params),
-		sortColumns: { k: sql`k` },
-	})
 
 /* r18 Q12: a derived list, a union or a join, merged across shards as a table's is */
 describe("buildDerivedListQuery's merged list", () => {

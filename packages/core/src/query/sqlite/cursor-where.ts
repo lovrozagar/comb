@@ -12,7 +12,8 @@ import { type CursorId, type CursorOptions, CursorRef, readKeyset } from "../cur
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
-import { assertCursorFits, bindableIn, boundAsRead, boundCarried, boundForKeys, readsBack } from "./cursor-fit.ts"
+import { assertCursorFits, bindableIn, boundAsRead, boundCarried, boundForKeys } from "./cursor-fit.ts"
+import { readsBack } from "./reads-back.ts"
 import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */

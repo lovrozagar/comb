@@ -7,6 +7,7 @@ import { SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { CursorOptions } from "../cursor.ts"
+import type { ColumnCheck } from "../cursor-mint.ts"
 import { NO_KEYSET_CAUSE } from "../cursor-refusals.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { COMB_ID, type ListExtra, type ListPagination, type PaginationFacts, paginationOf } from "../pagination.ts"
@@ -14,7 +15,8 @@ import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { DateKey, readsBack, refersBack } from "./cursor-fit.ts"
+import { DateKey, unfitIndex } from "./cursor-fit.ts"
+import { readsBack, refersBack } from "./reads-back.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import { familyOf, keyTextsSQL, storageOf, storedTextOf, textKeysSQL } from "./key-texts.ts"
 import type { SortKey } from "./keyset.ts"
@@ -90,6 +92,16 @@ function shardWindow(parsed: ListQueryInput, merged: { maxRowsPerShard?: number 
 const boundAsRead = ({ merged, table }: Finish, column: SQLWrapper): boolean =>
 	merged !== undefined || table === undefined || !readsBack(column, table)
 
+/** The column check cursorWhere runs on a cursor of `list`, its keys bound as read where boundAsRead says; none with no keyset */
+function holdsOf(list: Finish): ColumnCheck | undefined {
+	const { keyset, table, tiebreak } = list
+	if (keyset.keys === null || tiebreak === null) return undefined
+	const columns = [...keyset.keys.map(({ column }) => column), tiebreak.column]
+	const keys = keyset.keys.length
+	const asRead = (i: number) => i < keys && boundAsRead(list, columns[i] as SQLWrapper)
+	return (values, carried) => unfitIndex(columns, values, { asRead, carried, table })
+}
+
 /** What paginate is told of the list, beside the extras its rows carry */
 function factsOf(list: Finish) {
 	const { keyset, merged, parsed, sort, table, tiebreak } = list
@@ -100,6 +112,8 @@ function factsOf(list: Finish) {
 		asRead: fieldsWhere((column) => boundAsRead(list, column)),
 		/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number (Q6) */
 		cursorable: keyset.keys !== null && tiebreak !== null,
+		/* the check cursorWhere opens the next cursor by, so no cursor minted here is refused there (AB4-1 of area B) */
+		holds: holdsOf(list),
 		/* a merged list's anchor row is on one shard only, so it never pages by reference (Q1 of r17) */
 		keyset: merged !== undefined ? "merged" : table === undefined ? "derived" : "table",
 		/* the sort fields a reference reads back on, by the rule the cursor's read holds (27.7) */

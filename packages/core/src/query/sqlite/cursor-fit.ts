@@ -4,7 +4,7 @@
  * stale cursor, answered with a 400 before drizzle maps it (a string on a timestamp column would
  * otherwise throw a TypeError, a 500).
  */
-import { Column, type ColumnDataType, is, SQL, type SQLWrapper, sql, Table } from "drizzle-orm"
+import { Column, type ColumnDataType, is, SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
@@ -12,6 +12,7 @@ import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
+import { refersBack } from "./reads-back.ts"
 import { carriedStored, carriedText, holdsText, inSeconds } from "./timestamp-column.ts"
 
 /**
@@ -45,9 +46,13 @@ const HOLDS: Record<ColumnDataType, (value: unknown, dataType: string) => boolea
 		(dataType === "string numeric" && (typeof value === "bigint" || typeof value === "number")),
 }
 
-/** Whether `value` is what a column of this drizzle `dataType` holds (HOLDS) */
-const fitsDataType = (dataType: string, value: unknown): boolean =>
-	HOLDS[dataType.split(" ")[0] as ColumnDataType]?.(value, dataType) ?? false
+/**
+ * Whether `value` is what `column` holds (HOLDS), and on SQLite any text on a number column: SQLite orders
+ * every TEXT after every number and compares a bound text as itself, which drizzle's number mappers bind as is (AB4-1 of area B)
+ */
+const fitsColumn = (column: Column, value: unknown): boolean =>
+	(is(column, SQLiteColumn) && column.dataType.startsWith("number") && typeof value === "string") ||
+	(HOLDS[column.dataType.split(" ")[0] as ColumnDataType]?.(value, column.dataType) ?? false)
 
 /**
  * A derived sort key declared as time: its expression yields epoch milliseconds, and its cursor
@@ -69,66 +74,6 @@ const isInteger = (value: unknown) =>
 	typeof value === "bigint" ||
 	(typeof value === "number" && Number.isFinite(value)) ||
 	(typeof value === "string" && INTEGER_TEXT.test(value))
-
-/** Every column `chunk` reads, through the SQL it nests */
-function columnsOf(chunk: unknown): Column[] {
-	if (is(chunk, Column)) return [chunk]
-	if (is(chunk, SQL)) return chunk.queryChunks.flatMap(columnsOf)
-	return Array.isArray(chunk) ? chunk.flatMap(columnsOf) : []
-}
-
-/* drizzle keeps the table a column is of on it, untyped */
-const tableOf = (column: Column): unknown => (column as unknown as { table: unknown }).table
-
-/* the names drizzle tells one table from another by: an alias's own name over its table's, and its schema */
-const NAME = /* @__PURE__ */ Symbol.for("drizzle:Name")
-const ORIGINAL_NAME = /* @__PURE__ */ Symbol.for("drizzle:OriginalName")
-const SCHEMA = /* @__PURE__ */ Symbol.for("drizzle:Schema")
-
-/** A table's name, its original table's and its schema, as drizzle keys a table in a query */
-const tableKey = (table: Table): unknown[] => {
-	const named = table as unknown as Record<symbol, unknown>
-	return [named[NAME], named[ORIGINAL_NAME], named[SCHEMA]]
-}
-
-/**
- * Whether `a` and `b` are one table as a query reads it: one object, or two of drizzle's for the same
- * name, original table and schema. An alias's columns carry a table of their own, which is no alias
- * object, so identity alone refused an anchor that is an alias (27.19 of plan 15); another alias of
- * the same table has another name, and stays apart.
- */
-function sameTable(a: unknown, b: unknown): boolean {
-	if (a === b) return true
-	if (!is(a, Table) || !is(b, Table)) return false
-	const [x, y] = [tableKey(a), tableKey(b)]
-	return x.every((part, i) => part === y[i])
-}
-
-/**
- * Whether the anchor row `table` supplies the key `column`, so the keyset may read a bound from that
- * row: a column of that table does, and so does an SQL expression over that table's own columns
- * alone, which the read evaluates on that row (27.7 of plan 15). A joined table's column, or an
- * expression over one, reads the anchor's own value back through a subquery that correlates to each
- * candidate row, which skipped and looped rows for every bound read from the row (QL1 of r22b; 27.14
- * guarded only text), so such a key binds as an anchorless list binds it. With no anchor in reach, as
- * on the relational path, a column reads back: there every key is the queried table's own column, as
- * keysOn (query/drizzle.ts:57-68) takes each sort field as an own property of that table and refuses
- * any other, so no relation column through `with`, nor an extras SQL, becomes a key.
- */
-function readsBack(column: SQLWrapper, table: object | undefined): boolean {
-	if (is(column, Column)) return table === undefined || sameTable(tableOf(column), table)
-	if (!is(column, SQL) || table === undefined) return false
-	const read = columnsOf(column)
-	return read.length > 0 && read.every((each) => sameTable(tableOf(each), table))
-}
-
-/**
- * Whether a cursor value carried by reference on `column` reads back from `table`'s row: a key the row
- * supplies (readsBack) whose column, if it is one, holds text. The mint and the read both ask it, so
- * no list mints a cursor it then refuses.
- */
-const refersBack = (column: SQLWrapper, table: object | undefined): boolean =>
-	readsBack(column, table) && (!is(column, Column) || column.dataType.startsWith("string") || holdsText(column))
 
 /**
  * Whether `value` is a time key's stored value as a list that binds the key as read carries it (QL2
@@ -158,7 +103,7 @@ function fits(
 	if (asRead && carriedTime(column, value)) return true
 	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
 	if (carriedText(column, value, { asRead, carried }) || carriedStored(column, value, { asRead, carried })) return true
-	if (is(column, Column)) return fitsDataType(column.dataType, value)
+	if (is(column, Column)) return fitsColumn(column, value)
 	return ["string", "number", "boolean", "bigint"].includes(typeof value) || value instanceof Uint8Array
 }
 
@@ -258,24 +203,30 @@ const boundForKeys = (dialect: ListDialect, columns: readonly SQLWrapper[], valu
 		columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindableIn(dialect, columns[i], value),
 	)
 
+/** Where a list's keys are read: which bind as read, which values the cursor flags as carried, and the table a reference reads back from */
+type FitAt = {
+	asRead?: ((index: number) => boolean) | undefined
+	carried?: ((index: number) => boolean) | undefined
+	table?: object | undefined
+}
+
 /**
- * Throw a 400 unless every cursor value, the tiebreak id last, fits its column, a reference read back
- * from `at.table`; `at.asRead` says which keys bind as read, where a time key may carry its stored value,
- * and `at.carried` which the cursor flags as the stored text the list carried
+ * The index of the first cursor value, the tiebreak id last, that does not fit its column, a reference
+ * read back from `at.table`, or -1 when every one does; `at.asRead` says which keys bind as read, where a
+ * time key may carry its stored value, and `at.carried` which the cursor flags as the stored text the
+ * list carried. The open refuses a cursor by it, and the mint a row (AB4-1 of area B), so no list seals
+ * a cursor its next page refuses
  */
-function assertCursorFits(
-	columns: readonly SQLWrapper[],
-	values: readonly unknown[],
-	at: {
-		asRead?: ((index: number) => boolean) | undefined
-		carried?: ((index: number) => boolean) | undefined
-		table?: object | undefined
-	} = {},
-): void {
+function unfitIndex(columns: readonly SQLWrapper[], values: readonly unknown[], at: FitAt = {}): number {
 	const { asRead = () => false, carried = () => false, table } = at
-	const each = (column: SQLWrapper, index: number) =>
-		fits(column, values[index], { asRead: asRead(index), carried: carried(index), table })
-	if (columns.every(each)) return
+	return columns.findIndex(
+		(column, index) => !fits(column, values[index], { asRead: asRead(index), carried: carried(index), table }),
+	)
+}
+
+/** Throw a 400 unless every cursor value, the tiebreak id last, fits its column (unfitIndex) */
+function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unknown[], at: FitAt = {}): void {
+	if (unfitIndex(columns, values, at) === -1) return
 	throw new CombError({ cause: "Invalid cursor", errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 }
 
@@ -294,7 +245,6 @@ export {
 	boundForKeys,
 	carriesOpaque,
 	DateKey,
-	readsBack,
 	readsRounded,
-	refersBack,
+	unfitIndex,
 }

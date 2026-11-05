@@ -11,6 +11,12 @@ import { type CursorOptions, seal, sealedLength } from "./cursor-seal.ts"
 import { roundedKey } from "./rounded-key.ts"
 import type { SortField } from "./types.ts"
 
+/**
+ * The open's column check a builder hands the mint: the index of the first value, the tiebreak id last,
+ * its column does not hold, `carried` saying which the cursor flags as stored text; -1 when all fit
+ */
+type ColumnCheck = (values: readonly unknown[], carried: (index: number) => boolean) => number
+
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
 type KeysetKind = "derived" | "merged" | "table"
 
@@ -96,22 +102,16 @@ function fitCursor(
 function fittedCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
-	options: Parameters<typeof fitCursor>[2],
+	options: Parameters<typeof fitCursor>[2] & {
+		// AB4-1 of area B
+		/** the open's column check, run on the record sealed; none on a row no builder read */
+		holds?: ColumnCheck | undefined
+	},
 ): () => string {
 	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one (QL1 of r22b) */
 	const derived = options?.keyset === "derived"
 	const asRead = (field: string) => derived || (options?.asRead?.has(field) ?? false)
-	/* a date-mode ±infinity is bounded from its row (3.24) */
-	const unheld = sort.find(
-		({ field }) => asRead(field) && row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()),
-	)
-	if (unheld !== undefined) {
-		throw new CombError({
-			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite timestamp holding ±Infinity), which this list has no row to read back by, ${derived ? "a derived list having none" : "its key being no column of the anchor table"}; select it in string mode or sort by another column`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
+	refuseInvalidDate(row, sort, { asRead, derived })
 	/* a key bound as the driver read it skips rows or repeats one once rounded (Q1 of r19, QL1 of r22b) */
 	const rounded = roundedKey(row, sort, derived ? "derived" : { unread: asRead })
 	if (rounded !== undefined) throw rounded
@@ -125,11 +125,15 @@ function fittedCursor(
 		),
 	}
 	const bytes = (record: Record<string, unknown>) => cursorBytes(record, sort, settled)
-	const sealer = (plaintext: Uint8Array) => () => seal(plaintext, options)
+	/* the record sealed is held to the check the next page opens it by, so it never refuses what this page minted */
+	const sealer = (plaintext: Uint8Array, record: Record<string, unknown>) => {
+		refuseUnfit(record, sort, options)
+		return () => seal(plaintext, options)
+	}
 	const fits = (record: Record<string, unknown>) => sealedLength(bytes(record).length) <= MAX_CURSOR_LENGTH
 	const whole = bytes(row)
 	const length = sealedLength(whole.length)
-	if (length <= MAX_CURSOR_LENGTH) return sealer(whole)
+	if (length <= MAX_CURSOR_LENGTH) return sealer(whole, row)
 	const fields = sort.map(({ field }) => field).join(", ")
 	if (options.keyset === "derived" || options.keyset === "merged") throw tooLong(fields, length, options.keyset)
 	const long = sort
@@ -143,9 +147,46 @@ function fittedCursor(
 	for (const field of long) {
 		const ref = longestFitting(record, field, fits)
 		record = { ...record, [field]: ref ?? new CursorRef("", codePoints(row[field] as string).length) }
-		if (ref !== undefined) return sealer(bytes(record))
+		if (ref !== undefined) return sealer(bytes(record), record)
 	}
 	throw tooLong(fields, length, "table")
 }
 
-export { createCursor, fitCursor, fittedCursor, type KeysetKind }
+/** A 500 naming a key bound as read (`at.asRead`) whose row read an Invalid Date, which no cursor binds; a date-mode ±infinity is bounded from its row (3.24) */
+function refuseInvalidDate(
+	row: Record<string, unknown>,
+	sort: readonly SortField[],
+	at: { asRead: (field: string) => boolean; derived: boolean },
+): void {
+	const unheld = sort.find(
+		({ field }) => at.asRead(field) && row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()),
+	)
+	if (unheld === undefined) return
+	throw new CombError({
+		cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite timestamp holding ±Infinity), which this list has no row to read back by, ${at.derived ? "a derived list having none" : "its key being no column of the anchor table"}; select it in string mode or sort by another column`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
+/** A 500 naming the first value of `record` its column does not hold (ColumnCheck), the cursor the next page would refuse */
+function refuseUnfit(
+	record: Record<string, unknown>,
+	sort: readonly SortField[],
+	options: Parameters<typeof fittedCursor>[2],
+): void {
+	/* a row no builder read has no check, and options a JS caller left out are refused by seal, by name */
+	if (options?.holds === undefined) return
+	const idField = options.idField ?? "id"
+	const values = [...sort.map(({ field }) => record[field]), record[idField]]
+	const index = options.holds(values, (i) => options.carried?.has(sort[i]?.field ?? "") ?? false)
+	if (index === -1) return
+	const named = sort[index] === undefined ? `the tiebreak id ${idField}` : `the sort by ${sort[index].field}`
+	throw new CombError({
+		cause: `${named} reads a value its column's mode does not hold (a JSON-mode key's, or a SQLite column's of another storage class than its mode reads), which no cursor of this list resumes after; sort by another column`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
+export { type ColumnCheck, createCursor, fitCursor, fittedCursor, type KeysetKind }

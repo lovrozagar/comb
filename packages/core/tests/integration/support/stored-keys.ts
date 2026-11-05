@@ -253,6 +253,8 @@ export const JSON_TEXT: StoredCase = { ddl: "TEXT", mode: "json", values: [`'"a"
 /* AB4-1: a number column holding TEXT, which SQLite orders after every number and compares exactly */
 export const REAL_TEXT: StoredCase = { ddl: "REAL", mode: "real", values: ["1", "2", "'t'", "3"] }
 export const INTEGER_TEXT: StoredCase = { ddl: "INTEGER", mode: "integer", values: ["1", "2", "'x'", "3"] }
+/* AB4-1: a numeric-looking TEXT in a column of no declared type, whose BLOB affinity keeps a bound string a string */
+export const UNTYPED_TEXT: StoredCase = { ddl: "", mode: "real", values: ["1", "2", "'1.5'", "3"] }
 /* AB4-1: a TEXT column holding a BLOB, which drizzle reads as the text of its bytes */
 export const TEXT_BLOB: StoredCase = { ddl: "TEXT", mode: "text", values: ["'a'", "x'61'", "'b'"] }
 

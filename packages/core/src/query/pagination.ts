@@ -8,7 +8,7 @@
  * built query shows no part of the secret.
  */
 import { type DecodedCursor, readKeyset } from "./cursor.ts"
-import { fittedCursor, type KeysetKind } from "./cursor-mint.ts"
+import { type ColumnCheck, fittedCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { carriedTexts, COMB_ID, refuseUnheld, typedKeys } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
@@ -93,6 +93,9 @@ type PaginationFacts = {
 	/** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
 	byReference?: ReadonlySet<string> | undefined
 	cursorable: boolean
+	// AB4-1 of area B
+	/** the column check the builder's open runs on a cursor, which every cursor it mints passes */
+	holds?: ColumnCheck | undefined
 	/** the extras the builder selected, which every row must carry */
 	expects: readonly ListExtra[]
 	keyset?: KeysetKind | undefined
@@ -117,7 +120,13 @@ function paginationOf<TMerged extends boolean = false>(
 		limit: query.limit,
 		merged: (facts.merged ?? false) as TMerged,
 		fit: (row) =>
-			fitFrom(row, query.parsedSort, { ...options, asRead: facts.asRead, byReference: facts.byReference, keyset }),
+			fitFrom(row, query.parsedSort, {
+				...options,
+				asRead: facts.asRead,
+				byReference: facts.byReference,
+				holds: facts.holds,
+				keyset,
+			}),
 		nonFinite: options.nonFinite,
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
@@ -170,6 +179,7 @@ function fitFrom(
 	options: CursorOptions & {
 		asRead?: ReadonlySet<string> | undefined
 		byReference?: ReadonlySet<string> | undefined
+		holds?: ColumnCheck | undefined
 		keyset: KeysetKind
 	},
 ): () => string {

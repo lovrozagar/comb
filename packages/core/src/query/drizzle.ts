@@ -10,9 +10,10 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
 import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readKeyset } from "./cursor.ts"
+import type { ColumnCheck } from "./cursor-mint.ts"
 import { anchored } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { assertCursorFits, bindableOn, boundCarried } from "./sqlite/cursor-fit.ts"
+import { assertCursorFits, bindableOn, boundCarried, unfitIndex } from "./sqlite/cursor-fit.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { keyTextsSQL, textKeysSQL } from "./sqlite/key-texts.ts"
@@ -113,6 +114,27 @@ function tiebreakOf(table: RelationalTable): SQL {
 	return sql`${column}`.mapWith(column)
 }
 
+// AB4-1 of area B
+/**
+ * The `_combId` extra, which notes the table drizzle reads the rows from, as it hands it to every query's
+ * callbacks, and the check positionOn opens the next cursor by, run on that table's columns, so the next
+ * page never refuses a cursor minted here; rows no query of these options read hold no column to check
+ */
+function checkedOn(sort: readonly SortField[]): { holds: ColumnCheck; idOf: (table: RelationalTable) => SQL } {
+	let readFrom: RelationalTable | undefined
+	return {
+		holds: (values, carried) => {
+			if (readFrom === undefined) return -1
+			const { keys, tiebreak } = keysOn(readFrom, sort)
+			return unfitIndex([...keys.map(({ column }) => column), tiebreak.column], values, { carried })
+		},
+		idOf: (table) => {
+			readFrom = table
+			return tiebreakOf(table)
+		},
+	}
+}
+
 /** An offset page's count of every row the filter matches, which paginate reports */
 const countOver = (): SQL<number> => sql<number>`cast(count(*) over() as integer)`
 
@@ -151,6 +173,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	}
 	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3); the return checks `extras` */
 	const texts = textsOf(sort)
+	const { holds, idOf } = checkedOn(sort)
 	const base = <E extends object>(given: E) => {
 		const extras = { ...given, ...texts }
 		return {
@@ -160,6 +183,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 			pagination: paginationOf(options, {
 				cursorable: true,
 				expects: Object.keys(extras) as ListExtra[],
+				holds,
 				query,
 				window: query.limit + 1,
 			}),
@@ -168,7 +192,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	if (!query.cursor) {
 		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
 		assertPageWithin(query)
-		return { ...base({ _combId: tiebreakOf, _total: countOver }), offset: ((query.page ?? 1) - 1) * query.limit }
+		return { ...base({ _combId: idOf, _total: countOver }), offset: ((query.page ?? 1) - 1) * query.limit }
 	}
 	const cursor = readKeyset(query.cursor, sort, options)
 	const positionOn = (table: RelationalTable) => {
@@ -190,10 +214,10 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	}
 	const where = (table: RelationalTable) => keysetSQL(positionOn(table))
 	if (!cursor.values.some((value) => value instanceof CursorRef))
-		return { ...base({ _combId: tiebreakOf }), offset: 0, where: { RAW: where } }
+		return { ...base({ _combId: idOf }), offset: 0, where: { RAW: where } }
 	/* a reference may have no safe bound once its row is gone: the flag tells paginate, which has no database */
 	const gone = (table: RelationalTable) => sql<number>`${anchorGone(positionOn(table).values) ?? sql`0`}`
-	return { ...base({ _combAnchorGone: gone, _combId: tiebreakOf }), offset: 0, where: { RAW: where } }
+	return { ...base({ _combAnchorGone: gone, _combId: idOf }), offset: 0, where: { RAW: where } }
 }
 
 /** `row` with only the fields `select` asked for, and none of the list's own extras; every field when `parsedFields` is null */

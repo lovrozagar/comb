@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CursorRef, mintCursor, openCursor } from "./cursor.ts"
-import { createCursor } from "./cursor-mint.ts"
+import { createCursor, fittedCursor } from "./cursor-mint.ts"
 import { createCursor as publicCreateCursor, MAX_CURSOR_LENGTH, readCursor } from "./index.ts"
 import type { SortField } from "./types.ts"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
@@ -164,5 +164,34 @@ describe("the public createCursor: a tiebreak id no cursor carries", () => {
 				status: 500,
 			}),
 		)
+	})
+})
+
+/* AB4-1 of area B: the mint runs the open's column check, so no list seals a cursor its next page refuses */
+describe("fittedCursor given the builder's column check", () => {
+	it("hands it each key and the tiebreak id last, with the carried flags, and names the value it refuses", () => {
+		const seen: unknown[] = []
+		const holds = (index: number) => (values: readonly unknown[], carried: (i: number) => boolean) => {
+			seen.push([values, carried(0), carried(1)])
+			return index
+		}
+		expect(() => fittedCursor({ id: "a", title: "x" }, BY_TITLE, { ...SEALED, holds: holds(1) })).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(/^the tiebreak id id reads a value its column's mode does not hold/),
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
+		const carried = new Set(["title"])
+		const row = { _combId: "b", title: "y" }
+		expect(() => fittedCursor(row, BY_TITLE, { ...SEALED, carried, holds: holds(0), idField: "_combId" })).toThrow(
+			expect.objectContaining({ cause: expect.stringMatching(/^the sort by title reads a value/) }),
+		)
+		expect(typeof fittedCursor(row, BY_TITLE, { ...SEALED, holds: holds(-1), idField: "_combId" })()).toBe("string")
+		expect(seen).toEqual([
+			[["x", "a"], false, false],
+			[["y", "b"], true, false],
+			[["y", "b"], false, false],
+		])
 	})
 })

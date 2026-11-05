@@ -1,23 +1,14 @@
 import { getTableColumns, type SQL, SQL as SQLClass, sql } from "drizzle-orm"
 import {
 	customType as pgCustomType,
+	doublePrecision,
 	numeric as pgNumeric,
 	PgDialect,
 	pgTable,
 	timestamp,
 	vector,
 } from "drizzle-orm/pg-core"
-import {
-	alias,
-	blob,
-	customType,
-	integer,
-	numeric,
-	real,
-	SQLiteDialect,
-	sqliteTable,
-	text,
-} from "drizzle-orm/sqlite-core"
+import { blob, customType, integer, numeric, real, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -28,10 +19,9 @@ import {
 	boundForKeys,
 	carriesOpaque,
 	DateKey,
-	readsBack,
 	readsRounded,
-	refersBack,
 } from "./cursor-fit.ts"
+import { refersBack } from "./reads-back.ts"
 
 const columns = getTableColumns(
 	sqliteTable("t", {
@@ -75,7 +65,7 @@ describe("assertCursorFits", () => {
 
 	it.each([
 		["name", 1],
-		["count", "one"],
+		["count", { one: 1 }],
 		["active", 0],
 		["seen_at", 1],
 		["seen_at", "2024"],
@@ -113,52 +103,19 @@ describe("assertCursorFits", () => {
 	})
 
 	it("checks every position, the tiebreak id last", () => {
-		expect(() => assertCursorFits([columns.name, columns.count], ["a", "x"])).toThrow()
+		expect(() => assertCursorFits([columns.name, columns.count], ["a", true])).toThrow()
 	})
 })
 
-/* 27.7 of plan 15: the one rule a reference is minted and read by */
-describe("readsBack", () => {
-	const doc = sqliteTable("doc", { id: integer("id"), notes: text("notes"), rank: integer("rank") })
-	const other = sqliteTable("other", { label: text("label") })
-
-	it("takes the anchor table's column of any type, and an expression over its own columns alone, through any nesting (QL1 of r22b)", () => {
-		expect(readsBack(doc.notes, undefined)).toBe(true)
-		expect(readsBack(doc.rank, doc)).toBe(true)
-		expect(readsBack(sql`lower(${doc.notes})`, doc)).toBe(true)
-		expect(readsBack(sql`coalesce(${sql`lower(${doc.notes})`}, ${doc.id})`, doc)).toBe(true)
-		expect(readsBack(sql.join([doc.notes, doc.rank], sql`, `), doc)).toBe(true)
-		/* a list drizzle keeps as one chunk, as `IN (${[...]})` writes it */
-		expect(readsBack(sql`${doc.id} IN (${[doc.notes, doc.rank]})`, doc)).toBe(true)
-	})
-
-	it("refuses an expression with no anchor, none over a column, or a key over another table", () => {
-		/* a joined table's column reads the anchor's own value back (27.14), whatever it holds (QL1 of r22b) */
-		expect(readsBack(other.label, doc)).toBe(false)
-		expect(readsBack(other.label, undefined)).toBe(true)
-		/* 27.19: an alias is the table it names; another alias of the same table, or no drizzle table, is not */
-		const mine = alias(doc, "mine")
-		expect(readsBack(mine.notes, mine)).toBe(true)
-		expect(readsBack(alias(doc, "theirs").notes, mine)).toBe(false)
-		expect(readsBack(doc.notes, mine)).toBe(false)
-		expect(readsBack(doc.notes, {})).toBe(false)
-		expect(readsBack(sql`lower(${doc.notes})`, undefined)).toBe(false)
-		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
-		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)
-		expect(readsBack(new DateKey(sql`${doc.rank}`), doc)).toBe(false)
-	})
-})
-
-describe("refersBack", () => {
-	const doc = sqliteTable("doc", { notes: text("notes"), rank: integer("rank") })
-	const other = sqliteTable("other", { label: text("label") })
-
-	it("takes a key the row supplies whose column, if it is one, holds text", () => {
-		expect(refersBack(doc.notes, doc)).toBe(true)
-		expect(refersBack(doc.notes, undefined)).toBe(true)
-		expect(refersBack(sql`lower(${doc.notes})`, doc)).toBe(true)
-		expect(refersBack(doc.rank, doc)).toBe(false)
-		expect(refersBack(other.label, doc)).toBe(false)
+describe("assertCursorFits on a SQLite number column (AB4-1 of area B)", () => {
+	/* AB4-1 of area B: a non-STRICT number column holds TEXT, which the list mints a cursor after */
+	it("takes any text on a SQLite number column, which a non-STRICT table holds and SQLite orders after every number", () => {
+		for (const value of ["one", "", "1.5", "t"]) {
+			expect(fits("count", value), value).toBe(true)
+			expect(fits("score", value), value).toBe(true)
+		}
+		/* a Postgres number column holds no text */
+		expect(() => assertCursorFits([pgTable("p", { d: doublePrecision("d") }).d], ["one"])).toThrow()
 	})
 })
 
@@ -186,7 +143,7 @@ describe("a time key's stored value on a key bound as read (QL2 of r22b; sibling
 		expect(carried(columns.seen_at, 100.0001, true)).toBe(true)
 		expect(carried(columns.seen_at, 100.0001, false)).toBe(false)
 		expect(carried(columns.seen_at, "100", true)).toBe(false)
-		expect(carried(columns.count, "x", true)).toBe(false)
+		expect(carried(columns.count, new Date(1), true)).toBe(false)
 		expect(carried(columns.seen_at, new Date(1), true)).toBe(true)
 	})
 
@@ -224,7 +181,12 @@ describe("a Postgres time key's carried text on a list that reads it back (AB3-4
 describe("assertCursorFits on what libsql's intMode string reads", () => {
 	it("takes a canonical integer string on a number column, and binds it as that integer, exact", () => {
 		for (const value of ["1", "-5", "9007199254740993"]) expect(fits("count", value), value).toBe(true)
-		for (const value of ["01", "1.5", "", "+1"]) expect(fits("count", value), value).toBe(false)
+		/* any other text is a TEXT the column holds, bound as itself (AB4-1 of area B) */
+		expect(boundForKeys("sqlite", [columns.count, columns.count, columns.count], ["01", "1.5", "+1"])).toEqual([
+			"01",
+			"1.5",
+			"+1",
+		])
 		expect(boundForKeys("sqlite", [columns.count, sql`x`], ["7", "7"])).toEqual([7, "7"])
 		expect(boundForKeys("sqlite", [columns.count], ["9007199254740993"])).toEqual([9007199254740993n])
 	})
@@ -349,6 +311,7 @@ describe("a SQLite numeric() key's cursor value (B2-4 of area B; sibling: libsql
 describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's carried text)", () => {
 	const post = sqliteTable("post", {
 		m: integer("m", { mode: "timestamp_ms" }),
+		b: blob("b", { mode: "buffer" }),
 		n: integer("n"),
 		s: integer("s", { mode: "timestamp" }),
 	})
@@ -371,7 +334,7 @@ describe("a SQLite timestamp key's carried TEXT (B2-3 of area B; sibling: AB2's 
 		expect(flagged(post.s, "a-text", true)).toBe(true)
 		expect(flagged(post.m, "b,text", true)).toBe(true)
 		expect(flagged(post.s, "a-text", false)).toBe(false)
-		expect(flagged(post.n, "a-text", true)).toBe(false)
+		expect(flagged(post.b, "a-text", true)).toBe(false)
 		expect(() =>
 			assertCursorFits([post.s], ["a-text"], { asRead: () => true, carried: () => true, table: post }),
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))

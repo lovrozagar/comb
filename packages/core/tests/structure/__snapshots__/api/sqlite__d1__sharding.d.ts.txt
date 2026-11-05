@@ -504,7 +504,7 @@ export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, Sess
  * built query shows no part of the secret.
  */
 import { type DecodedCursor } from "./cursor.ts";
-import { type KeysetKind } from "./cursor-mint.ts";
+import { type ColumnCheck, type KeysetKind } from "./cursor-mint.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import { COMB_ID } from "./list-extras.ts";
 import type { paginationResponseSchema } from "./schema.ts";
@@ -567,6 +567,8 @@ type PaginationFacts = {
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
+    /** the column check the builder's open runs on a cursor, which every cursor it mints passes */
+    holds?: ColumnCheck | undefined;
     /** the extras the builder selected, which every row must carry */
     expects: readonly ListExtra[];
     keyset?: KeysetKind | undefined;
@@ -968,6 +970,11 @@ export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorBytes, curs
 // query/cursor-mint.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
 import type { SortField } from "./types.ts";
+/**
+ * The open's column check a builder hands the mint: the index of the first value, the tiebreak id last,
+ * its column does not hold, `carried` saying which the cursor flags as stored text; -1 when all fit
+ */
+type ColumnCheck = (values: readonly unknown[], carried: (index: number) => boolean) => number;
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
 type KeysetKind = "derived" | "merged" | "table";
 /**
@@ -999,8 +1006,11 @@ declare function fitCursor(row: Record<string, unknown>, sort: readonly SortFiel
  * fitCursor's every refusal of `row`, run with no seal, and what seals its cursor: the cap is measured
  * on the plaintext (sealedLength), so a page checks each row it serves and seals the last alone
  */
-declare function fittedCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof fitCursor>[2]): () => string;
-export { createCursor, fitCursor, fittedCursor, type KeysetKind };
+declare function fittedCursor(row: Record<string, unknown>, sort: readonly SortField[], options: Parameters<typeof fitCursor>[2] & {
+    /** the open's column check, run on the record sealed; none on a row no builder read */
+    holds?: ColumnCheck | undefined;
+}): () => string;
+export { type ColumnCheck, createCursor, fitCursor, fittedCursor, type KeysetKind };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
@@ -1035,7 +1045,7 @@ declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
 declare const isSealedShape: (cursor: string) => boolean;
 /** What `cursor` holds, opened under `options`; null when it was not sealed under both */
 declare function openSealed(cursor: string, options: CursorOptions): Uint8Array | null;
-export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal, sealedLength };
+export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal, sealedLength, };
 
 // query/list-extras.d.ts
 import type { SortField } from "./types.ts";
