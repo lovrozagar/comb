@@ -1,8 +1,9 @@
 /**
  * K3 of r18 and r19: the README's newest "Upgrading to" section lists exactly the exports the package
  * adds, removes or changes since the release it upgrades from, so it never promises an export that
- * is not there, nor leaves one out, nor hides a changed signature. The release's exports, each with a
- * hash of its emitted declaration, are checked in (__snapshots__/released-exports.json); after a
+ * is not there, nor leaves one out, nor hides a changed signature, and it names each member a type
+ * the release's exports reach lost or made required. The release's exports, each with a hash of its
+ * emitted declaration, and the members of those types are checked in (__snapshots__/released-exports.json); after a
  * release, regenerate them from the tag with support/write-released-exports.ts.
  */
 import { spawnSync } from "node:child_process"
@@ -10,11 +11,12 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
-import { type Exports, exportsOf } from "./support/exports-of.ts"
+import { apiOf, type Exports, type Members } from "./support/exports-of.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const RELEASED = JSON.parse(readFileSync(join(import.meta.dirname, "__snapshots__/released-exports.json"), "utf8")) as {
 	exports: Exports
+	members: Members
 	version: string
 }
 const README = readFileSync(join(ROOT, "../../README.md"), "utf8")
@@ -44,6 +46,25 @@ const differing = (from: Exports, to: Exports): string[] => {
 	)
 	return [...new Set(names)].sort()
 }
+
+/**
+ * Each member of a type the release reached that the type still declared now lacks, or that was
+ * optional there and is required now, as `Type.member`, sorted: a type no export reaches now is
+ * the export lists' to name
+ */
+const narrowed = (from: Members, to: Members): string[] =>
+	Object.entries(from)
+		.flatMap(([type, members]) =>
+			to[type] === undefined
+				? []
+				: Object.entries(members)
+						.filter(([member, was]) => {
+							const now = to[type]?.[member]
+							return now === undefined || (was === "optional" && now === "required")
+						})
+						.map(([member]) => `${type}.${member}`),
+		)
+		.sort()
 
 const API = join(import.meta.dirname, "__snapshots__/api")
 
@@ -146,7 +167,8 @@ function listed(section: string, label: string): string[] {
 }
 
 describe("the newest upgrade section's exports", () => {
-	const now = exportsOf(ROOT)
+	const api = apiOf(ROOT)
+	const now = api.exports
 	const { section, version } = newestUpgrade()
 
 	/* right after a release the newest section is the release's own, and the snapshot is regenerated from its tag */
@@ -176,6 +198,16 @@ describe("the newest upgrade section's exports", () => {
 					removed: listed(section, "Removed"),
 				}
 		expect(lists, `changed since ${RELEASED.version}, against "Upgrading to ${version}"`).toEqual(since)
+	})
+
+	/* comb-44's 0005 dropped `ManifestConfig.filePrefix`, which 0.20.1's generateManifest takes, and no list could name it */
+	it("names each member a released type lost or made required since then, as `Type.member` or `member`", () => {
+		const unnamed = narrowed(RELEASED.members, api.members).filter(
+			(name) => !section.includes(`\`${name}\``) && !section.includes(`\`${name.split(".")[1]}\``),
+		)
+		expect(released ? [] : unnamed, `narrowed since ${RELEASED.version}, unnamed in "Upgrading to ${version}"`).toEqual(
+			[],
+		)
 	})
 
 	/* D5-1 of the area D round-five review: the async paragraph left out exportDrizzleSchema and named a bare run */

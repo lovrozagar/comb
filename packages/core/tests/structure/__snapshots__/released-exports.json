@@ -390,5 +390,1201 @@
 			"statusKeyToCode": "07b6c6325825e9b4"
 		}
 	},
+	"members": {
+		"AnalysisResult": {
+			"dbName": "required",
+			"dialect": "required",
+			"imports": "required",
+			"tables": "required",
+			"tablesImportPath": "required"
+		},
+		"BaseConstraints": {
+			"autogenerate": "optional",
+			"mutable": "optional",
+			"nomutate": "optional",
+			"private": "optional",
+			"relation": "optional",
+			"tenant": "optional"
+		},
+		"BookmarkTracker": {
+			"getBookmarks": "required",
+			"track": "required"
+		},
+		"BuildDerivedListQueryOpts": {
+			"anchor": "optional",
+			"baseWhere": "optional",
+			"cursorScope": "required",
+			"cursorSecret": "required",
+			"dialect": "optional",
+			"filterWhere": "optional",
+			"idColumn": "optional",
+			"merged": "optional",
+			"parsed": "required",
+			"searchWhere": "optional",
+			"sortColumns": "required"
+		},
+		"BuildListQueryOpts": {
+			"baseWhere": "optional",
+			"computedFilters": "optional",
+			"computedSorts": "optional",
+			"cursorScope": "required",
+			"cursorSecret": "required",
+			"merged": "optional",
+			"nonFinite": "optional",
+			"parsed": "required",
+			"relations": "optional",
+			"search": "optional",
+			"table": "required"
+		},
+		"BunSqliteProviderConfig": {
+			"path": "required",
+			"type": "required"
+		},
+		"CheckConstraintMeta": {
+			"expression": "required",
+			"name": "required"
+		},
+		"CircuitBreakerState": {
+			"failures": "required",
+			"totalProcessed": "required",
+			"tripReason": "optional",
+			"tripped": "required"
+		},
+		"ClassifyOptions": {
+			"before": "optional",
+			"d1": "optional",
+			"dialect": "optional",
+			"schema": "optional"
+		},
+		"CliError": {
+			"exitCode": "required"
+		},
+		"CliIo": {
+			"confirm": "optional",
+			"cwd": "required",
+			"err": "required",
+			"locatePeer": "optional",
+			"out": "required",
+			"readPgObjects": "optional",
+			"readyPgDev": "optional",
+			"replayPgHistory": "optional",
+			"run": "optional"
+		},
+		"CodegenConfig": {
+			"databases": "required"
+		},
+		"ColumnsConfig": {
+			"filePrefix": "optional",
+			"output": "required",
+			"updatePackageJson": "optional"
+		},
+		"CombEntityMeta": {
+			"generated": "required",
+			"identity": "required",
+			"immutable": "required",
+			"kind": "required",
+			"name": "required",
+			"partialUniqueIndexes": "optional",
+			"softDelete": "required",
+			"states": "required",
+			"tenantColumn": "required",
+			"uniqueIndexes": "required",
+			"v": "required"
+		},
+		"CombError": {
+			"column": "optional",
+			"errorKey": "required",
+			"source": "required",
+			"status": "required",
+			"statusKey": "required",
+			"table": "optional"
+		},
+		"CombFilterField": {
+			"field": "required",
+			"ops": "required",
+			"type": "required"
+		},
+		"CombMeta": {
+			"kind": "required",
+			"v": "required"
+		},
+		"CombMetaStamp": {},
+		"CombMigrateConfig": {
+			"databases": "required"
+		},
+		"CombQueryMeta": {
+			"defaultOrder": "required",
+			"filterFields": "optional",
+			"filterable": "required",
+			"grammar": "required",
+			"kind": "required",
+			"maxFilterBytes": "optional",
+			"maxFilterConditions": "optional",
+			"maxFilterDepth": "optional",
+			"maxFilterValues": "optional",
+			"maxInValues": "optional",
+			"maxLimit": "required",
+			"maxPage": "optional",
+			"maxPatternBytes": "optional",
+			"maxQueryBytes": "optional",
+			"maxSearchBytes": "optional",
+			"maxSearchTerms": "optional",
+			"maxSortKeys": "optional",
+			"nulls": "optional",
+			"searchable": "required",
+			"selectable": "required",
+			"sortable": "required",
+			"stableTiebreak": "required",
+			"v": "required"
+		},
+		"CombStatesMeta": {
+			"column": "required",
+			"initial": "required",
+			"terminal": "required",
+			"values": "required"
+		},
+		"Connection": {
+			"batch": "required",
+			"close": "required",
+			"dialect": "required",
+			"execute": "required",
+			"ownedPrefix": "optional"
+		},
+		"ConnectionProvider": {
+			"connect": "required",
+			"dialect": "required"
+		},
+		"ConnectionProviderConfig": {
+			"type": "required"
+		},
+		"ConstraintMap": {},
+		"ConstraintMapEntry": {
+			"cause": "required",
+			"errorKey": "required",
+			"statusKey": "optional"
+		},
+		"ConstraintsConfig": {
+			"output": "required",
+			"partitions": "optional"
+		},
+		"CursorOptions": {
+			"cursorScope": "required",
+			"cursorSecret": "required",
+			"nonFinite": "optional"
+		},
+		"CursorPayload": {
+			"i": "required",
+			"s": "required",
+			"v": "required"
+		},
+		"CursorRef": {
+			"length": "required",
+			"prefix": "required"
+		},
+		"D1AnswerLike": {
+			"results": "required"
+		},
+		"D1DatabaseLike": {
+			"batch": "required",
+			"prepare": "required",
+			"withSession": "optional"
+		},
+		"D1ProviderConfig": {
+			"databaseName": "required",
+			"local": "optional",
+			"type": "required",
+			"wranglerConfig": "optional",
+			"wranglerEnv": "optional"
+		},
+		"D1SessionLike": {
+			"batch": "required",
+			"getBookmark": "required",
+			"prepare": "required"
+		},
+		"D1StatementLike": {
+			"bind": "required"
+		},
+		"DatabaseCodegen": {
+			"dialect": "optional",
+			"driver": "optional",
+			"filePrefix": "optional",
+			"fts": "optional",
+			"generators": "optional",
+			"output": "optional",
+			"partitions": "optional",
+			"tables": "required"
+		},
+		"DatabaseConfig": {
+			"codegen": "optional",
+			"drizzleConfigPath": "optional",
+			"environments": "optional",
+			"migrationsDir": "required",
+			"name": "optional",
+			"provider": "optional"
+		},
+		"DatabaseMissing": {},
+		"DatabaseShared": {
+			"codegen": "optional",
+			"drizzleConfigPath": "optional",
+			"migrationsDir": "required"
+		},
+		"DecodedCursor": {
+			"id": "required",
+			"sort": "required",
+			"values": "required"
+		},
+		"DiagramsConfig": {
+			"output": "required"
+		},
+		"DrizzleExportOptions": {
+			"configPath": "optional",
+			"cwd": "required",
+			"dialect": "required",
+			"run": "optional",
+			"schema": "optional"
+		},
+		"DrizzleListOptions": {
+			"extras": "required",
+			"limit": "required",
+			"offset": "required",
+			"orderBy": "required",
+			"pagination": "required",
+			"where": "optional"
+		},
+		"DtosConfig": {
+			"filePrefix": "optional",
+			"importFrom": "optional",
+			"output": "required",
+			"relationsOutput": "optional",
+			"updatePackageJson": "optional"
+		},
+		"EntitiesConfig": {
+			"importFrom": "optional",
+			"output": "required",
+			"updatePackageJson": "optional"
+		},
+		"EnumChecksConfig": {
+			"output": "required"
+		},
+		"EnumStates": {
+			"initial": "optional",
+			"terminal": "optional",
+			"transitions": "optional"
+		},
+		"EnvironmentConfig": {
+			"name": "optional",
+			"provider": "optional"
+		},
+		"EnvironmentsDatabaseConfig": {
+			"codegen": "optional",
+			"drizzleConfigPath": "optional",
+			"environments": "required",
+			"migrationsDir": "required",
+			"name": "optional",
+			"provider": "optional"
+		},
+		"ExpressionIndexMeta": {
+			"expression": "required",
+			"name": "required"
+		},
+		"ExtractedSchema": {
+			"droppedTables": "required",
+			"externalFts": "required",
+			"foreignKeys": "required",
+			"indexes": "required",
+			"statements": "required",
+			"tableInfo": "required",
+			"tables": "required",
+			"triggers": "required"
+		},
+		"Fallback": {
+			"cause": "required",
+			"errorKey": "required",
+			"status": "required"
+		},
+		"FieldConstraints": {
+			"autogenerate": "required",
+			"email": "required",
+			"imageUri": "required",
+			"lowercase": "required",
+			"max": "required",
+			"maxBytes": "required",
+			"min": "required",
+			"mutable": "required",
+			"name": "required",
+			"nomutate": "required",
+			"password": "required",
+			"pattern": "required",
+			"private": "required",
+			"relation": "optional",
+			"tenant": "required",
+			"trim": "required",
+			"uppercase": "required",
+			"url": "required"
+		},
+		"FieldConstraintsMeta": {
+			"autogenerate": "required",
+			"email": "required",
+			"imageUri": "required",
+			"lowercase": "required",
+			"max": "required",
+			"maxBytes": "required",
+			"min": "required",
+			"mutable": "required",
+			"name": "required",
+			"nomutate": "required",
+			"password": "required",
+			"pattern": "required",
+			"private": "required",
+			"relation": "optional",
+			"tenant": "required",
+			"trim": "required",
+			"uppercase": "required",
+			"url": "required"
+		},
+		"FieldMeta": {
+			"autoIncrement": "required",
+			"columnType": "required",
+			"combKind": "required",
+			"constraints": "required",
+			"dataType": "required",
+			"dimensions": "optional",
+			"drizzleHelper": "required",
+			"enumValues": "required",
+			"foreignKey": "required",
+			"generated": "required",
+			"hasDefault": "required",
+			"identity": "required",
+			"inCompositeKey": "required",
+			"isNotNull": "required",
+			"isPrimaryKey": "required",
+			"jsonSchemaName": "required",
+			"length": "required",
+			"name": "required",
+			"onUpdate": "required",
+			"prefix": "required",
+			"schemaImports": "required",
+			"sqlName": "required",
+			"sqlType": "required",
+			"states": "required",
+			"unique": "required"
+		},
+		"FieldNamesConfig": {
+			"output": "required",
+			"updatePackageJson": "optional"
+		},
+		"FieldSelection": {
+			"relations": "required",
+			"scalars": "required"
+		},
+		"FieldsConfig": {
+			"relationFields": "optional",
+			"relations": "optional",
+			"scalars": "required"
+		},
+		"FilterAST": {
+			"root": "required"
+		},
+		"FilterCondition": {
+			"field": "required",
+			"operator": "required",
+			"value": "required"
+		},
+		"FilterFieldSpec": {
+			"format": "optional",
+			"operators": "optional",
+			"type": "required"
+		},
+		"FilterGroup": {
+			"conditions": "required",
+			"logic": "required",
+			"subgroups": "required"
+		},
+		"FilterLimits": {
+			"maxConditions": "required",
+			"maxDepth": "required",
+			"maxInValues": "required",
+			"maxPatternBytes": "required",
+			"maxValues": "required"
+		},
+		"FilterSQLConfig": {
+			"columnMap": "required",
+			"tableAlias": "required"
+		},
+		"FilterToSQLConfig": {
+			"computedFilters": "optional",
+			"mainTable": "required",
+			"relations": "optional"
+		},
+		"FilterValidationResult": {
+			"valid": "required"
+		},
+		"ForeignKey": {
+			"columns": "required",
+			"onDelete": "required",
+			"parent": "required",
+			"parentColumns": "required",
+			"table": "required"
+		},
+		"ForeignKeyRef": {
+			"column": "required",
+			"key": "optional",
+			"onDelete": "optional",
+			"onUpdate": "optional",
+			"refColumn": "required",
+			"refTable": "required",
+			"toId": "optional"
+		},
+		"FtsGeneratorConfig": {
+			"filePrefix": "optional",
+			"fts": "required",
+			"output": "required"
+		},
+		"FtsObject": {
+			"group": "required",
+			"kind": "required",
+			"sql": "required"
+		},
+		"FtsSource": {
+			"folded": "optional",
+			"ftsTable": "required",
+			"table": "required"
+		},
+		"FtsTableConfig": {
+			"columns": "required",
+			"tokenizer": "optional"
+		},
+		"GeneratorContext": {
+			"analysis": "required",
+			"cwd": "required",
+			"dialect": "required",
+			"exportNamespace": "optional",
+			"importStyle": "optional",
+			"log": "required",
+			"staged": "optional",
+			"tablesPath": "required",
+			"warn": "required"
+		},
+		"HistoryFile": {
+			"name": "required",
+			"sql": "required"
+		},
+		"ImportRef": {
+			"from": "required",
+			"imported": "required",
+			"name": "required",
+			"path": "required"
+		},
+		"ImportsMeta": {
+			"enumImports": "required",
+			"identifiers": "required",
+			"jsonSchemaImports": "required"
+		},
+		"IntegerConstraints": {
+			"autogenerate": "optional",
+			"max": "optional",
+			"min": "optional",
+			"mutable": "optional",
+			"nomutate": "optional",
+			"private": "optional",
+			"relation": "optional",
+			"tenant": "optional"
+		},
+		"IsoInstant": {
+			"ms": "required",
+			"text": "required",
+			"toJSON": "required",
+			"toString": "required"
+		},
+		"JsonConstraints": {
+			"autogenerate": "optional",
+			"maxBytes": "optional",
+			"mutable": "optional",
+			"nomutate": "optional",
+			"private": "optional",
+			"relation": "optional",
+			"tenant": "optional"
+		},
+		"KeysetPosition": {
+			"id": "required",
+			"keys": "required",
+			"tiebreak": "required",
+			"values": "required"
+		},
+		"LibsqlProviderConfig": {
+			"authToken": "optional",
+			"type": "required",
+			"url": "required"
+		},
+		"ListExtras": {
+			"_combAnchorGone": "optional",
+			"_combId": "optional",
+			"_combKeyTypes": "optional",
+			"_total": "optional"
+		},
+		"ListPagination": {
+			"cursor": "required",
+			"cursorScope": "required",
+			"cursorable": "required",
+			"expects": "required",
+			"keyset": "required",
+			"limit": "required",
+			"merged": "required",
+			"mint": "required",
+			"nonFinite": "required",
+			"page": "required",
+			"parsedFields": "required",
+			"parsedSort": "required",
+			"read": "required",
+			"window": "required"
+		},
+		"ListQueryAppliable": {
+			"limit": "required",
+			"offset": "required",
+			"orderBy": "required",
+			"where": "required"
+		},
+		"ListQueryCapabilities": {
+			"computedFilterFields": "required",
+			"computedSortFields": "required",
+			"filterFields": "required",
+			"pagination": "required",
+			"relationFilterFields": "required",
+			"searchFields": "required",
+			"sortFields": "required"
+		},
+		"ListQueryConfig": {
+			"extend": "optional",
+			"fields": "optional",
+			"filter": "optional",
+			"lang": "optional",
+			"limits": "optional",
+			"pagination": "optional",
+			"search": "optional",
+			"sort": "required"
+		},
+		"ListQueryInput": {
+			"cursor": "optional",
+			"filterAst": "optional",
+			"limit": "required",
+			"limitBound": "optional",
+			"page": "optional",
+			"pageBound": "optional",
+			"parsedFields": "optional",
+			"parsedSort": "required",
+			"q": "optional",
+			"validated": "optional"
+		},
+		"ListQueryLimits": {
+			"maxConditions": "required",
+			"maxDepth": "required",
+			"maxFilterLength": "required",
+			"maxInValues": "required",
+			"maxPatternBytes": "required",
+			"maxSearchTerms": "required",
+			"maxSortKeys": "required",
+			"maxValues": "required"
+		},
+		"ListQueryOutput": {
+			"cursor": "required",
+			"filterAst": "required",
+			"lang": "required",
+			"limit": "required",
+			"limitBound": "optional",
+			"page": "required",
+			"pageBound": "optional",
+			"parsedFields": "required",
+			"parsedSort": "required",
+			"q": "required",
+			"sortOrderBy": "required",
+			"validated": "required"
+		},
+		"ListQueryResult": {
+			"extras": "required",
+			"limit": "required",
+			"meta": "required",
+			"offset": "required",
+			"orderBy": "required",
+			"pagination": "required",
+			"search": "required",
+			"where": "required"
+		},
+		"LiveObjects": {
+			"extensions": "required",
+			"kinds": "required",
+			"others": "required",
+			"platform": "required",
+			"policies": "required",
+			"relations": "required",
+			"rls": "required",
+			"routines": "required",
+			"rules": "required",
+			"sequences": "required",
+			"triggers": "required",
+			"user": "required"
+		},
+		"LiveTarget": {
+			"schema": "required",
+			"url": "required"
+		},
+		"LoadedConfig": {
+			"config": "required",
+			"configDir": "required"
+		},
+		"LruCache": {
+			"clear": "required",
+			"delete": "required",
+			"get": "required",
+			"getWithMeta": "required",
+			"has": "required",
+			"set": "required",
+			"size": "required"
+		},
+		"LruMeta": {
+			"stale": "required",
+			"value": "required"
+		},
+		"Manifest": {
+			"database": "required",
+			"entities": "required",
+			"v": "required"
+		},
+		"ManifestColumn": {
+			"enumValues": "required",
+			"generated": "required",
+			"immutable": "required",
+			"kind": "required",
+			"max": "required",
+			"maxBytes": "required",
+			"min": "required",
+			"name": "required",
+			"notNull": "required",
+			"patterns": "required",
+			"primaryKey": "required",
+			"private": "required",
+			"states": "required",
+			"textKind": "required",
+			"transform": "required"
+		},
+		"ManifestConfig": {
+			"filePrefix": "optional",
+			"output": "required"
+		},
+		"ManifestEntity": {
+			"checkConstraints": "required",
+			"columns": "required",
+			"compositePrimaryKey": "required",
+			"idPrefix": "required",
+			"identity": "required",
+			"name": "required",
+			"partialUniqueIndexes": "required",
+			"relations": "required",
+			"softDelete": "required",
+			"tenantColumn": "required",
+			"uniqueIndexes": "required",
+			"varName": "required"
+		},
+		"ManifestRelation": {
+			"column": "required",
+			"key": "optional",
+			"onDelete": "required",
+			"onUpdate": "required",
+			"refColumn": "required",
+			"table": "required"
+		},
+		"MappedColumn": {
+			"column": "required",
+			"kind": "required"
+		},
+		"MetaCarrier": {
+			"meta": "required"
+		},
+		"MigrationClassification": {
+			"cautiousStatements": "required",
+			"lockWarnings": "required",
+			"pendingStatements": "required",
+			"safety": "required",
+			"unsafeStatements": "required"
+		},
+		"MigrationConfig": {
+			"databases": "required"
+		},
+		"MigrationResult": {
+			"database": "required",
+			"error": "optional",
+			"status": "required",
+			"tablesVerified": "optional"
+		},
+		"NumericRangeConstraints": {
+			"max": "optional",
+			"min": "optional"
+		},
+		"OptionalShape": {
+			"filter": "optional",
+			"lang": "optional",
+			"order": "required",
+			"q": "optional",
+			"select": "optional"
+		},
+		"OrmConfig": {
+			"dialect": "required",
+			"driver": "required",
+			"filePrefix": "optional",
+			"output": "required",
+			"relationsOutput": "optional"
+		},
+		"PaginationConfig": {
+			"defaultLimit": "optional",
+			"maxLimit": "optional",
+			"maxPage": "optional"
+		},
+		"PaginationMeta": {
+			"count": "required",
+			"hasMore": "required",
+			"limit": "required",
+			"nextCursor": "required",
+			"page": "required"
+		},
+		"ParamMeta": {
+			"description": "required",
+			"examples": "required"
+		},
+		"ParsedFields": {
+			"root": "required"
+		},
+		"ParsedMigration": {
+			"classification": "required",
+			"drops": "required",
+			"expected": "required",
+			"filename": "required",
+			"hash": "required",
+			"sql": "required",
+			"statements": "required"
+		},
+		"PartialUniqueIndexMeta": {
+			"columns": "required",
+			"name": "required",
+			"where": "required"
+		},
+		"PasswordTextOptions": {
+			"hash": "optional",
+			"max": "optional",
+			"min": "optional"
+		},
+		"PgColumns": {
+			"boolean": "required",
+			"createdAt": "required",
+			"deletedAt": "required",
+			"enum": "required",
+			"id": "required",
+			"integer": "required",
+			"json": "required",
+			"real": "required",
+			"ref": "required",
+			"serialId": "required",
+			"text": "required",
+			"timestamp": "required",
+			"updatedAt": "required"
+		},
+		"PgErrorRead": {
+			"code": "required",
+			"column": "required",
+			"constraint": "required",
+			"keyColumns": "required",
+			"keyExpression": "required",
+			"message": "required",
+			"query": "optional",
+			"referenced": "required",
+			"schema": "required",
+			"table": "required"
+		},
+		"PgTarget": {
+			"devUrl": "required",
+			"lockTimeout": "required",
+			"schema": "required",
+			"url": "required"
+		},
+		"PostgresProviderConfig": {
+			"devUrl": "optional",
+			"lockTimeout": "optional",
+			"schema": "optional",
+			"type": "required",
+			"url": "required"
+		},
+		"ProviderConfig": {
+			"type": "required"
+		},
+		"ProviderDeps": {
+			"run": "optional"
+		},
+		"QueryResult": {
+			"columns": "required",
+			"rows": "required"
+		},
+		"ReadOptions": {
+			"maxVersion": "optional",
+			"onDiagnostic": "optional"
+		},
+		"Refold": {
+			"select": "required",
+			"updates": "required"
+		},
+		"RelationConfig": {
+			"sourceKey": "optional",
+			"target": "required",
+			"targetKey": "required",
+			"through": "required",
+			"throughSourceKey": "required",
+			"throughTargetKey": "required"
+		},
+		"RelationsConfig": {
+			"output": "required"
+		},
+		"ResolvedDatabaseConfig": {
+			"drizzleConfigPath": "optional",
+			"migrationsDir": "required",
+			"name": "required",
+			"provider": "required",
+			"readonly": "optional"
+		},
+		"ResolvedMigrationConfig": {
+			"databases": "required"
+		},
+		"ResolvedPostgresProviderConfig": {
+			"devUrl": "required",
+			"lockTimeout": "required",
+			"schema": "required",
+			"type": "required",
+			"url": "required"
+		},
+		"RetrieveQueryConfig": {
+			"extend": "optional",
+			"fields": "required",
+			"lang": "optional"
+		},
+		"RetrieveQueryOutput": {
+			"lang": "required",
+			"parsedFields": "required"
+		},
+		"RetrieveShape": {
+			"lang": "optional",
+			"select": "required"
+		},
+		"RetryOptions": {
+			"baseDelay": "optional",
+			"maxDelay": "optional",
+			"maxRetries": "optional",
+			"onRetry": "optional"
+		},
+		"RowsConfig": {
+			"output": "required"
+		},
+		"RunOptions": {
+			"cwd": "optional",
+			"env": "optional",
+			"exactEnv": "optional",
+			"input": "optional",
+			"maxBuffer": "optional",
+			"timeoutMs": "optional"
+		},
+		"RunResult": {
+			"code": "required",
+			"stderr": "required",
+			"stdout": "required"
+		},
+		"SchemaDiffOptions": {
+			"dialect": "required",
+			"fromSchema": "required",
+			"readyDev": "optional",
+			"run": "optional",
+			"target": "optional",
+			"toSchema": "required"
+		},
+		"SchemaDiffResult": {
+			"diff": "required",
+			"notices": "required",
+			"synced": "required"
+		},
+		"SessionHandle": {
+			"client": "required",
+			"session": "required"
+		},
+		"SessionOptions": {
+			"bookmark": "optional",
+			"constraint": "optional"
+		},
+		"ShardDbHandle": {
+			"driver": "required",
+			"handle": "required"
+		},
+		"ShardKv": {
+			"delete": "required",
+			"get": "required",
+			"put": "required"
+		},
+		"ShardMapColumns": {
+			"created_at": "required",
+			"deleted_at": "required",
+			"driver": "required",
+			"org_id": "required",
+			"shard_id": "required",
+			"target": "required",
+			"updated_at": "required"
+		},
+		"ShardMapping": {
+			"createdAt": "required",
+			"deletedAt": "required",
+			"driver": "required",
+			"orgId": "required",
+			"shardId": "required",
+			"target": "required",
+			"updatedAt": "required"
+		},
+		"ShardMove": {
+			"orgId": "required",
+			"shardId": "required",
+			"with": "optional"
+		},
+		"ShardPickInput": {
+			"counts": "required",
+			"orgId": "required",
+			"totalShards": "required"
+		},
+		"ShardPlacement": {
+			"orgId": "required",
+			"shardId": "required"
+		},
+		"ShardResolverDeps": {
+			"coreDb": "required",
+			"kv": "required"
+		},
+		"ShardRouter": {
+			"allocate": "required",
+			"getHandle": "required",
+			"invalidate": "required",
+			"move": "required",
+			"place": "required",
+			"resolve": "required",
+			"resolveOrAllocate": "required",
+			"resolveVerified": "required",
+			"unplace": "required"
+		},
+		"ShardRouterConfig": {
+			"kvTtlSeconds": "optional",
+			"log": "optional",
+			"lruHardTtlMs": "optional",
+			"lruMaxSize": "optional",
+			"lruTtlMs": "optional",
+			"maxOrgsPerShard": "optional",
+			"missTtlMs": "optional",
+			"pick": "optional",
+			"totalShards": "required"
+		},
+		"ShardVerifyDeps": {
+			"coreDb": "required",
+			"kv": "required",
+			"present": "required"
+		},
+		"SingleDatabaseConfig": {
+			"codegen": "optional",
+			"drizzleConfigPath": "optional",
+			"environments": "optional",
+			"migrationsDir": "required",
+			"name": "required",
+			"provider": "required"
+		},
+		"SortField": {
+			"direction": "required",
+			"field": "required",
+			"nulls": "optional"
+		},
+		"SortKey": {
+			"column": "required",
+			"direction": "required",
+			"nulls": "optional"
+		},
+		"SpellfixDb": {
+			"$client": "optional",
+			"all": "required"
+		},
+		"SpellfixRow": {
+			"word": "required"
+		},
+		"SpellfixSearch": {
+			"folded": "optional",
+			"ftsTable": "required",
+			"maxCorrections": "optional",
+			"maxEditDistance": "optional",
+			"spellfix": "optional",
+			"spellfixTable": "required",
+			"table": "required"
+		},
+		"Sql": {
+			"end": "required",
+			"unsafe": "required"
+		},
+		"SqliteColumns": {
+			"boolean": "required",
+			"createdAt": "required",
+			"deletedAt": "required",
+			"enum": "required",
+			"id": "required",
+			"integer": "required",
+			"json": "required",
+			"real": "required",
+			"ref": "required",
+			"serialId": "required",
+			"text": "required",
+			"timestamp": "required",
+			"updatedAt": "required"
+		},
+		"StateMachine": {
+			"column": "optional",
+			"initial": "optional",
+			"terminal": "optional",
+			"transitions": "optional",
+			"values": "required"
+		},
+		"StateMachineMeta": {
+			"initial": "required",
+			"terminal": "required",
+			"transitions": "required"
+		},
+		"StringTransformConstraints": {
+			"lowercase": "optional",
+			"trim": "optional",
+			"uppercase": "optional"
+		},
+		"StringValidationConstraints": {
+			"email": "optional",
+			"imageUri": "optional",
+			"name": "optional",
+			"password": "optional",
+			"pattern": "optional",
+			"url": "optional"
+		},
+		"TableInfo": {
+			"affinity": "required",
+			"autoincrement": "required",
+			"conflicts": "required",
+			"generatedColumns": "required",
+			"primaryKey": "required",
+			"rowidAlias": "required",
+			"strict": "required",
+			"withoutRowid": "required"
+		},
+		"TableMeta": {
+			"checkConstraints": "required",
+			"expressionIndexes": "required",
+			"fields": "required",
+			"hasCompositePrimaryKey": "required",
+			"idPrefix": "required",
+			"partialUniqueIndexes": "required",
+			"schema": "required",
+			"sqlName": "required",
+			"timestamps": "required",
+			"uniqueIndexes": "required",
+			"varName": "required"
+		},
+		"TaggedBookmark": {
+			"bookmark": "required",
+			"tag": "required"
+		},
+		"Terminal": {
+			"input": "required",
+			"output": "required"
+		},
+		"TextConstraints": {
+			"autogenerate": "optional",
+			"email": "optional",
+			"imageUri": "optional",
+			"lowercase": "optional",
+			"max": "optional",
+			"min": "optional",
+			"mutable": "optional",
+			"name": "optional",
+			"nomutate": "optional",
+			"password": "optional",
+			"pattern": "optional",
+			"private": "optional",
+			"relation": "optional",
+			"tenant": "optional",
+			"trim": "optional",
+			"uppercase": "optional",
+			"url": "optional"
+		},
+		"Tiebreak": {
+			"column": "required",
+			"direction": "required"
+		},
+		"TimestampConstraints": {
+			"autogenerate": "optional",
+			"max": "optional",
+			"min": "optional",
+			"mutable": "optional",
+			"nomutate": "optional",
+			"private": "optional",
+			"relation": "optional",
+			"tenant": "optional"
+		},
+		"TimestampsMeta": {
+			"createdAt": "required",
+			"deletedAt": "required",
+			"names": "required",
+			"style": "required",
+			"updatedAt": "required"
+		},
+		"TranslationResolverInput": {
+			"defaultLang": "required",
+			"fields": "required",
+			"lang": "required",
+			"languageCodeKey": "optional",
+			"translations": "required"
+		},
+		"TranslationsConfig": {
+			"baseDir": "required",
+			"filePrefix": "required"
+		},
+		"TursoCredentialsRequest": {
+			"apiToken": "required",
+			"dbName": "required",
+			"fetch": "optional",
+			"group": "optional",
+			"log": "optional",
+			"org": "required",
+			"readonly": "optional"
+		},
+		"TursoDeps": {
+			"fetch": "optional",
+			"log": "optional"
+		},
+		"TursoMissing": {},
+		"TursoProviderConfig": {
+			"apiToken": "required",
+			"databaseName": "required",
+			"group": "optional",
+			"org": "required",
+			"type": "required"
+		},
+		"TypedPasswordOptions": {
+			"hash": "optional",
+			"max": "optional"
+		},
+		"UlidFactoryOptions": {
+			"now": "optional",
+			"random": "optional"
+		},
+		"UniqueIndexMeta": {
+			"columns": "required",
+			"name": "required"
+		},
+		"ValidationResult": {
+			"errors": "required",
+			"warnings": "required"
+		},
+		"WaitUntilCtx": {
+			"waitUntil": "required"
+		}
+	},
 	"version": "0.20.1"
 }

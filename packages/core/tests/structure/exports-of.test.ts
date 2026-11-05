@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { exportsOf } from "./support/exports-of.ts"
+import { apiOf } from "./support/exports-of.ts"
 
 const made: string[] = []
 afterEach(() => {
@@ -54,7 +54,7 @@ export type UsesShared = { shared: Shared }
 	return root
 }
 
-const hashes = (root: string) => exportsOf(root)["."] as Record<string, string>
+const hashes = (root: string) => apiOf(root).exports["."] as Record<string, string>
 
 describe("an export's hash covers what a consumer's compiler reads for it (KT3; siblings: comments, exported types)", () => {
 	it("changes when an unexported type it names changes, however deep", () => {
@@ -85,5 +85,36 @@ describe("an export's hash covers what a consumer's compiler reads for it (KT3; 
 		/* 0.21 exports types 0.20.1 kept internal (KT6): what a consumer reads for Text stays as it was */
 		const published = hashes(fixture(BASE.replace("type Inner", "export type Inner"), undefined, true))
 		expect(published["Text"]).toBe(before["Text"])
+	})
+})
+
+const MEMBERS = `type Hidden = { inner: string }
+export class Kept extends Error {
+	#secret = 1
+	private quiet = 2
+	static made = 3
+	column?: string
+	toJSON(): object { return {} }
+}
+export interface Wide extends Narrow { extra?: number }
+interface Narrow { name: string }
+export type Mixed = Narrow & Partial<{ later: number }> & { required: Hidden }
+export type Either = { kind: "a"; a?: string; both: number } | { kind: "b"; both?: number }
+export type Mapped = { [K in "x"]: string }
+`
+
+describe("the members of each type an export reaches, as a consumer's compiler reads them", () => {
+	it("lists each public member optional or required, through bases, intersections, unions and Partial", () => {
+		const root = fixture(BASE)
+		writeFileSync(join(root, "src/index.ts"), MEMBERS)
+		const { members } = apiOf(root)
+		expect(members).toEqual({
+			Either: { both: "optional", kind: "required" },
+			Hidden: { inner: "required" },
+			Kept: { column: "optional", toJSON: "required" },
+			Mixed: { later: "optional", name: "required", required: "required" },
+			Narrow: { name: "required" },
+			Wide: { extra: "optional", name: "required" },
+		})
 	})
 })
