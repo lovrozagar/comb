@@ -83,6 +83,10 @@ const gained = (from: Members, to: Members, inputs: readonly string[]): string[]
 		)
 		.sort()
 
+/** Each of `names`, as `Type.member`, that `section` does not name */
+const unnamedIn = (section: string, names: readonly string[]): string[] =>
+	names.filter((name) => !section.includes(`\`${name}\``))
+
 /** Each member narrowed since the release, or gained as required by a type its callables took */
 const changedMembers = (now: Members): string[] => [
 	...narrowed(RELEASED.members, now),
@@ -189,6 +193,14 @@ function listed(section: string, label: string): string[] {
 	return [...names].map((match) => match[1] as string).sort()
 }
 
+/* AD7-2 of the area D round-seven review: an unrelated `max` elsewhere in the section named IntegerConstraints.max */
+describe("a changed member the section names", () => {
+	it("is named only as `Type.member`, never by a bare member name the section holds elsewhere", () => {
+		const section = "1. `T.min` is gone.\n2. Range queries take a `max` now."
+		expect(unnamedIn(section, ["T.max", "T.min"])).toEqual(["T.max"])
+	})
+})
+
 describe("the members a type a released callable took gained as required (AD7-3)", () => {
 	const from: Members = { Config: { name: "optional" }, Out: { x: "required" } }
 	const to: Members = {
@@ -237,9 +249,7 @@ describe("the newest upgrade section's exports", () => {
 
 	/* comb-44's 0005 dropped `ManifestConfig.filePrefix`, which 0.20.1's generateManifest takes, and no list could name it */
 	it("names each member a released type lost or made required, or a type a released callable took gained as required, since then", () => {
-		const unnamed = changedMembers(api.members).filter(
-			(name) => !section.includes(`\`${name}\``) && !section.includes(`\`${name.split(".")[1]}\``),
-		)
+		const unnamed = unnamedIn(section, changedMembers(api.members))
 		expect(
 			released ? [] : unnamed,
 			`members changed since ${RELEASED.version}, unnamed in "Upgrading to ${version}"`,
