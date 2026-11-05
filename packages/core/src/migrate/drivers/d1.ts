@@ -8,6 +8,7 @@ import { projectBin } from "../core/optional-peer.ts"
 import { WRANGLER } from "../core/peer-needs.ts"
 import { type ProjectBin, type Run, run, runPeer } from "../core/process.ts"
 import { segments } from "../../sql-lexer.ts"
+import { LOCAL_BUSY, LOCAL_LOCK_MS, LOCKER } from "./d1-lock.ts"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult } from "../types.ts"
 
 /* wrangler JSON output schema for query results, built on use: each command parses it once */
@@ -38,15 +39,6 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 
 /** wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22) */
 type Wrangler = { exec: Run; wrangler: ProjectBin }
-
-/* how long a --local command waits out another process's lock on the local D1 file: BUSY_TIMEOUT's window for a SQLite file (SL4 of r22) */
-const LOCAL_LOCK_MS = 5000
-
-/* workerd's error for a local D1 file another process holds the write lock on, which wrangler prints colored
-   without --json: SQLITE_BUSY exactly, never "locked" in another sense */
-const LOCAL_BUSY = /database is locked: SQLITE_BUSY(?!\w)/
-
-const LOCKER = "another process (wrangler dev, a wrangler command or a second comb migrate)"
 
 /** Whether `ms` ran out (true), or a signal stopped comb first (its name), after which nothing new starts */
 function waitOut(ms: number): Promise<true | NodeJS.Signals> {

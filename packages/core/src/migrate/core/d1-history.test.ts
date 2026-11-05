@@ -288,6 +288,36 @@ describe("applyD1 when wrangler fails before it makes its table", () => {
 	})
 })
 
+/* wrangler's own apply runs its batch once, and prints workerd's SQLITE_BUSY with an [ERROR] that names only an internal error */
+describe("applyD1 when another process holds the local database's lock", () => {
+	it("refuses naming the lock and what is still pending, and never reruns wrangler's apply", async () => {
+		const { d1, read, run } = await target({})
+		let applies = 0
+		const locked: D1Target = {
+			...d1,
+			exec: asWrangler(async (cmd, args, options) => {
+				if (args[1] !== "migrations") return run(cmd, args, options)
+				applies += 1
+				return {
+					code: 1,
+					stderr:
+						"workerd/util/sqlite.c++:1733: failed: SQLite failed; dbErrorMessage(err, db) = database is locked: SQLITE_BUSY\n✘ [ERROR] internal error; reference = x1",
+					stdout: "",
+				}
+			}),
+		}
+		const failed = await applyD1(locked, { approve, print: () => undefined, read }).then(
+			() => undefined,
+			(error: unknown) => error as Error & { pending?: string[] },
+		)
+		expect([failed?.message, failed?.pending, applies]).toEqual([
+			"wrangler d1 migrations apply failed: the local D1 database was locked by another process (wrangler dev, a wrangler command or a second comb migrate) while wrangler applied: let it finish and rerun",
+			["1_init.sql"],
+			1,
+		])
+	})
+})
+
 /* M33 of the 0.13 review: only a local database can be missing where comb looks for it */
 describe("statusD1 on a local database wrangler keeps nowhere comb finds", () => {
 	it("refuses locally, and reads a remote one with no local file", async () => {

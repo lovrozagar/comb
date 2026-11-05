@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest"
+import { LOCAL_BUSY } from "./d1-lock.ts"
+
+describe("LOCAL_BUSY", () => {
+	it("matches workerd's busy line, plain or colored, and no other SQLite code or sense of locked", () => {
+		const line = "dbErrorMessage(err, db) = database is locked: SQLITE_BUSY stack: 7f0a"
+		const others = [
+			"database is locked: SQLITE_BUSY_SNAPSHOT",
+			"database is locked: SQLITE_LOCKED",
+			"database table is locked: SQLITE_LOCKED_SHAREDCACHE",
+			"the account is locked: contact support",
+		]
+		expect([line, `\u001b[31m${line}\u001b[0m`, ...others].map((text) => LOCAL_BUSY.test(text))).toEqual([
+			true,
+			true,
+			false,
+			false,
+			false,
+			false,
+		])
+	})
+})

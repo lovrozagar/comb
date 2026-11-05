@@ -14,6 +14,7 @@ import { absentDatabase } from "../drivers/absent.ts"
 import { executeAll } from "../drivers/d1.ts"
 import { assertLocalExists, type D1Target, localMissing, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { d1Files, refuseSwallowing } from "./d1-files.ts"
+import { applyFailure, wranglerError } from "./d1-wrangler-error.ts"
 import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 import {
 	type Hashed,
@@ -104,14 +105,6 @@ async function history(
 	return { applied, hasIntents, orphans, settle, table, unhashed }
 }
 
-/** wrangler's own error lines from a failed run, its colours and banner left out; its whole output when it printed none */
-function wranglerError({ stderr, stdout }: { stderr: string; stdout: string }): string {
-	/* the escape sequences that colour a terminal's text */
-	const output = `${stderr}${stdout}`.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "")
-	const errors = output.split("\n").filter((line) => line.includes("[ERROR]"))
-	return (errors.length > 0 ? errors.map((line) => line.trim()).join("; ") : output).trim()
-}
-
 /**
  * What wrangler recorded once its apply of `names` ran, read back from the table, never from its output; a run
  * that failed may have made no table. Once wrangler has run, a read that fails is a Refused that says so: which of
@@ -139,7 +132,7 @@ async function appliedAfter(
 /** Refuse a failed run, or one whose table gained (`added`) other than the `names` checked, naming a file never checked (SD4 of r22) */
 function refuseUnlike(
 	ran: { code: number; stderr: string; stdout: string },
-	{ added, names, table }: { added: string[]; names: string[]; table: string },
+	{ added, local, names, table }: { added: string[]; local: boolean; names: string[]; table: string },
 ): void {
 	const unchecked = added.filter((name) => !names.includes(name))
 	const rest = names.filter((name) => !added.includes(name))
@@ -148,7 +141,7 @@ function refuseUnlike(
 			? ""
 			: `; wrangler also applied ${unchecked.join(", ")}, which comb never checked and holds no hash for: check each against git, then run comb migrate baseline <db> --hashes`
 	const now = { applied: added, pending: rest }
-	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}${also}`, now)
+	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${applyFailure(ran, local)}${also}`, now)
 	if (unchecked.length > 0 || rest.length > 0) {
 		throw new Refused(
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; wrangler said: ${wranglerError(ran)}${also}`,
@@ -208,7 +201,8 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
 	)
-	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), names, table })
+	const local = target.flags.includes("--local")
+	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), local, names, table })
 	if (moved !== undefined) {
 		throw new Refused(
 			`wrangler applied ${names.join(", ")}, then recording their hashes failed: ${moved}; comb migrate status reads them as recorded, and the next apply or baseline records them`,
