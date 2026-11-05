@@ -10,6 +10,7 @@ import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { pgCheck, T, tempDir } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { asRole, dropRoles, LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
+import { writingServer } from "../../support/server-lock.ts"
 
 const { checked, checkThenApply, devUrl, dir, files, options } = pgCheck()
 
@@ -199,13 +200,16 @@ describe("a bare change to a row the file names by keyword is the file's (AE6; s
 		}
 	}, 60_000)
 
+	/* every role's setting is about `all`, which another test's checked file may spell, so the check runs alone (server-lock.ts) */
 	it("refuses ALTER ROLE ALL SET, naming the setting every role keeps", async () => {
-		try {
-			logCatalog("ALTER ROLE ALL SET comb_t.probe = 'leaked', from the check's bare DO")
-			const { refused } = await checked(T, bare("ALTER ROLE ALL SET comb_t.probe = ''leaked''"))
-			expect(refused).toContain("devUrl's server keeps setting every database for every role ")
-		} finally {
-			await catalog("ALTER ROLE ALL RESET comb_t.probe")
-		}
+		await writingServer(async () => {
+			try {
+				logCatalog("ALTER ROLE ALL SET comb_t.probe = 'leaked', from the check's bare DO")
+				const { refused } = await checked(T, bare("ALTER ROLE ALL SET comb_t.probe = ''leaked''"))
+				expect(refused).toContain("devUrl's server keeps setting every database for every role ")
+			} finally {
+				await catalog("ALTER ROLE ALL RESET comb_t.probe")
+			}
+		})
 	}, 60_000)
 })
