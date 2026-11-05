@@ -37,7 +37,7 @@ function inlineKey(constraints: readonly Node[], table: string, filled: boolean)
 	const key = constraints.find((each) => each["contype"] === "CONSTR_FOREIGN")
 	if (key === undefined || !filled) return []
 	const referenced = written(key["pktable"])
-	const note = `${foreignScan(table, referenced)}; add the column, then the foreign key NOT VALID, then VALIDATE CONSTRAINT`
+	const note = `${foreignScan(table, referenced)}; add the column, then the foreign key NOT VALID, then VALIDATE CONSTRAINT in a later file`
 	return [{ level: "lock", note }]
 }
 

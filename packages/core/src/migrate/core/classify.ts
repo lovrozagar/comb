@@ -16,7 +16,7 @@
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { ftsCommandFindings, type ReadStatement, refuseHeader, reindexedOf } from "./classify-file.ts"
+import { ftsCommandFindings, refuseHeader, reindexedOf } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
 import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
@@ -24,9 +24,10 @@ import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
-import { type Facts, historyFacts, tableOf } from "./pg-history.ts"
-import { blockAfter, insideOnly, nodeOf, outsideOnly, transactionControl } from "./pg-outside-transaction.ts"
+import { type Facts, historyFacts } from "./pg-history.ts"
+import { scopeReader } from "./pg-scope.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
+import type { Held } from "./pg-validate.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
 import { outsideTransaction } from "./atlas-header.ts"
@@ -54,6 +55,8 @@ type FileContext = RebuildContext & {
 	created: Set<string>
 	/** what the Postgres history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
+	/** on Postgres, the tables the open transaction holds locked since its NOT VALID ADDs (pg-validate.ts) */
+	held: Held
 	/** the schema the history and the file so far leave, statement by statement */
 	schema: ExtractedSchema
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
@@ -179,29 +182,6 @@ function statementReadings(
 	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, ...read.grammar }), ...read.findings]
 }
 
-/** Whether a table, or an index, the history `facts` follow is partitioned */
-const partitionedIn =
-	(facts: Facts) =>
-	(relation: unknown, index: boolean): boolean => {
-		const { key } = tableOf(relation, facts.schema)
-		return index ? facts.partitionedIndexes.has(key) : facts.partitioned.has(key)
-	}
-
-/**
- * A reader of a file's statements in order: what Postgres runs only outside a transaction, and only
- * inside a block, the file's own BEGIN followed, as Postgres sees a txmode none file's (PA13 of r22b)
- */
-function scopeReader(): (tree: unknown, facts: Facts) => Pick<ReadStatement, "control" | "inside" | "outside"> {
-	let block = false
-	return (tree, facts) => {
-		const parsed = nodeOf(tree)
-		const inside = block ? undefined : insideOnly(...parsed)
-		block = blockAfter(block, ...parsed)
-		/* before the statement's findings follow what it makes: a table partitioned so far (P9 of r21) */
-		return { control: transactionControl(...parsed), inside, outside: outsideOnly(...parsed, partitionedIn(facts)) }
-	}
-}
-
 /** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */
 function readFile(
 	sql: string,
@@ -231,6 +211,7 @@ function readFile(
 		created,
 		dialect,
 		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
+		held: new Map(),
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),
@@ -244,10 +225,10 @@ function readFile(
 		renumbered: guards.renumbered,
 		unguarded: guards.unguarded,
 	}
-	const scoped = scopeReader()
+	const scoped = scopeReader(outsideTransaction(sql), ctx)
 	return statements.map((stmt, i) => {
 		const tree = read?.statements[i]?.tree
-		const { control, inside, outside } = tree === undefined ? {} : scoped(tree, ctx.facts)
+		const { control, inside, outside } = tree === undefined ? {} : scoped(tree)
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)

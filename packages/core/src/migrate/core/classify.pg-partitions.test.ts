@@ -38,7 +38,7 @@ describe("an added column's inline foreign key (P18 of r19)", () => {
 
 	it("warns of the scan of both tables once a default fills the column, with the NOT VALID recipe", () => {
 		expect(rate("ALTER TABLE t ADD COLUMN w int DEFAULT 1 REFERENCES u (id);").lockWarnings).toEqual([
-			"ALTER TABLE t ADD COLUMN w int DEFAULT 1 REFERENCES u (id) (scans t, blocking writes to t and u; add the column, then the foreign key NOT VALID, then VALIDATE CONSTRAINT)",
+			"ALTER TABLE t ADD COLUMN w int DEFAULT 1 REFERENCES u (id) (scans t, blocking writes to t and u; add the column, then the foreign key NOT VALID, then VALIDATE CONSTRAINT in a later file)",
 		])
 	})
 })
@@ -48,7 +48,7 @@ describe("a foreign key on a partitioned table (P18 of r19)", () => {
 
 	it("refuses one NOT VALID, which Postgres refuses on every database, naming the recipe", () => {
 		expect(() => rate(NOT_VALID)).toThrow(
-			`${NOT_VALID.slice(0, -1)}: Postgres refuses a NOT VALID foreign key on the partitioned table pt: add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to pt, which then scans nothing`,
+			`${NOT_VALID.slice(0, -1)}: Postgres refuses a NOT VALID foreign key on the partitioned table pt: add it NOT VALID to each partition, VALIDATE CONSTRAINT on each in a later file, then add it to pt, which then scans nothing`,
 		)
 	})
 
@@ -63,13 +63,13 @@ describe("a foreign key on a partitioned table (P18 of r19)", () => {
 
 	it("warns that a valid one scans every partition, with the recipe that scans none of them at once", () => {
 		expect(rate("ALTER TABLE pt ADD CONSTRAINT fk FOREIGN KEY (u_id) REFERENCES u (id);").lockWarnings).toEqual([
-			"ALTER TABLE pt ADD CONSTRAINT fk FOREIGN KEY (u_id) REFERENCES u (id) (scans every partition of pt, blocking writes to them and u; add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to pt, which then scans nothing)",
+			"ALTER TABLE pt ADD CONSTRAINT fk FOREIGN KEY (u_id) REFERENCES u (id) (scans every partition of pt, blocking writes to them and u; add it NOT VALID to each partition, VALIDATE CONSTRAINT on each in a later file, then add it to pt, which then scans nothing)",
 		])
 	})
 
 	it("keeps a plain table's note", () => {
 		expect(rate("ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES u (id);").lockWarnings).toEqual([
-			"ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES u (id) (scans t, blocking writes to t and u; add it NOT VALID, then VALIDATE CONSTRAINT)",
+			"ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES u (id) (scans t, blocking writes to t and u; add it NOT VALID, then VALIDATE CONSTRAINT in a later file)",
 		])
 	})
 })
@@ -77,7 +77,7 @@ describe("a foreign key on a partitioned table (P18 of r19)", () => {
 describe("ATTACH PARTITION … DEFAULT (P20 of r19)", () => {
 	it("says what Postgres checks a default partition for, with the CHECK that excludes every bound", () => {
 		expect(rate("ALTER TABLE ev ATTACH PARTITION d DEFAULT;").lockWarnings).toEqual([
-			"ALTER TABLE ev ATTACH PARTITION d DEFAULT (scans d under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to d that excludes every other partition's bound NOT VALID, VALIDATE it, then ATTACH)",
+			"ALTER TABLE ev ATTACH PARTITION d DEFAULT (scans d under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to d that excludes every other partition's bound NOT VALID, VALIDATE it in a later file, then ATTACH)",
 		])
 	})
 })

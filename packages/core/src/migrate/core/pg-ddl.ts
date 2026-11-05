@@ -132,7 +132,7 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 
 /** The recipe for a foreign key on the partitioned table `table`, whose ADD then attaches each partition's and scans nothing (P18 of r19) */
 const partitionsFirst = (table: string): string =>
-	`add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to ${table}, which then scans nothing`
+	`add it NOT VALID to each partition, VALIDATE CONSTRAINT on each in a later file, then add it to ${table}, which then scans nothing`
 
 /**
  * A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID. A foreign key
@@ -155,7 +155,12 @@ function addConstraint(cmd: Node, table: string, { facts, key }: On): Finding[] 
 		const note = `scans every partition of ${table}, blocking writes to them and ${referenced}; ${partitionsFirst(table)}`
 		return [{ level: "lock", note }]
 	}
-	return [{ level: "lock", note: `${foreignScan(table, referenced)}; add it NOT VALID, then VALIDATE CONSTRAINT` }]
+	return [
+		{
+			level: "lock",
+			note: `${foreignScan(table, referenced)}; add it NOT VALID, then VALIDATE CONSTRAINT in a later file`,
+		},
+	]
 }
 
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */

@@ -27,6 +27,7 @@ import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
 import { followFresh } from "./pg-fresh.ts"
+import { type Held, heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
@@ -47,6 +48,8 @@ type TreeContext = {
 	/** what the history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
 	fresh: Fresh
+	/** the tables the open transaction holds locked since its NOT VALID ADDs (PA8 of r22b) */
+	held: Held
 }
 
 // lookup-table: the settings whose change decides what a later statement runs, and why
@@ -246,7 +249,7 @@ function pgTreeFindings(
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
 		return [
 			...(refusingAs(stmt, () => ddlFindings(type, node, ctx.facts)) ?? []),
-			...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
+			...(type === "AlterTableStmt" ? [...constraintIndexWarnings(node, ctx), ...heldScans(node, ctx)] : []),
 			codeFinding(type, node, ctx),
 		].filter((finding) => finding !== undefined)
 	})

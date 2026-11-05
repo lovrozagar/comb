@@ -65,7 +65,7 @@ describe("a partition added beside the parent's default partition", () => {
 			.lockWarnings
 	const ATTACH = "ALTER TABLE ev ATTACH PARTITION ev_new FOR VALUES FROM ('2021-01-01') TO ('2022-01-01');"
 	const BOTH =
-		"scans ev_new, and the default partition ev_def, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ev_new and one excluding it to ev_def, each NOT VALID, VALIDATE them, then ATTACH"
+		"scans ev_new, and the default partition ev_def, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ev_new and one excluding it to ev_def, each NOT VALID, VALIDATE them in a later file, then ATTACH"
 
 	it("names the default partition and its own CHECK on an ATTACH", () => {
 		expect(locks(ATTACH)).toEqual([expect.stringMatching(/^ALTER TABLE ev ATTACH PARTITION ev_new .* \((.*)\)$/)])
@@ -77,7 +77,7 @@ describe("a partition added beside the parent's default partition", () => {
 		const [warning, ...rest] = locks(create)
 		expect([warning?.startsWith("CREATE TABLE ev_2022 PARTITION OF ev"), rest]).toEqual([true, []])
 		expect(warning).toContain(
-			"(scans the default partition ev_def under an exclusive lock to check no row of it belongs to ev_2022; add a CHECK constraint excluding the new bound to ev_def NOT VALID, VALIDATE it, then create the partition)",
+			"(scans the default partition ev_def under an exclusive lock to check no row of it belongs to ev_2022; add a CHECK constraint excluding the new bound to ev_def NOT VALID, VALIDATE it in a later file, then create the partition)",
 		)
 		expect(locks(create, EV.replace("CREATE TABLE ev_def PARTITION OF ev DEFAULT;", ""))).toEqual([])
 	})

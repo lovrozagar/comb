@@ -35,10 +35,10 @@ function attachFindings(partition: string, defaulted?: string): Finding[] {
 function attachNote(partition: string, defaulted: string | undefined): string {
 	/* a default partition has no bound: Postgres checks that no row of it falls in another partition's (P20 of r19) */
 	if (defaulted === "default")
-		return `scans ${partition} under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to ${partition} that excludes every other partition's bound NOT VALID, VALIDATE it, then ATTACH`
+		return `scans ${partition} under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to ${partition} that excludes every other partition's bound NOT VALID, VALIDATE it in a later file, then ATTACH`
 	if (defaulted === undefined)
-		return `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH`
-	return `scans ${partition}, and the default partition ${defaulted}, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ${partition} and one excluding it to ${defaulted}, each NOT VALID, VALIDATE them, then ATTACH`
+		return `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it in a later file, then ATTACH`
+	return `scans ${partition}, and the default partition ${defaulted}, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ${partition} and one excluding it to ${defaulted}, each NOT VALID, VALIDATE them in a later file, then ATTACH`
 }
 
 /** A partition created beside its parent's default partition: Postgres checks no row of the default belongs to it */
@@ -53,7 +53,7 @@ function createFindings(node: Node, facts: Facts): Finding[] {
 	return [
 		{
 			level: "lock",
-			note: `scans the default partition ${defaulted} under an exclusive lock to check no row of it belongs to ${table}; add a CHECK constraint excluding the new bound to ${defaulted} NOT VALID, VALIDATE it, then create the partition`,
+			note: `scans the default partition ${defaulted} under an exclusive lock to check no row of it belongs to ${table}; add a CHECK constraint excluding the new bound to ${defaulted} NOT VALID, VALIDATE it in a later file, then create the partition`,
 		},
 	]
 }

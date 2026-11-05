@@ -43,6 +43,9 @@ describe("ddlFindings: an ALTER TABLE, command by command", () => {
 	})
 })
 
+/** The NOT VALID recipe every scanning constraint names */
+const LATER = "add it NOT VALID, then VALIDATE CONSTRAINT in a later file"
+
 describe("ddlFindings: an ALTER TABLE's constraints, defaults and other commands", () => {
 	it("warns of a scan for a foreign key or check validated, and of none NOT VALID or for a key", () => {
 		expect(rated("ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (a) REFERENCES u")?.[0]?.level).toBe("lock")
@@ -54,10 +57,10 @@ describe("ddlFindings: an ALTER TABLE's constraints, defaults and other commands
 	/* r18 P16: a foreign key scans its table and blocks writes to both tables; it rewrites nothing */
 	it("says what an added foreign key scans and blocks, naming both tables", () => {
 		expect(rated("ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (a) REFERENCES s.u (id)")).toEqual([
-			{ level: "lock", note: "scans t, blocking writes to t and s.u; add it NOT VALID, then VALIDATE CONSTRAINT" },
+			{ level: "lock", note: `scans t, blocking writes to t and s.u; ${LATER}` },
 		])
 		expect(rated("ALTER TABLE ONLY t ADD FOREIGN KEY (a) REFERENCES t")).toEqual([
-			{ level: "lock", note: "scans t, blocking writes to t; add it NOT VALID, then VALIDATE CONSTRAINT" },
+			{ level: "lock", note: `scans t, blocking writes to t; ${LATER}` },
 		])
 	})
 

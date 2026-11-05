@@ -77,7 +77,7 @@ describe("ATTACH PARTITION, REFRESH MATERIALIZED VIEW and LOCK", () => {
 		expect(rated.safety).toBe("safe")
 		expect(rated.lockWarnings).toEqual([
 			expect.stringMatching(
-				/^ALTER TABLE ev ATTACH PARTITION ev_old .* \(scans ev_old under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH\)$/,
+				/^ALTER TABLE ev ATTACH PARTITION ev_old .* \(scans ev_old under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it in a later file, then ATTACH\)$/,
 			),
 		])
 	})
