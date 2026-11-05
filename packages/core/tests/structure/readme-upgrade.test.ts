@@ -1,7 +1,8 @@
 /**
  * The 0.21 API item names what changed beyond declaration names (G1-1), the fields it made required
- * (G1-2) and both keys a list's extras gain (G1-3). Sibling: upgrade-exports.test.ts, which holds
- * the section's export lists to the exports.
+ * (G1-2), both keys a list's extras gain (G1-3) and the D1 fake that `withSession` as a property
+ * refuses (G1-4). Sibling: upgrade-exports.test.ts, which holds the section's export lists to the
+ * exports.
  */
 import { describe, expect, it } from "vitest"
 import { section } from "./support/readme.ts"
@@ -42,5 +43,11 @@ describe("the 0.21 API item", () => {
 
 	it("names both keys ListExtra and ListExtras gain (G1-3)", () => {
 		expect(upgrade).toContain("`ListExtra` and `ListExtras` gain `_combKeyTexts` and `_combTextKeys` (steps 60, 63)")
+	})
+
+	it("names the D1 fake D1DatabaseLike.withSession, a property now, refuses (G1-4)", () => {
+		const property = paragraph(upgrade, "`D1DatabaseLike.withSession` is a property now")
+		expect(property).toContain("Every optional property comb declares takes `undefined`")
+		expect(property).toContain("**Fix:** a D1 fake's `withSession` takes `string | undefined`")
 	})
 })
