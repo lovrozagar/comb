@@ -12,7 +12,12 @@
  * after one. Each path pages it every row once too. comb-9d's ruling on the fix binds a carried text
  * as an untyped parameter, which Postgres types as the key it is compared with; postgres.js infers a
  * parameter's type itself, so both keys page on node-postgres and on postgres.js alike.
+ *
+ * B2-2 of area B: a mapper that reads an integer as a fraction (cents) was a 500 `sort_not_wired` on
+ * the anchorless list and on an anchored list's joined key, which bind the key as read, as though the
+ * driver had rounded it; no driver reads an integer type as a fraction.
  */
+import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
 import { customType, numeric, type PgAsyncDatabase, type PgQueryResultHKT, pgTable, text } from "drizzle-orm/pg-core"
@@ -39,21 +44,33 @@ const sku = customType<{ data: string; driverData: string }>({
 	toDriver: (value) => (/^\d+(?:\.\d+)?$/.test(value) ? `sku-${value}` : value),
 })
 
+/* an amount the database holds in cents and the app in units, so every value but a whole one reads as a fraction */
+const cents = customType<{ data: number; driverData: number }>({
+	dataType: () => "integer",
+	fromDriver: (value) => value / 100,
+	toDriver: (value) => Math.round(value * 100),
+})
+
 const item = pgTable("custom_item", {
 	a: amount("a"),
 	id: text("id").primaryKey(),
 	n: numeric("n", { mode: "number" }),
+	p: cents("p"),
 	s: sku("s"),
 })
-const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["a", "n", "s"] })
-/* by `a` and `n`, and by `s`'s stored text: sku-12 < sku-3 < sku-45 < sku-7 */
+/* the item's price again, for an anchored list sorted by a joined key */
+const side = pgTable("custom_side", { item_id: text("item_id").primaryKey(), p: cents("p") })
+const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["a", "n", "p", "s"] })
+/* by `a`, `n` and `p`, and by `s`'s stored text: sku-12 < sku-3 < sku-45 < sku-7 */
 const SERVED = {
 	a: { asc: ["d", "a", "c", "b"], desc: ["b", "c", "a", "d"] },
 	n: { asc: ["d", "a", "c", "b"], desc: ["b", "c", "a", "d"] },
+	p: { asc: ["d", "a", "c", "b"], desc: ["b", "c", "a", "d"] },
 	s: { asc: ["a", "c", "b", "d"], desc: ["d", "b", "c", "a"] },
 } as const
 type Key = keyof typeof SERVED
-type Path = "anchored" | "anchorless" | "table"
+/* `joined` is a list anchored on custom_item, sorted by custom_side's column */
+type Path = "anchored" | "anchorless" | "joined" | "table"
 /** One session, on node-postgres or on postgres.js, its statements run as given */
 type Session = { db: PgAsyncDatabase<PgQueryResultHKT>; run(statement: string, params?: unknown[]): Promise<unknown[]> }
 
@@ -74,23 +91,28 @@ async function seed(session: Session): Promise<void> {
 	const [made] = (await session.run("SELECT to_regclass('pg_temp.custom_item') AS t")) as { t: unknown }[]
 	if (made?.t === null) {
 		await session.run("CREATE DOMAIN pg_temp.amount AS numeric")
-		await session.run("CREATE TEMP TABLE custom_item (id text PRIMARY KEY, a pg_temp.amount, n numeric, s text)")
+		await session.run(
+			"CREATE TEMP TABLE custom_item (id text PRIMARY KEY, a pg_temp.amount, n numeric, p integer, s text)",
+		)
+		await session.run("CREATE TEMP TABLE custom_side (item_id text PRIMARY KEY, p integer)")
 	}
 	await session.run("DELETE FROM custom_item")
+	await session.run("DELETE FROM custom_side")
 	await session.run(`
-	INSERT INTO custom_item VALUES ('d', 0.1000000000000000001, 0.5, 'sku-7'), ('a', 0.1000000000000000002, 1.5, 'sku-12'),
-		('c', 0.1000000000000000003, 2.5, 'sku-3'), ('b', 0.1000000000000000004, 3.5, 'sku-45')`)
+	INSERT INTO custom_item VALUES ('d', 0.1000000000000000001, 0.5, 150, 'sku-7'), ('a', 0.1000000000000000002, 1.5, 200, 'sku-12'),
+		('c', 0.1000000000000000003, 2.5, 1234, 'sku-3'), ('b', 0.1000000000000000004, 3.5, 2500, 'sku-45')`)
+	await session.run("INSERT INTO custom_side SELECT id, p FROM custom_item")
 }
 
 /** The list `path` builds for `query` */
 function listOf(path: Path, query: ReturnType<typeof schema.parse>) {
 	if (path === "table") return buildListQuery({ ...SEALED, parsed: query, table: item as never })
-	const anchor = path === "anchored" ? { anchor: { idColumn: item.id, table: item } } : { idColumn: item.id }
+	const anchor = path === "anchorless" ? { idColumn: item.id } : { anchor: { idColumn: item.id, table: item } }
 	return buildDerivedListQuery({
 		...SEALED,
 		...anchor,
 		parsed: query,
-		sortColumns: { a: item.a, n: item.n, s: item.s },
+		sortColumns: { a: item.a, n: item.n, p: path === "joined" ? side.p : item.p, s: item.s },
 	})
 }
 
@@ -114,8 +136,9 @@ async function served(
 		const query = { ...schema.parse({ order: `${key}.${direction}` }), cursor }
 		const built = listOf(path, query)
 		const select = session.db
-			.select({ a: item.a, id: item.id, n: item.n, s: item.s, ...built.extras })
+			.select({ a: item.a, id: item.id, n: item.n, p: item.p, s: item.s, ...built.extras })
 			.from(item)
+			.innerJoin(side, eq(side.item_id, item.id))
 			.$dynamic()
 		const rows = await (built.where === undefined ? select : select.where(built.where))
 			.orderBy(...built.orderBy)
@@ -147,6 +170,19 @@ describe("a customType key pages or is refused at the mint, on Postgres (AB2 of 
 						await served(DRIVERS[driver](), path, { deleting, direction, key: "a" }),
 						`${direction} ${deleting}`,
 					).toEqual(SERVED.a[direction])
+		},
+	)
+
+	/* B2-2 of area B: no driver reads an integer as a fraction, so one there is the mapper's, bound back through toDriver */
+	it.each([...CASES, ["joined", "node-postgres"] as const, ["joined", "postgres.js"] as const])(
+		"pages a customType key that reads an integer in cents on the %s list every row once on %s",
+		async (path, driver) => {
+			for (const deleting of [false, true])
+				for (const direction of ["asc", "desc"] as const)
+					expect(
+						await served(DRIVERS[driver](), path, { deleting, direction, key: "p" }),
+						`${direction} ${deleting}`,
+					).toEqual(SERVED.p[direction])
 		},
 	)
 
