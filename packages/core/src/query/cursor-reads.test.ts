@@ -4,7 +4,7 @@
  * read a Date. readCursor hands back the Date the row read, an Invalid one included, and the keyset
  * still binds the stored value; the Date rides in the cursor and counts against its cap. AB3-3 of
  * area B widens it to every key the list re-types: a numeric's text read as a bigint, a null read
- * for Infinity, bytes read as an ArrayBuffer.
+ * for Infinity; bytes read as an ArrayBuffer or an array carry no read, and readCursor answers the bound.
  */
 import { describe, expect, it } from "vitest"
 import { CursorRef, mintCursor, openCursor, readCursor } from "./cursor.ts"
@@ -104,7 +104,7 @@ describe("readCursor returns every key the list re-types as its row read it (AB3
 		expect(back(5, undefined)).toBe(5)
 	})
 
-	it("returns bytes read as an ArrayBuffer or D1's array as a Uint8Array, and bytes read as bound as the bound", () => {
+	it("answers bytes read as an ArrayBuffer or D1's array with the bound bytes, as no cursor carries either read", () => {
 		const bytes = Uint8Array.from([1, 2])
 		expect(back(bytes, bytes.buffer)).toEqual(bytes)
 		expect(back(bytes, [1, 2])).toEqual(bytes)

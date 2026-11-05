@@ -39,12 +39,6 @@ function readOf(
 	return read.includes(undefined) ? null : (read as ReadSlot[])
 }
 
-/** `read` as the codec carries bytes: an ArrayBuffer, or D1's array where the key binds bytes, as a Uint8Array */
-function bytesOf(read: unknown, bound: unknown): unknown {
-	if (read instanceof ArrayBuffer) return new Uint8Array(read)
-	return Array.isArray(read) && bound instanceof Uint8Array ? Uint8Array.from(read as number[]) : read
-}
-
 /**
  * The slot a cursor's `d` writes for a key the row read as `read` and the keyset binds as `bound`:
  * null where they are one, or where no cursor carries the read, which readCursor then answers with
@@ -52,8 +46,7 @@ function bytesOf(read: unknown, bound: unknown): unknown {
  */
 function readSlot(read: unknown, bound: unknown): [unknown] | null {
 	if (read === undefined) return null
-	const value = bytesOf(read, bound)
-	return sameValue(bound, value) || !carried(value, decodeValue) ? null : [encodeValue(value)]
+	return sameValue(bound, read) || !carried(read, decodeValue) ? null : [encodeValue(read)]
 }
 
 /**
