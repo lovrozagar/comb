@@ -886,15 +886,23 @@ declare function segments(sql: string, dialect?: Dialect): Segment[];
  * loadPostgresParser(). A stretch that holds only comments is not a statement.
  */
 declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
+declare const WORD_CHAR: RegExp;
 /**
  * `sql` with comments dropped and SQLite's whitespace collapsed outside strings and identifiers, those
  * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
- * in data or names never. A migration's hash is taken over this form. `foldAll` is the form comb
- * 0.5.0 to 0.20 hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type
- * b, and a column named a b) normalized alike (SL5 of r22).
+ * in data or names never. A migration's hash is taken over this form, so it stays as recorded: a
+ * word written against a quoted name stays against it. `foldAll` is the form comb 0.5.0 to 0.20
+ * hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type b, and a
+ * column named a b) normalized alike (SL5 of r22).
  */
-declare function normalizeSql(sql: string, foldAll?: boolean): string;
-export { normalizeSql, segments, splitSqlStatements, type Segment };
+declare function hashedSql(sql: string, foldAll?: boolean): string;
+/**
+ * `sql` as hashedSql collapses it, read as SQLite tokenizes it: a quoted name is a token of its own,
+ * so a word written against one is set off by a space, as `ALTER TABLE "users"DROP COLUMN email`
+ * drops the column `ALTER TABLE "users" DROP COLUMN email` does; `"main".t` and `"a"(` stay as written
+ */
+declare function normalizeSql(sql: string): string;
+export { hashedSql, normalizeSql, segments, splitSqlStatements, type Segment, WORD_CHAR };
 
 // migrate/drivers/d1.d.ts
 import { type ProjectBin, type Run } from "../core/process.ts";
@@ -1073,8 +1081,8 @@ type AlterContext = {
         temp: string;
     }>>;
 };
-/** The findings of an ALTER TABLE, action by action; undefined for code that is not one */
-declare function alterTableFindings(code: string, ctx: AlterContext): Finding[] | undefined;
+/** The findings of an ALTER TABLE, action by action; one unsafe finding for an ALTER TABLE comb cannot read */
+declare function alterTableFindings(code: string, ctx: AlterContext): Finding[];
 export { alterTableFindings, type Finding };
 
 // migrate/core/classify-file.d.ts

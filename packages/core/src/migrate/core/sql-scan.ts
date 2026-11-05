@@ -214,7 +214,7 @@ function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] 
 const SQLITE_SPACE = /[\t\n\f\r ]+/g
 
 /* a character SQLite reads into a bare word: a letter, digit, _, $, or any above ASCII */
-const WORD_CHAR = /[\w$\u0080-\uffff]/
+const WORD_CHAR: RegExp = /[\w$\u0080-\uffff]/
 
 /**
  * `sql` with comments dropped and SQLite's whitespace collapsed outside strings and identifiers, those
