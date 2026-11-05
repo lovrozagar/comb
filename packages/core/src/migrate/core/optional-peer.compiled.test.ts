@@ -19,7 +19,7 @@ afterAll(() => rmSync(ROOT, { force: true, recursive: true }))
 /** What comb says of `peers` in a compiled executable */
 const refused = (peers: string): Error =>
 	new Error(
-		`comb loads ${peers} from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`,
+		`comb loads ${peers} from the project, which a Bun single-file executable cannot do: run it with bun or node, not from a compiled executable`,
 	)
 
 /** The Atlas comb is tested against, counting each read of its version */

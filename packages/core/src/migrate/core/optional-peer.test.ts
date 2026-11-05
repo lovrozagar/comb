@@ -332,7 +332,7 @@ describe("projectBin and binOf", () => {
 		const bin = { bin: "/nowhere/w.js", manifest: "/nowhere/package.json", peer: "wrangler", runtime: "node" } as const
 		await expect(importBin(bin, "file:///$bunfs/root/app-exe")).rejects.toThrow(
 			new Error(
-				"comb loads wrangler from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable",
+				"comb loads wrangler from the project, which a Bun single-file executable cannot do: run it with bun or node, not from a compiled executable",
 			),
 		)
 	})

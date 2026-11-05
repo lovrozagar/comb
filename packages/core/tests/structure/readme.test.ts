@@ -258,6 +258,16 @@ const loads = (provider: Provider, command: Command): boolean =>
 		(need) => need.peer !== "atlas" && need.peer !== "drizzle-kit" && need.optional !== true,
 	)
 
+/** Each provider and command that a declared FTS gives a child-loaded need */
+const ftsAdds = (): Array<readonly [Provider, Command]> => {
+	const commands = [...new Set(Object.values(PEERS).flatMap((row) => Object.keys(row)))].sort() as Command[]
+	return (Object.keys(PEERS) as Provider[]).flatMap((provider) =>
+		commands
+			.filter((command) => needsOf(command, provider, true).some((need) => need.child === true))
+			.map((command) => [provider, command] as const),
+	)
+}
+
 /* D4-6 of the area D round-four review: item 2 promises what a Bun single-file executable refuses */
 describe("README peer install upgrade item", () => {
 	const item =
@@ -295,12 +305,7 @@ describe("README peer install upgrade item", () => {
 
 	/* D6-3 of the area D round-six review: the FTS clause is derived, as the per-provider split is, from the rows with FTS declared */
 	it("names each command a declared FTS adds a child-loaded need to, on every SQLite provider", () => {
-		const commands = [...new Set(Object.values(PEERS).flatMap((row) => Object.keys(row)))].sort() as Command[]
-		const added = (Object.keys(PEERS) as Provider[]).flatMap((provider) =>
-			commands
-				.filter((command) => needsOf(command, provider, true).some((need) => need.child === true))
-				.map((command) => [provider, command] as const),
-		)
+		const added = ftsAdds()
 		/* "SQLite" is every provider but Postgres */
 		const sqlite = (Object.keys(PEERS) as Provider[]).filter((provider) => provider !== "postgres").sort()
 		expect([...new Set(added.map(([provider]) => provider))].sort()).toEqual(sqlite)
@@ -313,6 +318,10 @@ describe("README peer install upgrade item", () => {
 		expect(refused).toContain("every D1, libsql and Turso command but `migrate diff`")
 		expect(refused).toContain("every Postgres command but `migrate status`")
 		expect(refused).toContain("`loadPostgresParser`")
+		/* D6-6 of the area D round-six review: the libsql and Turso providers an app calls load @libsql/client too */
+		expect(refused).toContain(
+			"`createLibsqlProvider`, `createTursoProvider` and `createProvider` for a libsql or Turso config",
+		)
 		for (const peer of ["wrangler", "@libsql/client", "libpg-query", "postgres"])
 			expect(refused).toContain(`\`${peer}\``)
 	})
