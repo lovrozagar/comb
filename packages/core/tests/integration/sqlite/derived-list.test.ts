@@ -7,6 +7,7 @@
  * Postgres's suites' case.
  */
 import { afterEach, describe, expect, it } from "vitest"
+import { BLOB_SEED, BLOB_SERVED, servedBlob } from "../support/blob-key.ts"
 import { type JoinedKey, SEED, SERVED, SERVED_NULLS, servedBy } from "../support/joined-keys.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import { NUMERIC_SEED, NUMERIC_SERVED, servedNumeric } from "../support/numeric-key.ts"
@@ -74,5 +75,18 @@ describe("a drizzle numeric() key pages with no anchor and merged (B2-4 of area 
 			expect(await servedNumeric(one, { direction, shape: "anchorless" }), direction).toEqual(NUMERIC_SERVED[direction])
 			expect(await servedNumeric(two, { direction, shape: "merged" }), direction).toEqual(NUMERIC_SERVED[direction])
 		}
+	})
+})
+
+/* B2-12 of area B: libsql reads a blob no buffer-mode column maps as an ArrayBuffer, which the mint refused */
+describe("an expression over a blob pages by its bytes (B2-12 of area B; sibling: QL5's bytes)", () => {
+	it("pages an anchored and an anchorless list sorted by an expression over a blob, every row once", async () => {
+		harness = libsqlMemory()
+		for (const statement of BLOB_SEED) await harness.client.execute(statement)
+		for (const shape of ["anchored", "anchorless"] as const)
+			for (const direction of ["asc", "desc"] as const)
+				expect(await servedBlob(harness.db, { direction, shape }), `${shape} ${direction}`).toEqual(
+					BLOB_SERVED[direction],
+				)
 	})
 })

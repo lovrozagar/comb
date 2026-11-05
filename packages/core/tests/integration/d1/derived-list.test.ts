@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest"
 import { type JoinedKey, SEED, SERVED, SERVED_NULLS, servedBy } from "../support/joined-keys.ts"
+import { BLOB_SEED, BLOB_SERVED, servedBlob } from "../support/blob-key.ts"
 import { drizzle } from "drizzle-orm/d1"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import { NUMERIC_SEED, NUMERIC_SERVED, servedNumeric } from "../support/numeric-key.ts"
@@ -84,5 +85,17 @@ describe("a drizzle numeric() key pages with no anchor and merged (B2-4 of area 
 			expect(await servedNumeric(one, { direction, shape: "anchorless" }), direction).toEqual(NUMERIC_SERVED[direction])
 			expect(await servedNumeric(two, { direction, shape: "merged" }), direction).toEqual(NUMERIC_SERVED[direction])
 		}
+	})
+})
+
+/* B2-12 of area B: D1 reads a blob no buffer-mode column maps as an ArrayBuffer, which the mint refused */
+describe("an expression over a blob pages by its bytes (B2-12 of area B; sibling: QL5's bytes)", () => {
+	it("pages an anchored and an anchorless list sorted by an expression over a blob, every row once", async () => {
+		harness = await d1Memory()
+		for (const statement of BLOB_SEED) await harness.CORE.prepare(statement).run()
+		const db = drizzle(harness.CORE)
+		for (const shape of ["anchored", "anchorless"] as const)
+			for (const direction of ["asc", "desc"] as const)
+				expect(await servedBlob(db, { direction, shape }), `${shape} ${direction}`).toEqual(BLOB_SERVED[direction])
 	})
 })
