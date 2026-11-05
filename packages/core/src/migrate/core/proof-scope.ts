@@ -8,9 +8,9 @@
  * - Rows go to S, each table a trigger or view reached from S names (to a fixpoint), D (their FK descendants: a
  *   cascade reaches them) and A (the FK ancestors of all those: their keys must be met).
  * - The copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
- *   them on DROP COLUMN and RENAME COLUMN); then to a fixpoint each index and trigger on a created table, each
- *   table and view a created trigger or view names, and each created table's FK ancestors, which a write to it
- *   compiles checks against.
+ *   them on DROP COLUMN and RENAME COLUMN); then to a fixpoint each index and trigger on a created table or view
+ *   (a view's INSTEAD OF triggers carry out a write through it), each table and view a created trigger or view
+ *   names, and each created table's FK ancestors, which a write to it compiles checks against.
  */
 import type { LiveObject } from "./proof-copy.ts"
 import { asciiFold, IDENT, sqliteNames } from "./sql-code.ts"
@@ -85,11 +85,13 @@ function graphOf(objects: readonly LiveObject[]) {
 
 type Graph = ReturnType<typeof graphOf>
 
-/** `start` and, to a fixpoint, each index and trigger on a table in it, and each table and view a trigger or view in it names */
+/** `start` and, to a fixpoint, each index and trigger on a table or view in it, and each table and view a trigger or view in it names */
 function forward(graph: Graph, start: Iterable<LiveObject>): Set<LiveObject> {
 	const out = new Set(start)
 	for (const object of out) {
-		if (object.type === "table") for (const each of graph.on.get(asciiFold(object.name)) ?? []) out.add(each)
+		/* a view's INSTEAD OF triggers carry out every write through it */
+		if (object.type === "table" || object.type === "view")
+			for (const each of graph.on.get(asciiFold(object.name)) ?? []) out.add(each)
 		if (object.type !== "trigger" && object.type !== "view") continue
 		for (const name of graph.names.get(object) as Set<string>)
 			for (const each of graph.named.get(name) ?? []) if (each.type === "table" || each.type === "view") out.add(each)

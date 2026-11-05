@@ -148,12 +148,36 @@ function ftsCases(): ScopeCase[] {
 	}))
 }
 
+const VIEW_OVER_BASE =
+	"CREATE TABLE base (id INTEGER PRIMARY KEY, a TEXT);\nINSERT INTO base (a) VALUES ('x'), ('y');\nCREATE VIEW v AS SELECT id, a FROM base;"
+
+/* a write through a view, which its INSTEAD OF trigger carries out on the tables the trigger names */
+function viewTriggerCases(): ScopeCase[] {
+	return [
+		[
+			"an INSTEAD OF trigger that inserts",
+			`${VIEW_OVER_BASE}\nCREATE TRIGGER v_ins INSTEAD OF INSERT ON v BEGIN INSERT INTO base (a) VALUES (new.a); END;`,
+			"INSERT INTO v (a) VALUES ('z');",
+		],
+		[
+			"an INSTEAD OF trigger that deletes",
+			`${VIEW_OVER_BASE}\nCREATE TRIGGER v_ins INSTEAD OF INSERT ON v BEGIN DELETE FROM base; END;`,
+			"INSERT INTO v (a) VALUES ('z');",
+		],
+	].map(([label, schema, file]) => ({
+		file: file as string,
+		label: `view trigger: ${label as string}`,
+		schema: schema as string,
+	}))
+}
+
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
 	return [
 		...d1Cases(),
 		...triggerCases(),
 		...ftsCases(),
+		...viewTriggerCases(),
 		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
 	]
 }
