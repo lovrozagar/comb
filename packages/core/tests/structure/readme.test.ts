@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { type Command as CliCommand, usageOf } from "../../src/cli/args.ts"
 import { type Command, needsOf, PEERS, type Provider } from "../../src/migrate/core/peer-needs.ts"
 import { ATLAS_RANGE, type BinPeer } from "../../src/migrate/core/process.ts"
 import { LOCAL_LOCK_MS } from "../../src/migrate/drivers/d1-lock.ts"
@@ -393,6 +394,15 @@ describe("README newest upgrade section's step citations", () => {
 			/\b(?:[A-Z]{1,4}\d{1,3}[a-z]?(?:-\d+[a-z]?)?|r\d{2}[a-z]?|comb-[0-9a-f]{2})\b|\barea [A-D]\b/g,
 		)
 		expect([...new Set(tokens)].filter((token) => !["D1", "FTS5", "RE2", "SHA256"].includes(token))).toEqual([])
+	})
+})
+
+describe("README usage lines", () => {
+	/* a refusal the README quotes is the line the CLI prints, options included */
+	it("quotes each command's usage line as the CLI builds it", () => {
+		const quoted = [...README.matchAll(/`(Usage: comb ([a-z]+(?: [a-z]+)?) [^`]*)`/g)]
+		expect(quoted.length).toBeGreaterThan(0)
+		for (const [, line, command] of quoted) expect(line).toBe(usageOf(command as CliCommand))
 	})
 })
 
