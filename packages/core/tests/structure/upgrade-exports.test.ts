@@ -107,9 +107,10 @@ function bare(type: ts.TypeNode | undefined): ts.TypeNode | undefined {
 	return defined.length === 1 ? bare(defined[0]) : type
 }
 
-/** The members of an interface or an object type alias, by its name */
-function membersOf(node: ts.Node): [string, ts.NodeArray<ts.TypeElement>] | undefined {
+/** The members of an interface, a class or an object type alias, by its name */
+function membersOf(node: ts.Node): [string, ts.NodeArray<ts.TypeElement | ts.ClassElement>] | undefined {
 	if (ts.isInterfaceDeclaration(node)) return [node.name.text, node.members]
+	if (ts.isClassDeclaration(node) && node.name !== undefined) return [node.name.text, node.members]
 	if (ts.isTypeAliasDeclaration(node) && ts.isTypeLiteralNode(node.type)) return [node.name.text, node.type.members]
 	return undefined
 }
@@ -117,15 +118,15 @@ function membersOf(node: ts.Node): [string, ts.NodeArray<ts.TypeElement>] | unde
 /**
  * Each callable a snapshot declares, and whether it returns a promise: a function, a const or a type
  * of function type, and, as `Type.member` (D6-4 of the area D round-six review), a method or a
- * function-typed member of an interface or object type, a member typed by a callable alias among them
+ * function-typed member of an interface, class or object type, a member typed by a callable alias among them
  */
 function callablesOf(text: string): Map<string, boolean> {
 	const found = new Map<string, boolean>()
 	const mark = (name: string, promise: boolean) => found.set(name, found.get(name) === true || promise)
 	const note = (name: string, type: ts.TypeNode | undefined) => mark(name, /^Promise\s*</.test(type?.getText() ?? ""))
-	const noteMember = (name: string, member: ts.TypeElement): void => {
-		if (ts.isMethodSignature(member)) return void note(name, member.type)
-		const type = ts.isPropertySignature(member) ? bare(member.type) : undefined
+	const noteMember = (name: string, member: ts.TypeElement | ts.ClassElement): void => {
+		if (ts.isMethodSignature(member) || ts.isMethodDeclaration(member)) return void note(name, member.type)
+		const type = ts.isPropertySignature(member) || ts.isPropertyDeclaration(member) ? bare(member.type) : undefined
 		if (type !== undefined && ts.isFunctionTypeNode(type)) note(name, type.type)
 		const alias = type !== undefined && ts.isTypeReferenceNode(type) ? found.get(type.typeName.getText()) : undefined
 		if (alias !== undefined) mark(name, alias)
@@ -198,6 +199,27 @@ describe("a changed member the section names", () => {
 	it("is named only as `Type.member`, never by a bare member name the section holds elsewhere", () => {
 		const section = "1. `T.min` is gone.\n2. Range queries take a `max` now."
 		expect(unnamedIn(section, ["T.max", "T.min"])).toEqual(["T.max"])
+	})
+})
+
+/* AD7-4 of the area D round-seven review: LruCache.clear made async passed, since no class member was read */
+describe("the callables a snapshot declares", () => {
+	it("hold a class's methods and function-typed properties as `Class.member`, as an interface's", () => {
+		const text = [
+			"export declare class Cache {",
+			"\tprivate store;",
+			"\tconstructor(size: number);",
+			"\tclear(): Promise<void>;",
+			"\tget(key: string): string | undefined;",
+			"\tload: (key: string) => Promise<string>;",
+			"\tsize: number;",
+			"}",
+		].join("\n")
+		expect(Object.fromEntries(callablesOf(text))).toEqual({
+			"Cache.clear": true,
+			"Cache.get": false,
+			"Cache.load": true,
+		})
 	})
 })
 
