@@ -132,11 +132,11 @@ const refersBack = (column: SQLWrapper, table: object | undefined): boolean =>
 
 /**
  * Whether `value` is a time key's stored value as a list that binds the key as read carries it (QL2
- * of r22b): a Postgres date-mode column's text, or a SQLite seconds-mode timestamp's REAL seconds
+ * of r22b): a Postgres date-mode column's text, or a SQLite timestamp's stored seconds or milliseconds
  */
 const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
 	is(column, SQLiteColumn)
-		? inSeconds(column) && typeof value === "number"
+		? holdsText(column) && typeof value === "number"
 		: is(column, Column) && column.dataType === "object date" && typeof value === "string"
 
 /**

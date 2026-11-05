@@ -136,10 +136,12 @@ describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
 		expect(table).not.toHaveProperty("_combKeyTexts")
 		const ms = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }], { table: evMs })
 		expect(ms["_combTextKeys"]).toBe(`json_array(case when typeof("ev_ms"."at") = 'text' then "ev_ms"."at" end)`)
-		/* bound as read: no text, only the mark a 500 names it by */
+		/* bound as read: no text, only the mark a 500 names it by, beside a number's stored milliseconds (B2-6 of area B) */
 		const anchorless = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }])
 		expect(anchorless).not.toHaveProperty("_combTextKeys")
-		expect(anchorless["_combKeyTexts"]).toBe(`case when typeof("ev_ms"."at") = 'text' then '!' else '' end`)
+		expect(anchorless["_combKeyTexts"]).toBe(
+			`case when typeof("ev_ms"."at") in ('integer', 'real') then printf('%!.17g', "ev_ms"."at") when typeof("ev_ms"."at") = 'text' then '!' else '' end`,
+		)
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
 			"_combTextKeys",
 		)

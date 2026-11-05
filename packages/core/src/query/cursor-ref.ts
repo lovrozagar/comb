@@ -33,7 +33,7 @@ import { combErrorKeys } from "../types.ts"
 import { CursorRef, effectiveNulls, lossy } from "./cursor.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
 import { readsBack } from "./sqlite/cursor-fit.ts"
-import { inSeconds } from "./sqlite/timestamp-column.ts"
+import { holdsText, inSeconds } from "./sqlite/timestamp-column.ts"
 import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlite/keyset.ts"
 
 /* drizzle's own keys for a table's name before any alias, and its schema */
@@ -85,21 +85,24 @@ function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
 const literal = (n: number): SQL => sql`${n < 0 ? sql`-` : sql``}${countLiteral(Math.abs(n))}`
 
 /**
- * A Date on a seconds-mode SQLite timestamp key: the row's own value while it still lies in the
- * cursor's millisecond, whose fraction below it no Date holds (U10). A Date truncates toward zero,
- * as `CAST(… AS INTEGER)` does, so that is the row whose value times 1000 truncates to the Date's
- * milliseconds. Otherwise (the row edited since, an updated_at bump among them, or gone, its id
- * perhaps given out again) the edge of that millisecond toward the rows already served, so a row of
- * it may come again and none is skipped (U20): the millisecond is [ms, ms + 1) after 1970, (ms - 1,
- * ms] before it, and (-1, 1) at 0. The milliseconds are literals, so the bound costs the id alone.
+ * A Date on a SQLite timestamp key: the row's own value while it still lies in the cursor's
+ * millisecond, whose fraction below it no Date holds. A Date truncates toward zero, as `CAST(… AS
+ * INTEGER)` does, so that is the row whose value in milliseconds (its seconds times 1000 on a
+ * seconds-mode key) truncates to the Date's. Otherwise (the row edited since, an updated_at bump among
+ * them, or gone, its id perhaps given out again) the edge of that millisecond toward the rows already
+ * served, so a row of it may come again and none is skipped: the millisecond is [ms, ms + 1) after
+ * 1970, (ms - 1, ms] before it, and (-1, 1) at 0. The milliseconds are literals, so the bound costs the
+ * id alone.
  */
-function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
+// U10 and U20 for seconds; B2-6 of area B for a milliseconds-mode key holding a REAL fraction
+function storedTimeBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
 	const truncated = value.getTime()
 	/* each edge widened on its own: a Date of 0 is any stored value within a millisecond either side of it */
 	const [low, high] = [truncated > 0 ? truncated : truncated - 1, truncated < 0 ? truncated : truncated + 1]
-	const ms = direction === "asc" ? low : high
-	const fallback = sql`(${literal(ms)} / 1000.0)`
-	const kept = sql`CASE WHEN CAST(${column} * 1000 AS INTEGER) = ${literal(truncated)} THEN ${column} END`
+	const ms = literal(direction === "asc" ? low : high)
+	const seconds = inSeconds(column)
+	const fallback = seconds ? sql`(${ms} / 1000.0)` : ms
+	const kept = sql`CASE WHEN CAST(${column}${seconds ? sql` * 1000` : sql``} AS INTEGER) = ${literal(truncated)} THEN ${column} END`
 	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
 }
 
@@ -222,7 +225,7 @@ function roundingEdge(value: number, direction: "asc" | "desc"): bigint {
  * A rounded integer key: the row's own exact value; once the row is gone, as on every shard of a
  * merged list but its own, the edge of the rounding interval of the cursor's double toward the rows
  * still to serve, which repeats the rows that round to it and skips none (Q1 of r18). Written as the
- * integer it is, digits only, as secondsBound writes its milliseconds, so the bound costs the D1
+ * integer it is, digits only, as storedTimeBound writes its milliseconds, so the bound costs the D1
  * budget the id alone (Q15 of r17)
  */
 const exactBound = ({ column, direction }: SortKey, value: number, at: Anchor): SQL =>
@@ -241,7 +244,7 @@ function assertNoReference(values: readonly unknown[]): void {
 
 /**
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
- * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, a null on a SQLite number key, and an
+ * `tiebreak`: a reference, a Date on a SQLite timestamp key, a null on a SQLite number key, and an
  * integer a JS number rounds. Only a key the row supplies (readsBack) is read from it: any other is
  * bound as given, as an anchorless list binds it (QL1 of r22b)
  */
@@ -252,7 +255,7 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		if (value instanceof CursorRef)
 			return new AnchorBound("row", textBound(key, value, at), !onSqlite(key.column, at.table))
 		if (value instanceof Date && Number.isNaN(value.getTime())) return new AnchorBound("row", unheldBound(key, at))
-		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
+		if (value instanceof Date && holdsText(key.column)) return new AnchorBound("row", storedTimeBound(key, value, at))
 		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))
 			return new AnchorBound("row", timestampBound(key, value, at))
 		if (value instanceof Date && cursorPrecision(key.column) !== key.column)

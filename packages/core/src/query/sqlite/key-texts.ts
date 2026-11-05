@@ -8,7 +8,7 @@ import { Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import type { ListDialect } from "../list-dialect.ts"
 import { carriesOpaque, DateKey, readsRounded } from "./cursor-fit.ts"
 import type { SortKey } from "./keyset.ts"
-import { holdsText, inMilliseconds, inSeconds } from "./timestamp-column.ts"
+import { holdsText } from "./timestamp-column.ts"
 
 /**
  * The storage class SQLite holds a key in, a REAL ±Infinity as `+inf` or `-inf`, which D1's JSON
@@ -45,9 +45,9 @@ const familyOf = (column: SQLWrapper): SQL =>
 /**
  * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
  * time: Postgres's own text of a timestamp, timestamptz or date, which it reads back as that type
- * (a column in string mode reads as that text already); SQLite's REAL seconds of a seconds-mode
- * timestamp at 17 significant digits, which a double reads back exactly (its integer seconds are
- * exact in a Date); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
+ * (a column in string mode reads as that text already); a SQLite timestamp's stored seconds or
+ * milliseconds at 17 significant digits, which a double reads back exactly, where a Date keeps whole
+ * milliseconds; a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
  * A SQLite timestamp holding TEXT, which drizzle reads as a Date and SQLite orders after every number,
  * carries `!`, comma-free, on a list that binds it as read, which no list binds a cursor from; one
  * that reads it back carries the text itself apart, never joined (textKeysOf, B2-3 of area B)
@@ -56,9 +56,9 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
 	if (dialect === "sqlite") {
 		if (!asRead) return null
-		if (inSeconds(column))
-			return sql`case when typeof(${column}) in ('integer', 'real') then printf('%!.17g', ${column}) when typeof(${column}) = 'text' then '!' else '' end`
-		return inMilliseconds(column) ? sql`case when typeof(${column}) = 'text' then '!' else '' end` : null
+		return holdsText(column)
+			? sql`case when typeof(${column}) in ('integer', 'real') then printf('%!.17g', ${column}) when typeof(${column}) = 'text' then '!' else '' end`
+			: null
 	}
 	if (column instanceof DateKey) return null
 	if (is(column, Column) && !carriesOpaque(column))
