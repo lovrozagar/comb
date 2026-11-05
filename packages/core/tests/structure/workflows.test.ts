@@ -139,7 +139,8 @@ function ciGates(): string[] {
 const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)$/.exec(command)?.[1]
 
 /* the CI steps no local gate stands for: installs, the commit-message lint lefthook's commit-msg
-   hook runs, the release dry run, and the Atlas binaries the test jobs fetch */
+   hook runs, the release dry run, the Atlas binaries the test jobs fetch, and the Postgres service's
+   fsync turned off (tests/integration/support/pg-fsync.ts) */
 const SETUP = {
 	commands: ["bun install --frozen-lockfile", "npm install -g npm@latest"],
 	names: [
@@ -148,6 +149,7 @@ const SETUP = {
 		"install atlas v1.3.0",
 		`install atlas v${ATLAS_FLOOR_VERSION}`,
 		`install sqld ${SQLD_VERSION}`,
+		"test Postgres without fsync",
 	],
 }
 
@@ -222,6 +224,7 @@ describe("ci.yml's suite jobs", () => {
 		const needs = [
 			"- name: install atlas v1.3.0",
 			"image: postgres:17",
+			"- name: test Postgres without fsync",
 			"COMB_TEST_PG_URL: postgres://comb:comb@localhost:5432/comb?sslmode=disable",
 		]
 		const suites = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8")).filter(

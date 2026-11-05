@@ -95,6 +95,10 @@ jobs:
           node-version: "24"
           package-manager-cache: false
       - run: bun install --frozen-lockfile
+      # each DROP DATABASE forces a checkpoint, slow under fsync; tests/integration/support/pg-fsync.ts says why
+      - name: test Postgres without fsync
+        run: |
+          PGPASSWORD=comb psql -h localhost -U comb -d comb -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET fsync = off" -c "SELECT pg_reload_conf()"
       # The Atlas suites are required here; tests/integration/support/atlas.ts fails the run without it.
       - name: install atlas v1.3.0
         run: |
@@ -157,6 +161,10 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      # each DROP DATABASE forces a checkpoint, slow under fsync; tests/integration/support/pg-fsync.ts says why
+      - name: test Postgres without fsync
+        run: |
+          PGPASSWORD=comb psql -h localhost -U comb -d comb -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET fsync = off" -c "SELECT pg_reload_conf()"
       # The Atlas suites are required here; tests/integration/support/atlas.ts fails the run without it.
       - name: install atlas v1.3.0
         run: |
@@ -199,6 +207,10 @@ jobs:
           node-version: "24"
           package-manager-cache: false
       - run: bun install --frozen-lockfile
+      # each DROP DATABASE forces a checkpoint, slow under fsync; tests/integration/support/pg-fsync.ts says why
+      - name: test Postgres without fsync
+        run: |
+          PGPASSWORD=comb psql -h localhost -U comb -d comb -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET fsync = off" -c "SELECT pg_reload_conf()"
       # migrate diff runs the real Atlas
       - name: install atlas v1.3.0
         run: |
@@ -245,6 +257,10 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: bun install --frozen-lockfile
+      # each DROP DATABASE forces a checkpoint, slow under fsync; tests/integration/support/pg-fsync.ts says why
+      - name: test Postgres without fsync
+        run: |
+          PGPASSWORD=comb psql -h localhost -U comb -d comb -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET fsync = off" -c "SELECT pg_reload_conf()"
       # comb migrate check runs Atlas there, as it does in a consumer's project
       - name: install atlas v1.3.0
         run: |

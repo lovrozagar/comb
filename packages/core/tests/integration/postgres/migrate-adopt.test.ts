@@ -293,7 +293,7 @@ describe("migrate on Postgres: an empty schema sharing public's directory migrat
 					"the database already records 2 migrations (up to 20260101000020); baseline marks a database that has none",
 				)
 			})
-		}, 90_000)
+		})
 
 		it("baselines nothing while it holds none of what the files leave, as any database without them", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -306,7 +306,7 @@ describe("migrate on Postgres: an empty schema sharing public's directory migrat
 				expect(await own(url)).toBeUndefined()
 				expect(await appTables(url)).toEqual([])
 			})
-		}, 90_000)
+		})
 
 		it("refuses, in check as in apply and baseline, a schema that holds part of what the files leave", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
@@ -319,7 +319,7 @@ describe("migrate on Postgres: an empty schema sharing public's directory migrat
 				expect(await own(url)).toBeUndefined()
 				expect(await appTables(url)).toEqual(["a"])
 			})
-		}, 90_000)
+		})
 	})
 })
 

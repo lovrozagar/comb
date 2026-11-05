@@ -167,7 +167,7 @@ describe("check replays file by file, as Atlas applies", () => {
 			"CREATE TABLE after_all (id int PRIMARY KEY);\n",
 		)
 		expect(await checkAll(devUrl())).toBeUndefined()
-	}, 300_000)
+	})
 
 	it("passes a change to a table whose seed rows left deferred trigger events in an earlier file", async () => {
 		await writeAll(

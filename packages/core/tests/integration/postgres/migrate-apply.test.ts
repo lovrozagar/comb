@@ -341,7 +341,7 @@ describe("migrate baseline on Postgres: a history Atlas splits as it runs it", (
 					expect(await revisions(url)).toEqual(["20260101000000"])
 				})
 			}
-		}, 120_000)
+		})
 	})
 })
 

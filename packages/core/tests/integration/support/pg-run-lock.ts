@@ -15,11 +15,13 @@
  *
  * Once it holds the lock, the run sweeps the scratch databases a timed-out or killed run left
  * (scratch-sweep.ts, plan 21 leaf 10.9): no other run's suites are running then, so none of theirs
- * is in use. And it resets each every-role `comb_t.*` setting a killed run left (probe-settings.ts).
+ * is in use. And it resets each every-role `comb_t.*` setting a killed run left (probe-settings.ts),
+ * and warns when the server runs with fsync on (pg-fsync.ts).
  */
 import { acquirePgRunLock } from "../../support/pg-lock.ts"
 import setupIntegration from "./global-setup.ts"
 import { pgUrl } from "./pg.ts"
+import { fsyncWarning } from "./pg-fsync.ts"
 import { resetProbeSettings } from "./probe-settings.ts"
 import { sweepScratchDbs } from "./scratch-sweep.ts"
 
@@ -30,6 +32,8 @@ export default async function setup(): Promise<() => Promise<void>> {
 		taken: async (session) => {
 			await sweepScratchDbs(session)
 			await resetProbeSettings(session)
+			const warning = await fsyncWarning(session)
+			if (warning !== undefined) process.stderr.write(`${warning}\n`)
 		},
 	})
 }

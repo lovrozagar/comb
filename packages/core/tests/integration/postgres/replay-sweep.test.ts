@@ -434,7 +434,7 @@ describe("two live replays under one role (P4 of r22)", () => {
 		} finally {
 			for (const at of [dirB, dirC]) rmSync(at, { force: true, recursive: true })
 		}
-	}, 90_000)
+	})
 })
 
 describe("a history's role the replay makes", () => {
