@@ -98,7 +98,7 @@ describe("finish's stored times on SQLite (QL2 of r22b; sibling: _combKeyTypes)"
 			{ column: ev.at, direction: "asc" },
 			{ column: ev.n, direction: "asc" },
 		])
-		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') then printf('%!.17g', "ev"."at") when typeof("ev"."at") = 'text' then '!' else '' end`
+		const SECONDS = `case when typeof("ev"."at") in ('integer', 'real') and abs("ev"."at") < 9e999 then printf('%!.17g', "ev"."at") when typeof("ev"."at") = 'text' then '!' else '' end`
 		expect(anchorless["_combKeyTexts"]).toBe(`${SECONDS} || ',' || ''`)
 		expect(extrasOf("sqlite", [{ column: ev.n, direction: "asc" }])["_combKeyTexts"]).toBeUndefined()
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })["_combKeyTexts"]).toBe(SECONDS)
@@ -140,7 +140,7 @@ describe("finish's SQLite timestamp keys holding TEXT (B2-3 of area B)", () => {
 		const anchorless = extrasOf("sqlite", [{ column: evMs.at, direction: "asc" }])
 		expect(anchorless).not.toHaveProperty("_combTextKeys")
 		expect(anchorless["_combKeyTexts"]).toBe(
-			`case when typeof("ev_ms"."at") in ('integer', 'real') then printf('%!.17g', "ev_ms"."at") when typeof("ev_ms"."at") = 'text' then '!' else '' end`,
+			`case when typeof("ev_ms"."at") in ('integer', 'real') and abs("ev_ms"."at") < 9e999 then printf('%!.17g', "ev_ms"."at") when typeof("ev_ms"."at") = 'text' then '!' else '' end`,
 		)
 		expect(extrasOf("sqlite", [{ column: ev.at, direction: "asc" }], { merged: {} })).not.toHaveProperty(
 			"_combTextKeys",

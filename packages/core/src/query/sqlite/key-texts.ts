@@ -48,7 +48,8 @@ const familyOf = (column: SQLWrapper): SQL =>
  * in every DateStyle, which it reads back as that type in any session (a column in string mode reads
  * as its text already); a SQLite timestamp's stored seconds or
  * milliseconds at 17 significant digits, which a double reads back exactly, where a Date keeps whole
- * milliseconds; a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
+ * milliseconds, and none for ±Infinity, whose `Inf` no cursor reads back and whose type the row
+ * carries already (AB3-1 of area B); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
  * A SQLite timestamp holding TEXT, which drizzle reads as a Date and SQLite orders after every number,
  * carries `!`, comma-free, on a list that binds it as read, which no list binds a cursor from; one
  * that reads it back carries the text itself apart, never joined (textKeysOf, B2-3 of area B)
@@ -58,7 +59,7 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	if (dialect === "sqlite") {
 		if (!asRead) return null
 		return holdsText(column)
-			? sql`case when typeof(${column}) in ('integer', 'real') then printf('%!.17g', ${column}) when typeof(${column}) = 'text' then '!' else '' end`
+			? sql`case when typeof(${column}) in ('integer', 'real') and abs(${column}) < 9e999 then printf('%!.17g', ${column}) when typeof(${column}) = 'text' then '!' else '' end`
 			: null
 	}
 	if (column instanceof DateKey) return null

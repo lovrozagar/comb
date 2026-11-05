@@ -89,6 +89,28 @@ export const FRACTION_SERVED = {
 	desc: ["a", "d", "c", "e", "f", "b"],
 } as const
 
+/*
+ * AB3-1 of area B: ±Infinity, as a raw writer stores 9e999, both units; -Infinity < 1 < 2 < 3 <
+ * Infinity twice (b before e by id); no TEXT, so every list pages them
+ */
+const INFINITY_ROWS = [
+	"('a', 1, 1)",
+	"('b', 9e999, 9e999)",
+	"('c', 2, 2)",
+	"('d', -9e999, -9e999)",
+	"('e', 9e999, 9e999)",
+	"('f', 3, 3)",
+] as const
+
+/** The statements that seed a database, or one shard of two, with the infinity rows */
+export const INFINITY_SEED = seedOf(INFINITY_ROWS)
+
+/** Every id by either key over the infinity rows */
+export const INFINITY_SERVED = {
+	asc: ["d", "a", "c", "f", "b", "e"],
+	desc: ["e", "b", "f", "c", "a", "d"],
+} as const
+
 /** Every id in SQLite's order of either key */
 export const TEXT_SERVED = {
 	asc: ["c", "a", "d", "e", "h", "f", "g"],

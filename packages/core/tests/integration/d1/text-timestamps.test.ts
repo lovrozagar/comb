@@ -8,6 +8,8 @@ import { drizzle } from "drizzle-orm/d1"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import {
 	FRACTION_SEED,
+	INFINITY_SEED,
+	INFINITY_SERVED,
 	FRACTION_SERVED,
 	firstPage,
 	startsOrder,
@@ -89,6 +91,19 @@ describe("a SQLite timestamp holding a fraction of its unit pages exactly on eve
 			for (const walk of WALKS) {
 				const served = await servedText(await dbsFor(shape, FRACTION_SEED), { ...walk, shape })
 				expect(served, JSON.stringify(walk)).toEqual({ ids: FRACTION_SERVED[walk.direction] })
+			}
+		},
+	)
+})
+
+/* AB3-1 of area B: a list that binds the key as read carried ±Infinity as the text 'Inf', which no cursor reads back */
+describe("a SQLite timestamp holding ±Infinity pages every row once on every list (AB3-1 of area B)", () => {
+	it.each(["table", "anchored own", "anchored joined", "anchorless", "listOptions", "merged"] as const)(
+		"pages the %s list by milliseconds and seconds past every finite time, every row once",
+		async (shape) => {
+			for (const walk of WALKS) {
+				const served = await servedText(await dbsFor(shape, INFINITY_SEED), { ...walk, shape })
+				expect(served, JSON.stringify(walk)).toEqual({ ids: INFINITY_SERVED[walk.direction] })
 			}
 		},
 	)

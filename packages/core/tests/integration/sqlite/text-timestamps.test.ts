@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import {
 	FRACTION_SEED,
+	INFINITY_SEED,
+	INFINITY_SERVED,
 	FRACTION_SERVED,
 	firstCursor,
 	firstPage,
@@ -119,6 +121,19 @@ describe("readCursor returns a SQLite timestamp key as the row read it (B2-6 of 
 				const { values } = await firstCursor(await dbsFor(shape), { direction: "desc", key, shape })
 				expect(values[0], key).toBeInstanceOf(Date)
 				expect((values[0] as Date).getTime(), key).toBeNaN()
+			}
+		},
+	)
+})
+
+/* AB3-1 of area B: a list that binds the key as read carried ±Infinity as the text 'Inf', which no cursor reads back */
+describe("a SQLite timestamp holding ±Infinity pages every row once on every list (AB3-1 of area B)", () => {
+	it.each(["table", "anchored own", "anchored joined", "anchorless", "listOptions", "merged"] as const)(
+		"pages the %s list by milliseconds and seconds past every finite time, every row once",
+		async (shape) => {
+			for (const walk of WALKS) {
+				const served = await servedText(await dbsFor(shape, INFINITY_SEED), { ...walk, shape })
+				expect(served, JSON.stringify(walk)).toEqual({ ids: INFINITY_SERVED[walk.direction] })
 			}
 		},
 	)
