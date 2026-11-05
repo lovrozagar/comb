@@ -3,7 +3,7 @@
  * file by version, and hashes each file over its name and the files before it, so a rename under
  * the version, a gone file and an edit are each named for what they are, checked in that order.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -143,6 +143,16 @@ describe("an applied file renamed under its version, or edited", () => {
 		const refusal = /^1_a\.sql was applied, then edited: its hash is not the one Atlas recorded/
 		expect(() => named(history([applied("1_a.sql", "other=")]))).toThrow(refusal)
 		expect(() => checkHistory(history([applied("1_a.sql", "other=")]), dir, { scrub: kept })).toThrow(refusal)
+	})
+
+	/* PA19 of r22b: a CRLF atlas.sum, as git's autocrlf checks one out, holds the same refusal; sibling: the LF sum */
+	it("refuses it under a CRLF atlas.sum, and passes the unedited file", () => {
+		snapshot({ "1_a.sql": "SELECT 1;\n" })
+		writeFileSync(join(dir, "atlas.sum"), readFileSync(join(dir, "atlas.sum"), "utf8").replaceAll("\n", "\r\n"))
+		expect(() => checkHistory(history([applied("1_a.sql", "other=")]), dir, { scrub: kept })).toThrow(
+			/^1_a\.sql was applied, then edited/,
+		)
+		expect(checkHistory(history([applied("1_a.sql")]), dir, { scrub: kept })).toBeUndefined()
 	})
 
 	it("reads a file named by its version alone, so a rename to or from it and its edit are refused", () => {

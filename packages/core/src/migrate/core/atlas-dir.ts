@@ -1,7 +1,8 @@
 /**
  * A migrations directory as Atlas reads it: its .sql files in name order and atlas.sum, the
  * checksum Atlas keeps over them. comb hashes copies it hands Atlas, checks a directory's sum
- * against a fresh hash, and snapshots a directory, so Atlas applies exactly the bytes comb read.
+ * against a fresh hash, line by line whatever its line ends, and snapshots a directory, so Atlas
+ * applies exactly the bytes comb read.
  */
 import { copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -21,11 +22,17 @@ async function hashDir(exec: Run, dir: string): Promise<void> {
 	if (result.code !== 0) throw new Error(`atlas migrate hash failed: ${result.stderr.trim()}`)
 }
 
+/**
+ * The lines of the atlas.sum at `path`, split on LF or CRLF: Atlas validates a sum git's autocrlf
+ * checked out with CRLF line ends, so comb reads its entries, not its bytes (PA19 of r22b)
+ */
+const sumLines = (path: string): string[] => readFileSync(path, "utf8").split(/\r?\n/)
+
 /** Each file's hash as atlas.sum records it, without the `h1:` prefix */
 function sumHashes(dir: string): Map<string, string> {
 	const sum = join(dir, "atlas.sum")
 	if (!existsSync(sum)) return new Map()
-	const lines = readFileSync(sum, "utf8").split("\n").slice(1)
+	const lines = sumLines(sum).slice(1)
 	const pairs = lines.flatMap((line) => {
 		const match = /^(\S+) h1:(\S+)$/.exec(line)
 		return match === null ? [] : [[match[1] as string, match[2] as string] as const]
@@ -46,7 +53,7 @@ async function verifySum(exec: Run, dir: string, shown: string = dir): Promise<v
 	try {
 		for (const file of sqlFiles(dir)) copyFileSync(join(dir, file), join(check, file))
 		await hashDir(exec, check)
-		if (readFileSync(join(check, "atlas.sum"), "utf8") !== readFileSync(join(dir, "atlas.sum"), "utf8")) {
+		if (sumLines(join(check, "atlas.sum")).join("\n") !== sumLines(join(dir, "atlas.sum")).join("\n")) {
 			throw new Error(
 				`${shown}/atlas.sum does not match its migrations; if a migration was edited on purpose, run atlas migrate hash`,
 			)

@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -51,6 +51,31 @@ describe("hashDir and verifySum", () => {
 	it("accepts a sum that matches the files and refuses one that does not", async () => {
 		writeFileSync(join(dir, "1_a.sql"), "")
 		await hashDir(fakeHash, dir)
+		await expect(verifySum(fakeHash, dir)).resolves.toBeUndefined()
+		writeFileSync(join(dir, "22_late.sql"), "")
+		await expect(verifySum(fakeHash, dir)).rejects.toThrow(`${dir}/atlas.sum does not match its migrations`)
+	})
+})
+
+/** `dir`'s sum rewritten with CRLF line ends */
+const crlf = () =>
+	writeFileSync(join(dir, "atlas.sum"), readFileSync(join(dir, "atlas.sum"), "utf8").replaceAll("\n", "\r\n"))
+
+/* PA19 of r22b: git's autocrlf checks atlas.sum out with CRLF line ends, which Atlas validates; sibling: the LF sum */
+describe("a CRLF atlas.sum", () => {
+	it("reads each file's hash as the LF sum's", async () => {
+		writeFileSync(join(dir, "1_a.sql"), "")
+		await hashDir(fakeHash, dir)
+		const lf = sumHashes(dir)
+		crlf()
+		expect(sumHashes(dir)).toEqual(lf)
+		expect(lf.size).toBe(1)
+	})
+
+	it("is accepted when its entries match the files, and refused when they do not", async () => {
+		writeFileSync(join(dir, "1_a.sql"), "")
+		await hashDir(fakeHash, dir)
+		crlf()
 		await expect(verifySum(fakeHash, dir)).resolves.toBeUndefined()
 		writeFileSync(join(dir, "22_late.sql"), "")
 		await expect(verifySum(fakeHash, dir)).rejects.toThrow(`${dir}/atlas.sum does not match its migrations`)
