@@ -87,6 +87,12 @@ describe("prove: each file on D1's own engine (SD1 of r22)", () => {
 		expect(await proven(files, { table: 'my "history"' })).toBeUndefined()
 	}, 120_000)
 
+	/* a write to a virtual table compiles no trigger or generated column, and fts5vocab's refuses every write */
+	it("passes a virtual table no statement may write, without probing its writes", async () => {
+		const sql = "CREATE VIRTUAL TABLE f USING fts5 (x);\nCREATE VIRTUAL TABLE f_terms USING fts5vocab (f, row);"
+		expect(await proven([{ name: "1_vocab.sql", sql }])).toBeUndefined()
+	}, 120_000)
+
 	it("refuses a file D1 refuses as it runs, naming D1's error", async () => {
 		const refused = await proven([
 			{ name: "1_ok.sql", sql: "CREATE TABLE a (x);" },

@@ -34,6 +34,9 @@ import { pathToFileURL } from "node:url"
  */
 const fold = (name) => name.replaceAll(/[A-Z]/g, (letter) => letter.toLowerCase())
 
+/* a virtual table's CREATE, and the module it names */
+const VIRTUAL = /^CREATE\s+VIRTUAL\s+TABLE\b[^]*?\bUSING\s+(\w+)/i
+
 /** @param {string} name */
 const quote = (name) => `"${name.replaceAll('"', '""')}"`
 
@@ -70,7 +73,7 @@ async function master(db, shadows) {
 		.all()
 	const shadow = new Set(
 		results.flatMap((row) => {
-			const module = /^CREATE\s+VIRTUAL\s+TABLE\b[^]*?\bUSING\s+(\w+)/i.exec(String(row["sql"]))?.[1]
+			const module = VIRTUAL.exec(String(row["sql"]))?.[1]
 			const suffixes = module === undefined ? [] : (shadows[module.toLowerCase()] ?? [])
 			return suffixes.map((suffix) => fold(`${String(row["name"])}_${suffix}`))
 		}),
@@ -87,7 +90,8 @@ async function master(db, shadows) {
 
 /**
  * The EXPLAINs that compile what a file made or changed: each view's read, and each table's writes,
- * triggers and generated columns with them
+ * triggers and generated columns with them. A virtual table holds neither, and its module may refuse
+ * every write (fts5vocab), so its writes compile nothing of the file's
  * @param {D1Database} db
  * @param {ProofInput["shadows"]} shadows
  * @param {ReadonlyMap<string, SchemaObject>} before
@@ -98,7 +102,7 @@ async function probes(db, shadows, before) {
 	const views = changed.filter(([, object]) => object.type === "view").map(([, object]) => object.table)
 	const tables = new Set(
 		changed
-			.filter(([, object]) => object.type === "table" || object.type === "trigger")
+			.filter(([, object]) => (object.type === "table" && !VIRTUAL.test(object.sql)) || object.type === "trigger")
 			.map(([, object]) => object.table),
 	)
 	/** @type {string[]} */
