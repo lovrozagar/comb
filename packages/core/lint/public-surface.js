@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { parseSync } from "oxc-parser"
-import { declarationOf, declaredNames, walkPublic } from "./public-declarations.js"
+import { declarationOf, walkPublic } from "./public-declarations.js"
+import { parseModule } from "./public-module.js"
 
 /* What a package exposes: every declaration its `exports` entries reach, by name or through a type position. It is
  * read off the syntax, so oxlint can ask for it, and anything the walk cannot follow lands in `unknown` for the rule to
@@ -35,88 +35,21 @@ export function findPackageRoot(filename) {
 	return null
 }
 
-function unknownForm(statement, declaration) {
-	if (statement.type === "TSExportAssignment") return statement.type
-	if (statement.type === "ExportNamedDeclaration" && declaration !== null) {
-		if (declaration.type === "TSModuleDeclaration" || declaration.type === "TSImportEqualsDeclaration") {
-			return declaration.type
-		}
-		if (declaration.type === "VariableDeclaration") {
-			return declaration.declarations.find((d) => d.id.type !== "Identifier")?.id.type ?? null
-		}
-	}
-	return null
-}
-
-function addImports(module, statement) {
-	for (const specifier of statement.specifiers) {
-		const imported =
-			specifier.type === "ImportNamespaceSpecifier"
-				? "*"
-				: specifier.type === "ImportDefaultSpecifier"
-					? "default"
-					: specifierName(specifier.imported)
-		module.imports.set(specifier.local.name, { imported, source: statement.source.value })
-	}
-}
-
-function specifierName(node) {
-	return node.type === "Literal" ? node.value : node.name
-}
-
-function addExports(module, statement) {
-	const source = statement.source?.value
-	if (statement.type === "ExportAllDeclaration") {
-		if (statement.exported) module.exports.set(specifierName(statement.exported), { imported: "*", source })
-		else module.stars.push(source)
-		return
-	}
-	if (statement.type === "ExportDefaultDeclaration") {
-		const declaration = statement.declaration
-		const names = declaredNames(statement)
-		if (names.length > 0) module.exports.set("default", { local: names[0] })
-		else if (declaration.type === "Identifier") module.exports.set("default", { local: declaration.name })
-		else module.unknown.push({ form: declaration.type, node: statement })
-		return
-	}
-	for (const name of declaredNames(statement)) module.exports.set(name, { local: name })
-	for (const specifier of statement.specifiers) {
-		const local = specifierName(specifier.local)
-		const entry = source === undefined ? { local } : { imported: local, source }
-		module.exports.set(specifierName(specifier.exported), entry)
-	}
-}
-
-function addLocals(module, statement) {
-	for (const name of declaredNames(statement)) {
-		const declarations = module.locals.get(name) ?? []
-		declarations.push(statement)
-		module.locals.set(name, declarations)
-	}
-}
-
-function parseModule(file) {
-	const code = readFileSync(file, "utf8")
-	const module = { code, exports: new Map(), file, imports: new Map(), locals: new Map(), stars: [], unknown: [] }
-	for (const statement of parseSync(file, code).program.body) {
-		if (statement.type === "ImportDeclaration") addImports(module, statement)
-		if (statement.type.startsWith("Export")) addExports(module, statement)
-		addLocals(module, statement)
-		const form = unknownForm(statement, declarationOf(statement))
-		if (form !== null) module.unknown.push({ form, node: statement })
-	}
-	return module
-}
-
 function moduleOf(graph, file) {
 	if (!graph.modules.has(file)) graph.modules.set(file, existsSync(file) ? parseModule(file) : null)
 	return graph.modules.get(file)
 }
 
-/* `found` is the form the walk cannot follow and the node it starts at */
+/* `found` is the form the walk cannot follow and the node it starts at; a form two routes reach is reported once */
 function fail(graph, module, { form, node }) {
-	const line = module.code.slice(0, node.start).split("\n").length
-	graph.unknown.push({ file: module.file, form, line })
+	failAt(graph, { file: module.file, form, line: module.code.slice(0, node.start).split("\n").length })
+}
+
+function failAt(graph, { file, form, line }) {
+	const key = `${file}\0${line}\0${form}`
+	if (graph.failed.has(key)) return
+	graph.failed.add(key)
+	graph.unknown.push({ file, form, line })
 }
 
 function targetOf(file, source) {
@@ -241,8 +174,24 @@ function publishName(walk, file, name) {
 	if (names.has(name)) return
 	names.set(name, walk.entryKey)
 	const module = moduleOf(graph, file)
+	for (const found of module.namespaces.get(name) ?? []) fail(graph, module, found)
 	for (const statement of module.locals.get(name)) {
 		for (const reference of referencesOf(statement)) publishReference(walk, module, reference)
+	}
+}
+
+/* what `file` and every module its stars reach export but the walk cannot follow, and each star naming no file: a
+ * star publishes each name it reaches, so a form it reaches in silence is a public gap */
+function failReached(graph, file, seen) {
+	if (seen.has(file)) return
+	seen.add(file)
+	const module = moduleOf(graph, file)
+	for (const found of module.unknown) fail(graph, module, found)
+	for (const star of module.stars) {
+		const target = targetOf(file, star)
+		if (target === null) continue
+		if (moduleOf(graph, target) === null) failAt(graph, { file, form: star, line: 1 })
+		else failReached(graph, target, seen)
 	}
 }
 
@@ -252,11 +201,7 @@ function publishModule(walk, file) {
 	graph.published.add(file)
 	const module = moduleOf(graph, file)
 	if (!first) return
-	for (const found of module.unknown) fail(graph, module, found)
-	for (const star of module.stars) {
-		const target = targetOf(file, star)
-		if (target !== null && moduleOf(graph, target) === null) graph.unknown.push({ file, form: star, line: 1 })
-	}
+	failReached(graph, file, new Set())
 	for (const name of exportNames(graph, file)) {
 		const resolved = resolveExport(resolution(graph), file, name)
 		if (resolved === null) failExport(graph, module, name)
@@ -277,7 +222,7 @@ function publishEntry(walk, root, source) {
 }
 
 function readSurface(root) {
-	const graph = { modules: new Map(), names: new Map(), published: new Set(), unknown: [] }
+	const graph = { failed: new Set(), modules: new Map(), names: new Map(), published: new Set(), unknown: [] }
 	for (const [key, value] of Object.entries(readManifest(root).exports)) {
 		const source = sourceOf(value)
 		if (source !== null) publishEntry({ entryKey: key, graph }, root, source)

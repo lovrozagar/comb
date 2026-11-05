@@ -318,4 +318,52 @@ describe("comb/public-jsdoc: failing closed", () => {
 			},
 		])
 	})
+
+	const destructured = "/** The pair. */\nexport const [lo, hi]: number[] = [1, 2]\n"
+	const merged =
+		"/** Makes a box. */\nexport function Box(): void {}\nexport namespace Box {\n\texport const c = 1\n}\n"
+	const namespace = "/** Helpers. */\nexport namespace Ns {\n\texport const extra = 3\n}\n"
+	const unexportedMerge =
+		"/** Makes a box. */\nfunction Box(): void {}\nnamespace Box {\n\texport const c = 1\n}\nexport { Box }\n"
+	const star = 'export * from "./m.ts"\n'
+	it.each([
+		[
+			"a destructured export behind export *",
+			{ "src/index.ts": star, "src/m.ts": destructured },
+			{ file: "src/m.ts", form: "ArrayPattern" },
+		],
+		[
+			"a namespace behind export *",
+			{ "src/index.ts": star, "src/m.ts": namespace },
+			{ file: "src/m.ts", form: "TSModuleDeclaration" },
+		],
+		[
+			"a merged namespace behind export *",
+			{ "src/index.ts": star, "src/m.ts": merged },
+			{ file: "src/m.ts", form: "TSModuleDeclaration" },
+		],
+		[
+			"a merged namespace behind a named re-export",
+			{ "src/index.ts": 'export { Box } from "./m.ts"\n', "src/m.ts": merged },
+			{ file: "src/m.ts", form: "TSModuleDeclaration" },
+		],
+		[
+			"a merged namespace left unexported",
+			{ "src/index.ts": unexportedMerge },
+			{ file: "src/index.ts", form: "TSModuleDeclaration" },
+		],
+		[
+			"a namespace two stars down",
+			{ "src/a.ts": star, "src/index.ts": 'export * from "./a.ts"\n', "src/m.ts": namespace },
+			{ file: "src/m.ts", form: "TSModuleDeclaration" },
+		],
+		[
+			"a star two stars down that names no file",
+			{ "src/a.ts": star, "src/index.ts": 'export * from "./a.ts"\n' },
+			{ file: "src/a.ts", form: "./m.ts" },
+		],
+	])("reports %s, once, on the file that has it", (_, files, { file, form }) => {
+		const message = `comb/public-jsdoc cannot follow ${form} here, so what it exposes goes unchecked: write it as a plain export`
+		expect(reports({ "package.json": MANIFEST, ...files })).toEqual([{ file, message }])
+	})
 })
