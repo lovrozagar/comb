@@ -1,7 +1,7 @@
 /**
  * A cursor's values on the wire: each sort value and the tiebreak id as JSON, the values JSON has
  * no form for under a one-key tag, and back. Closed: what a mint encodes, the decoder returns as
- * itself (QL5 of r22b), and any other value is no cursor's, which `carried` tells a mint.
+ * itself, and any other value is no cursor's, which `carried` tells a mint.
  */
 import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 
@@ -27,7 +27,7 @@ class CursorRef {
 }
 
 /**
- * A SQLite REAL key's stored value as the text of it SQLite reads back as it (AB4-7 of area B): the
+ * A SQLite REAL key's stored value as the text of it SQLite reads back as it: the
  * cursor carries the text and flags it (`r`), and the next page binds `cast(? as real)`, one SQLite
  * parse of one text, as the list checked it, where a JS number's shortest form D1 may parse as another
  */
@@ -49,7 +49,7 @@ type CursorValue = bigint | boolean | CursorRef | Date | number | string | Uint8
 
 /* Dates survive JSON as tagged epoch ms so a timestamp column compares as one, a bigint as its
    decimal digits, a number JSON has none for (±Infinity, NaN) as its name, not as null, and a
-   blob's bytes as base64url (QL5 of r22b) */
+   blob's bytes as base64url */
 const BYTES_TAG = "$bytes"
 const DATE_TAG = "$date"
 const BIGINT_TAG = "$bigint"
@@ -58,7 +58,7 @@ const REF_TAG = "$ref"
 const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
 
 function encodeValue(value: unknown): unknown {
-	/* a Date no JS Date holds, a date-mode ±infinity, stays a Date: null under the tag, never the null group (3.24) */
+	/* a Date no JS Date holds, a date-mode ±infinity, stays a Date: null under the tag, never the null group */
 	if (value instanceof Date) return { [DATE_TAG]: Number.isNaN(value.getTime()) ? null : value.getTime() }
 	if (value instanceof CursorRef) return { [REF_TAG]: [value.prefix, value.length] }
 	/* the cursor's `r` flag, not a tag, marks it, so a released comb's decoder reads the text */

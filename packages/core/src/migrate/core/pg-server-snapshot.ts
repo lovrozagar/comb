@@ -1,11 +1,11 @@
 /**
- * The server's shared catalogs read as committed, in one query (P1 and P2 of r22): what a bare
+ * The server's shared catalogs read as committed, in one query: what a bare
  * statement changed, which no transaction counts, and what a second connection committed, which this
  * backend's counts never see (pg-server-writes.ts). The read is the server's, another session's work
  * in it too, so each row carries the names of the objects it is about, and a change is a file's only
  * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out, but
  * for the fields of its own database's row that keep the cleanup from dropping it, which only that
- * replay changes. Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog
+ * replay changes. Beside the catalogs, the server's replication slots, which no catalog
  * holds.
  */
 import type { Sql } from "./pg-replay-database.ts"
@@ -14,7 +14,7 @@ import { type Catalog, catalogsOf, changedFields } from "./pg-server-writes.ts"
 /* the roles a replay made, by the tag their comment carries */
 const TAGGED =
 	"(SELECT objoid FROM pg_shdescription WHERE classoid = 'pg_authid'::regclass AND description LIKE 'comb\\_replay %')"
-/* a setting for every database has no datname, and NOT of a NULL would drop its row too (AE6 of r22); a comment's too, by construction */
+/* a setting for every database has no datname, and NOT of a NULL would drop its row too; a comment's too, by construction */
 const REPLAY_SETTING =
 	"coalesce((SELECT datname FROM pg_database WHERE oid = setdatabase) LIKE 'comb\\_replay\\_%', false)"
 const REPLAY_OBJECT = "coalesce((SELECT datname FROM pg_database WHERE oid = objoid) LIKE 'comb\\_replay\\_%', false)"
@@ -27,7 +27,7 @@ const REPLAYS: Readonly<Record<string, string>> = {
 	pg_auth_members: `m.roleid IN ${TAGGED} OR m.member IN ${TAGGED}`,
 	pg_authid: `r.oid IN ${TAGGED}`,
 	pg_database: "d.datname LIKE 'comb\\_replay\\_%'",
-	/* a role it tagged takes each of its settings with it, every database's too, as an ALTER ROLE … SET of a role it made writes (PR5 of r22b) */
+	/* a role it tagged takes each of its settings with it, every database's too, as an ALTER ROLE … SET of a role it made writes */
 	pg_db_role_setting: `(${REPLAY_SETTING} AND setrole = 0) OR setrole IN ${TAGGED}`,
 	pg_shdescription: REPLAY_SHARED,
 	pg_shseclabel: REPLAY_SHARED,
@@ -35,7 +35,7 @@ const REPLAYS: Readonly<Record<string, string>> = {
 
 /*
  * the names a catalog's row is about as the snapshot reads them, where they differ from the counts'
- * read (AE6 of r22): a setting for every role, which ALTER ROLE ALL makes, is about `all`, the word
+ * read: a setting for every role, which ALTER ROLE ALL makes, is about `all`, the word
  * the file spells; only here, so the counts' read never takes a role named all for every role
  */
 const NAMES: Readonly<Record<string, string>> = {
@@ -125,7 +125,7 @@ const about = (
 
 /**
  * What changed from `before` to `after`, one change per subject, in order: of a subject about a
- * name in `names`, the names a file spells (P2 of r22), when given
+ * name in `names`, the names a file spells, when given
  */
 function snapshotChanges(before: Snapshot, after: Snapshot, names?: ReadonlySet<string>): string[] {
 	const changes: string[] = []

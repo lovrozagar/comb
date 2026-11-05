@@ -13,7 +13,7 @@ import { type RetryOptions, withRetry } from "./utils.ts"
    MIGRATIONS TABLE
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* comb's history from 0.13: a name is recorded once, a hash as often as files hold that text (M16) */
+/* comb's history from 0.13: a name is recorded once, a hash as often as files hold that text */
 const TABLE = `(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL,
@@ -36,8 +36,8 @@ export async function hashUnique(conn: Connection): Promise<boolean> {
 
 /**
  * comb's history, made where it is missing, named from 0.11, and from a history before 0.13
- * rebuilt in one batch: every row and id kept, each row `renamed` lists taking its new name (M35),
- * and the AUTOINCREMENT counter kept above every id it handed out (M36)
+ * rebuilt in one batch: every row and id kept, each row `renamed` lists taking its new name,
+ * and the AUTOINCREMENT counter kept above every id it handed out
  */
 export async function ensureMigrationsTable(
 	conn: Connection,
@@ -59,7 +59,7 @@ export async function ensureMigrationsTable(
 			: "coalesce((SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'), 0)"
 	const counter = await conn.execute(`SELECT max(${counted}, coalesce((SELECT max(id) FROM __drizzle_migrations), 0))`)
 	const seq = Number(counter.rows[0]?.[0])
-	/* a view or trigger over the history would fail the rename, and the drop takes an index on it: each goes before the rebuild and comes back after (M42) */
+	/* a view or trigger over the history would fail the rename, and the drop takes an index on it: each goes before the rebuild and comes back after */
 	const over = await conn.execute(
 		"SELECT type, name, sql FROM sqlite_master WHERE type IN ('index', 'view', 'trigger') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND instr(lower(sql), '__drizzle_migrations') > 0 ORDER BY rowid",
 	)
@@ -110,7 +110,7 @@ export async function checkMigrationHash(conn: Connection, hashes: string | read
 const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)"
 
 /**
- * Set on every connection comb opens to a local file (SL4 of r22): a write lock the app serving the
+ * Set on every connection comb opens to a local file: a write lock the app serving the
  * file holds, or a second runner, is waited for up to 5 s, as SQLite's own busy handler waits, where
  * SQLite fails at once. It retries no statement that failed, so a `SQLITE_` code is still never retried
  */
@@ -126,7 +126,7 @@ type Recorded = { filename: string; hash: string; statements: readonly string[] 
 
 /**
  * The connection one file applies on: its batch, then its close. It reads nothing, so a libsql file's
- * can run on `exec` alone (SL1 of r22); a read of comb's history goes through the command's own connection
+ * can run on `exec` alone; a read of comb's history goes through the command's own connection
  */
 export type FileConnection = Pick<Connection, "batch" | "close">
 
@@ -143,11 +143,11 @@ class Unconfirmed extends Error {}
 /**
  * `migration`'s record and its statements in one batch, retried while it fails transiently. A
  * batch can commit and its answer still fail, and its statements need not run twice safely: the
- * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6).
- * When no read of `history` answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20).
+ * record it wrote says it ran, so a retry reads the history first and runs nothing again.
+ * When no read of `history` answers after a batch that failed transiently, the failure is an Unconfirmed.
  * The record goes first, so a batch whose file another run recorded while it waited for the lock
- * fails on the name at once and runs nothing; the history then says so, and it is that run's
- * (SL4 of r22). Returns who applied it.
+ * fails on the name at once and runs nothing; the history then says so, and it is that run's.
+ * Returns who applied it.
  */
 export async function applyRecorded(
 	conn: Pick<Connection, "batch">,
@@ -192,9 +192,9 @@ export async function applyRecorded(
 /**
  * Each of `migrations` applied and recorded in turn, its name printed first, each on a connection
  * `open` makes for it alone and closed after it, so what one file sets on its connection ends with
- * that file, as wrangler runs each file on D1 (S1 of r21). A failure stops the run as a Refused
+ * that file, as wrangler runs each file on D1. A failure stops the run as a Refused
  * naming the files that committed before it and the ones still pending, which it prints as D1's
- * apply does (S2 of the 0.15.0 review); a file whose answer was lost is in neither, but unknown
+ * apply does; a file whose answer was lost is in neither, but unknown
  */
 export async function applyEach(
 	open: () => Promise<FileConnection>,

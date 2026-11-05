@@ -15,7 +15,7 @@ import { functionBehind } from "./pg-nodes.ts"
 type Node = Record<string, unknown>
 
 /**
- * The tables a write to `table` reaches: itself, the base table a view writes through (M71), its
+ * The tables a write to `table` reaches: itself, the base table a view writes through, its
  * descendants unless ONLY, and the partitions' parents
  */
 function reached(table: string, inh: boolean, facts: Facts): string[] {
@@ -35,7 +35,7 @@ function reached(table: string, inh: boolean, facts: Facts): string[] {
 
 /**
  * The tables whose defaults and checks a write to `table` takes: itself and its inheritance
- * ancestors, as a child copies its parents' (M73); a partition's are its own
+ * ancestors, as a child copies its parents'; a partition's are its own
  */
 function inheritedFrom(table: string, facts: Facts): string[] {
 	const out = [table]

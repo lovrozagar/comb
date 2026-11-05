@@ -1,7 +1,7 @@
 /**
  * One filter condition as SQL on one column: the single lowering filterToSQL (drizzle's columns)
  * and buildFilterSQL (a table alias's columns by name) share, so no operator or value conversion
- * exists in one and not the other (Q5 of r17). A column is described by what it stores (its kind)
+ * exists in one and not the other. A column is described by what it stores (its kind)
  * and the SQL its values compare against.
  */
 import {
@@ -60,7 +60,7 @@ function columnOf(column: SQLiteColumn): FilterColumn {
 const isDate = (kind: ColumnKind): boolean => kind === "date-ms" || kind === "date-s"
 
 /**
- * One value as `kind` stores it (Q5 of the 0.14.1 review, Q4 of r17): an ISO date field's instant
+ * One value as `kind` stores it: an ISO date field's instant
  * by its milliseconds on a date or number column, by its text on any other; a Date by its
  * milliseconds on a date column; any other value as validated
  */
@@ -76,8 +76,8 @@ const holds = (value: unknown, type: "number" | "string"): boolean =>
 /**
  * Whether the value is one the column cannot compare: a number on a text column, which SQLite would
  * compare as text, or text on a date or number column, which it would compare as greater than every
- * number (U35). `numeric` compares both by its affinity (U35b). `is` and the patterns take text on
- * any column; `contains` reads a JSON array whatever the column is declared as (C13, 27.8).
+ * number. `numeric` compares both by its affinity. `is` and the patterns take text on
+ * any column; `contains` reads a JSON array whatever the column is declared as.
  */
 function mismatched(kind: ColumnKind, { operator, value }: FilterCondition): boolean {
 	if (operator === "contains") return false
@@ -87,7 +87,7 @@ function mismatched(kind: ColumnKind, { operator, value }: FilterCondition): boo
 
 /**
  * The whole seconds of `members`, epoch milliseconds: what each matches on a seconds column, as
- * secondsBound rounds eq's value; one between two seconds matches no row, and is left out (U25)
+ * secondsBound rounds eq's value; one between two seconds matches no row, and is left out
  */
 const wholeSeconds = (members: readonly unknown[]): number[] =>
 	members.flatMap((ms) => (typeof ms === "number" && ms % 1000 === 0 ? [ms / 1000] : []))
@@ -118,7 +118,7 @@ function secondsBound(
 
 /**
  * A seconds column's condition on epoch milliseconds: one bound rounded as secondsBound keeps it
- * exact, or an in/nin list of each member as eq (in) or ne (nin) takes it (U25). Undefined for an
+ * exact, or an in/nin list of each member as eq (in) or ne (nin) takes it. Undefined for an
  * operator or value no rounding applies to
  */
 function secondsSQL(column: SQLWrapper, operator: string, value: unknown): SQL | undefined {
@@ -126,7 +126,7 @@ function secondsSQL(column: SQLWrapper, operator: string, value: unknown): SQL |
 		const seconds = wholeSeconds(value)
 		if (operator === "in") return seconds.length === 0 ? sql`0` : inArray(column, seconds)
 		/* an empty list matches every row, as everywhere else; a list of no whole second matches every
-		   value, but not NULL, as NOT IN reads it (QL13 of r22b) */
+		   value, but not NULL, as NOT IN reads it */
 		if (value.length === 0) return sql`1`
 		return seconds.length === 0 ? isNotNull(column) : notInArray(column, seconds)
 	}
@@ -170,7 +170,7 @@ function operatorSQL(column: SQLWrapper, operator: string, value: unknown): SQL 
 			return patternToSQL(column, operator, value)
 		case "is":
 			return isToSQL(column, value)
-		/* a member of a JSON array the column holds, whatever it is declared as (C13, 27.8); a scalar JSON value is no set, though json_each reads it as one, and text that is no JSON, which json_type raises on, is matched by nothing: a CASE asks json_valid first, in the order SQLite evaluates it (27.15) */
+		/* a member of a JSON array the column holds, whatever it is declared as; a scalar JSON value is no set, though json_each reads it as one, and text that is no JSON, which json_type raises on, is matched by nothing: a CASE asks json_valid first, in the order SQLite evaluates it */
 		case "contains":
 			return sql`(CASE WHEN json_valid(${column}) THEN json_type(${column}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value}) END)`
 		default:

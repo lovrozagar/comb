@@ -70,9 +70,9 @@ const NAME = `(?:(?:${PART})\\s*\\.\\s*)*(?:${PART})`
 
 /* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
  * statement's own verb on: a name its schema qualifies or not, each part quoted or bare. `target` is
- * how an UPDATE or DELETE names it: on Postgres past ONLY, a reserved word there that names no table
- * (AB7 of area B), or inside ONLY's parentheses; on SQLite, which has no ONLY, only names a table
- * (B2-10 of area B) */
+ * how an UPDATE or DELETE names it: on Postgres past ONLY, a reserved word there that names no table,
+ * or inside ONLY's parentheses; on SQLite, which has no ONLY, only names a table
+ * */
 const statementTables = (target: string) =>
 	new RegExp(
 		`^(?:(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into)\\s+(${NAME})|(?:update(?:\\s+or\\s+\\w+)?|delete\\s+from)${target})`,
@@ -104,7 +104,7 @@ export function statementTable(
 	query: string | undefined,
 	dialect: "postgres" | "sqlite",
 ): { schema: string | undefined; table: string } | undefined {
-	/* U8, QE8 of r22b, B2-10b and AB3-8 of area B; SQLite's code keeps its strings, which name a table there */
+	/* SQLite's code keeps its strings, which name a table there */
 	const code = dialect === "sqlite" ? joined(query ?? "", dialect, true) : codeOf(query ?? "", dialect)
 	const name = STATEMENT_TABLE[dialect]
 		.exec(statementHead(code))
@@ -169,7 +169,7 @@ function groupEnd(sql: string, open: number): number {
 
 /**
  * The columns an INSERT's column list names, unquoted; undefined when `query` is no INSERT or names
- * no list, which assigns every column (AB4 of area B). The list follows the table and its alias, if
+ * no list, which assigns every column. The list follows the table and its alias, if
  * any, in parentheses
  */
 export function insertedColumns(query: string | undefined): string[] | undefined {
@@ -197,7 +197,7 @@ function assignedIn(list: string, end: RegExp): string[] {
 
 /**
  * The columns an upsert's DO UPDATE SET lists assign, unquoted, each list read up to a top-level
- * WHERE, RETURNING or next ON CONFLICT; undefined when `query` is no INSERT or has none (U43)
+ * WHERE, RETURNING or next ON CONFLICT; undefined when `query` is no INSERT or has none
  */
 export function upsertColumns(query: string | undefined): string[] | undefined {
 	/* matched on the blanked head, where a quoted name is spaces: the match ends at SET, so none is swallowed */

@@ -60,7 +60,6 @@ export type ConnectionProvider = {
    PROVIDER CONFIGS — the shapes config.ts validates and resolves to
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// K2 of r18
 /** A Turso database: it names its own database, which the environment's name never does */
 export type TursoProviderConfig = {
 	/** a Turso Platform API token, which comb mints the database's short-lived tokens with */
@@ -152,7 +151,6 @@ export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig
    ENVIRONMENT AND DATABASE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// K13 of the 0.15.0 review
 /** An environment of a database, which `-e` names by its key */
 export type EnvironmentConfig = {
 	/** the name comb shows for the environment's database in its output and prompts; default: its key */
@@ -163,7 +161,6 @@ export type EnvironmentConfig = {
 
 /** What every database declares, whichever shape it has */
 export type DatabaseShared = {
-	// C7
 	/** the comb.config.ts database this one's tables and FTS are, when its name there is another */
 	codegen?: string | undefined
 	/** the drizzle config comb exports the database's schema from, relative to comb.migrate.config.ts; default: drizzle-kit's own in the working folder */
@@ -192,7 +189,6 @@ export type EnvironmentsDatabaseConfig = DatabaseShared & {
 	provider?: ProviderConfig | undefined
 }
 
-// K13 of the 0.15.0 review
 /** A database comb.migrate.config.ts declares: of one target, or of environments, never both */
 export type DatabaseConfig = EnvironmentsDatabaseConfig | SingleDatabaseConfig
 

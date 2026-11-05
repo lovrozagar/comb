@@ -22,9 +22,9 @@ function named<T>(name: string, read: () => T): T {
 }
 
 /**
- * Each pending file read once from the snapshot (M86), against the schema the files before it
+ * Each pending file read once from the snapshot, against the schema the files before it
  * leave, names keyed under the target's schema; returns its classifier, which classifies each as
- * Postgres and refuses a statement no approval clears, from the file alone (PA2 of r22b). A check
+ * Postgres and refuses a statement no approval clears, from the file alone. A check
  * that replays the files on devUrl classifies them again with what the replay `measured` of each,
  * where Postgres decides what the history's text cannot show (pg-scope.ts, pg-replay-held.ts)
  */
@@ -33,17 +33,17 @@ export function readPending(
 	copy: string,
 	waiting: ReadonlySet<string>,
 ): (measured?: Measured) => ParsedMigration[] {
-	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
+	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema */
 	const readAs = { dialect: "postgres" as const, schema: options.target.schema }
 	let schema = extractSchema("", undefined, readAs)
-	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown (M75) */
+	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown */
 	let unread: string | undefined
 	const reads: { before: typeof schema; file: Parameters<typeof parseRead>[0] }[] = []
 	for (const Name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, Name), "utf8")
 		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
 		const before = schema
-		/* the file's one parse, for the schema it leaves and, pending, its approval (M86) */
+		/* the file's one parse, for the schema it leaves and, pending, its approval */
 		const file = { dialect: "postgres" as const, read: named(Name, () => pgRead(sql)), sql }
 		schema = schemaOfRead(file, readAs.schema, before)
 		const { unreadable } = file.read

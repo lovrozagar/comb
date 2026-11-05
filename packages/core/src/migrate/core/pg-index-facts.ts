@@ -1,5 +1,5 @@
 /**
- * What an index of a Postgres history is, and the name Postgres gives it (PA12 of r22b): its shape as
+ * What an index of a Postgres history is, and the name Postgres gives it: its shape as
  * CompareIndexInfo compares two, the name ChooseIndexName chooses (its table, its columns or `expr`,
  * and `pkey`, `key`, `excl` or `idx`, cut to 63 bytes as makeObjectName cuts and numbered past every
  * relation its schema holds, and every constraint for a constraint's), and how one made on a
@@ -33,7 +33,6 @@ type IndexShape = {
  * An index, by key in Facts.indexes: its table, its kind, its shape, its columns as the index names
  * them (which a clone copies, and a column's RENAME leaves alone), the partitioned index it is
  * attached to, and the tablespace the history put it in, undefined where it left that to the target
- * (PA17 of r22b)
  */
 type IndexFact = {
 	columns: string[]

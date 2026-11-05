@@ -38,7 +38,7 @@ type Proof = {
 /** Every table of the copy but a mirror FTS table, each with its stored columns and rows (each value as SQLite quotes it) */
 function snapshot(db: LocalDb): Map<string, Shape> {
 	const out = new Map<string, Shape>()
-	/* main's own: a temp table of the same name would answer for a bare name (M12) */
+	/* main's own: a temp table of the same name would answer for a bare name */
 	const tables = db.all(
 		"SELECT name, sql FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
 	)
@@ -82,7 +82,7 @@ type Making = { engine: ScratchEngine; files: ReadonlyArray<{ sql: string }>; js
 
 /**
  * A copy of `objects` seeded as `variant`, holding only what the pending files can observe, the D1 proof's
- * closure (proof-scope.ts, 8.5 of plan 21): what a file names, writes through a trigger or a key, or reads
+ * closure (proof-scope.ts): what a file names, writes through a trigger or a key, or reads
  * through a view. Every pending file's names count, so one copy serves them all in order
  */
 async function scopedCopy(
@@ -152,7 +152,7 @@ function named<T>(name: string, work: () => T): T {
 
 /**
  * Each of `files` after a turn of the event loop, where a SIGINT or SIGTERM's handler runs: a file's
- * proof runs synchronously, so without one a Ctrl-C would wait out the whole proof (S2 of r22)
+ * proof runs synchronously, so without one a Ctrl-C would wait out the whole proof
  */
 async function* turns<T>(files: readonly T[]): AsyncGenerator<T> {
 	for (const file of files) {
@@ -164,7 +164,7 @@ async function* turns<T>(files: readonly T[]): AsyncGenerator<T> {
 /**
  * The copy's tables after a file, or why SQLite cannot read one: a file can leave a table no read
  * opens, as an fts5vocab table over a dropped fts table, which fails on the live database at its
- * first read (AC3-7 of area C round 3)
+ * first read
  */
 function snapshotAfter(db: Copy["db"]): Map<string, Shape> | string {
 	try {
@@ -208,7 +208,7 @@ const failedProof = (copy: Copy, why: string): Proof => ({
  * unproven, and so unsafe. The later files are proven on the schema it leaves, seeded fresh; when
  * it fails even on a copy with no rows, they are unproven too. `live` is the schema the caller read
  * already (plan-apply.ts), which this reads otherwise. The engine's own tables are left out of every
- * read of a schema, the target's and the copy's (P4).
+ * read of a schema, the target's and the copy's.
  */
 async function provePending(
 	conn: Connection,
@@ -242,7 +242,7 @@ async function provePending(
 					name,
 					failedProof(copy, `comb could not run this in the proof copy on ${copy.db.engine}: ${run.error}`),
 				)
-				/* the later files are proven on the schema this one leaves, seeded fresh (M13) */
+				/* the later files are proven on the schema this one leaves, seeded fresh */
 				const after = await schemaAfter(objects, [...applied, sql], { engine, engineTables })
 				if (after === undefined) {
 					failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`

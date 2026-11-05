@@ -77,7 +77,7 @@ function resolveBinding(read: ReadConfig, target: D1Target): string {
 
 /**
  * `target`'s wrangler config as `read` reads it; one it fails on is named with the reason as its
- * cause, as comb's other config loaders name theirs (D2-8 of the area D round-two review)
+ * cause, as comb's other config loaders name theirs
  */
 function readNamed(read: ReadConfig, target: BindingRef): WranglerConfig {
 	try {
@@ -91,7 +91,7 @@ function readNamed(read: ReadConfig, target: BindingRef): WranglerConfig {
 /** What names a binding: its name, and the wrangler config and environment it is read from */
 type BindingRef = Pick<D1Target, "name" | "wranglerConfig" | "wranglerEnv">
 
-/** The config reader of `bin`'s wrangler, the one the command checked and spawns (K1 of r22) */
+/** The config reader of `bin`'s wrangler, the one the command checked and spawns */
 async function wranglerReader(bin: ProjectBin): Promise<ReadConfig> {
 	const wrangler = await importBin<{ unstable_readConfig: ReadConfig }>(bin)
 	return (args) => wrangler.unstable_readConfig(args)

@@ -1,5 +1,5 @@
 /**
- * The CAs `sslrootcert=system` verifies a server against (R1 of 5.3's review). libpq reads OpenSSL's
+ * The CAs `sslrootcert=system` verifies a server against. libpq reads OpenSSL's
  * default store, and Atlas's driver Go's system pool. On Linux both read the same CA files, which
  * comb reads as Go does: SSL_CERT_FILE, else the first of Go's bundle files that reads, and every
  * file of SSL_CERT_DIR, else of Go's CA directories. Elsewhere Go asks the platform's verifier, which

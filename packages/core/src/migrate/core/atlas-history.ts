@@ -1,5 +1,5 @@
 /**
- * The Postgres history Atlas reports, checked against the snapshot comb hands it (M76): Atlas
+ * The Postgres history Atlas reports, checked against the snapshot comb hands it: Atlas
  * maps a revision to its file by version, the name up to the first `_` or `.sql`, and hashes each
  * file over its name and the files before it. So an applied file renamed under its version, gone,
  * or edited is named for what happened to it, checked in that order, before Atlas runs anything.
@@ -48,7 +48,7 @@ const fileOf = (copy: string, version: string): string =>
 	sqlFiles(copy).find((name) => versionOf(name).version === version) ?? version
 
 /**
- * Refuses an applied file renamed under its version (M76): Atlas hashes each file over its name and
+ * Refuses an applied file renamed under its version: Atlas hashes each file over its name and
  * those before it, so the rename would read as an edit of every file from it on
  */
 function refuseRenamed(status: AtlasStatus, copy: string): void {
@@ -61,7 +61,7 @@ function refuseRenamed(status: AtlasStatus, copy: string): void {
 	}
 }
 
-/** Why a gone revision may be no gone file: another schema's history unread, or another schema there at all (G1-b) */
+/** Why a gone revision may be no gone file: another schema's history unread, or another schema there at all */
 function goneWhy({ elsewhere, unread }: Pick<Report, "elsewhere" | "unread">): string {
 	if (unread !== undefined) return `; another schema's history could not be read: ${unread}`
 	return elsewhere === true
@@ -69,13 +69,13 @@ function goneWhy({ elsewhere, unread }: Pick<Report, "elsewhere" | "unread">): s
 		: ""
 }
 
-/** Each applied revision whose file is gone or renamed to another version (M76), named by its version */
+/** Each applied revision whose file is gone or renamed to another version, named by its version */
 const goneFiles = (status: AtlasStatus, copy: string, why: Pick<Report, "elsewhere" | "unread">): string[] =>
 	status.applied
 		.filter((revision) => fileOf(copy, revision.version) === revision.version)
 		.map((revision) => `${revision.version} was applied, and its file is gone or renamed${goneWhy(why)}`)
 
-/** How checkHistory reports: `scrub` for Atlas's text it prints, every decision read raw (M79); `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read (M78) */
+/** How checkHistory reports: `scrub` for Atlas's text it prints, every decision read raw; `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read */
 type Report = {
 	elsewhere?: boolean | undefined
 	gone?: ((line: string) => void) | undefined
@@ -115,7 +115,7 @@ const stoppedAt = (partial: AtlasRevision, copy: string, scrub: Report["scrub"])
 /**
  * Where `partial`, a file Atlas ran halfway outside a transaction, stopped, refused when the file
  * changed since: Atlas resumes it by statement count, so an edit would shift which statements it
- * skips. Restored, it resumes at the statement that failed (P11)
+ * skips. Restored, it resumes at the statement that failed
  */
 function resumable(partial: AtlasRevision, copy: string, scrub: Report["scrub"]): string {
 	const name = fileOf(copy, partial.version)
@@ -132,7 +132,7 @@ function resumable(partial: AtlasRevision, copy: string, scrub: Report["scrub"])
  * The history checked against the snapshot. A history Atlas reports no error for may proceed, and
  * so may a file Atlas ran halfway outside a transaction, if it is unchanged; returns where that
  * file stopped, if one did. A renamed, gone, late or edited applied file is refused, in that order
- * and before the half-run file's own change, since Atlas's hashes are cumulative (P11); a gone file
+ * and before the half-run file's own change, since Atlas's hashes are cumulative; a gone file
  * is only named when `gone` takes it, as status does, and then no hash is compared, as every one
  * after it reads as changed.
  */
@@ -147,7 +147,7 @@ function checkHistory(
 	const missing = goneFiles(status, copy, { elsewhere, unread })
 	if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
 	/* the half-run file's own error, which Atlas's status repeats, is no other error; any other is honored, an
-	   out-of-order file's among them (27.6 of plan 15), and one past a gone file is the gone file's doing */
+	   out-of-order file's among them, and one past a gone file is the gone file's doing */
 	if (status.error !== "" && status.error !== partial?.error)
 		throw new Error(
 			missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,

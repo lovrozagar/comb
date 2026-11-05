@@ -65,7 +65,6 @@ export type SchemaDiffResult = {
 	synced: boolean
 }
 
-// P8 of r18, P2 of r19
 /**
  * Atlas's diff of two schemas, on the dialect's dev database: an in-memory one for SQLite, and on
  * Postgres `target.devUrl`, whose schema is made to exist first. Throws when a Postgres diff has no
@@ -174,7 +173,7 @@ export async function exportDrizzleSchema(options: DrizzleExportOptions): Promis
 	return exportWith(projectBin(DIFF, options.cwd), options)
 }
 
-/** The config drizzle-kit loads: the one given, else the first of its own defaults cwd holds (D3-2 of the area D round-three review) */
+/** The config drizzle-kit loads: the one given, else the first of its own defaults cwd holds */
 function drizzleConfigOf(configPath: string | undefined, cwd: string): string | undefined {
 	if (configPath !== undefined) return configPath
 	const found = ["drizzle.config.ts", "drizzle.config.js", "drizzle.config.json"].find((name) =>
@@ -183,11 +182,11 @@ function drizzleConfigOf(configPath: string | undefined, cwd: string): string | 
 	return found === undefined ? undefined : join(cwd, found)
 }
 
-/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
+/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin */
 export async function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): Promise<string> {
 	const { configPath, cwd, dialect, run: exec = run } = options
 
-	/* drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config (D2-14 of the area D round-two review) */
+	/* drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
 	const loads = drizzleConfigOf(configPath, cwd)
 	if (loads?.endsWith(".json") === true && process.versions["bun"] === undefined)
 		throw new Error(

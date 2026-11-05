@@ -1,5 +1,5 @@
 /**
- * The tablespaces a dev replay leaves out (PR5 of r22b). A tablespace is the server's, so the replay
+ * The tablespaces a dev replay leaves out. A tablespace is the server's, so the replay
  * leaves out a history's CREATE TABLESPACE, as it does every statement that reaches past its
  * database, and a statement that then puts a table or an index in that tablespace would fail on
  * devUrl where apply runs it. Where a relation lives changes nothing a later statement reads, so the

@@ -1,5 +1,5 @@
 /**
- * A D1 migrations directory as wrangler reads it (S1, S4, C8 of the 0.14.1 review). wrangler
+ * A D1 migrations directory as wrangler reads it. wrangler
  * applies every `*.sql` file whose name does not start with a dot, by leading number, and sends
  * each with its history INSERT appended on the next line; Atlas hashes and diffs every `*.sql`
  * file, by name. A directory where the two lists or orders differ is refused, naming the file to

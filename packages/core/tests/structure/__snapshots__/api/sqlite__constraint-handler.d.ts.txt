@@ -211,7 +211,7 @@ export declare const own: <T>(record: Record<string, T> | undefined, key: string
 /**
  * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
  * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
- * no generated map can name (R5 of plan 17). A key with a `*` anywhere else matches nothing
+ * no generated map can name. A key with a `*` anywhere else matches nothing
  */
 export declare function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined;
 /**
@@ -223,16 +223,16 @@ export declare function defineConstraintMaps(...maps: ConstraintMap[]): readonly
 /**
  * `maps`, a handler's first look at each map reporting its malformed keys to the operator, through the
  * warn sink, each key once per process however many arrays or maps carry it: the violation is still classified with the well-formed
- * keys, as the client's answer must not change, nor say anything of the app's configuration (Q4 of r19)
+ * keys, as the client's answer must not change, nor say anything of the app's configuration
  */
 export declare function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[];
 /**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
- * one as the table's private column, since naming the rest would point at it (F67), or when the
+ * one as the table's private column, since naming the rest would point at it, or when the
  * maps given key no such table (fail closed)
  */
 export declare function shown(maps: readonly ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
-/** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
+/** `column`, or undefined when a map lists it among `table`'s private columns, or shown hides the table's */
 export declare const shownColumn: (maps: readonly ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
 /** The first entry `pick` finds for `table` across `maps`. */
 export declare function lookup(maps: readonly ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;

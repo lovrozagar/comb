@@ -1,7 +1,7 @@
 /**
  * What a statement's compiled program does outside the database it runs on. The proof runs each
  * statement on its in-memory copy (proof-engine.ts), so one that opens or writes another file, or
- * loads code into the process, would act on the real machine during a read-only `check` (M40).
+ * loads code into the process, would act on the real machine during a read-only `check`.
  */
 
 import { preview } from "./classify-file.ts"
@@ -29,7 +29,7 @@ function outsideReach(ops: ReadonlyArray<Record<string, unknown>>): string | und
 	return undefined
 }
 
-/** Refuses the statement `sql` whose program `ops` reaches outside the copy: the copy runs what it proves, so this is refused before it runs, and no approval overrides it (M40) */
+/** Refuses the statement `sql` whose program `ops` reaches outside the copy: the copy runs what it proves, so this is refused before it runs, and no approval overrides it */
 function refuseOutside(ops: ReadonlyArray<Record<string, unknown>>, sql: string): void {
 	const outside = outsideReach(ops)
 	if (outside === undefined) return

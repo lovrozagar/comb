@@ -56,7 +56,7 @@ export default defineConfig({
 
 /**
  * The starter files of each dialect, in the order they are written. No atlas.hcl: comb runs Atlas
- * with a config of its own, so a project's would hold a guard no comb command reads (C11)
+ * with a config of its own, so a project's would hold a guard no comb command reads
  */
 function starterFiles(dialect: Dialect): ReadonlyArray<readonly [string, string]> {
 	if (dialect === "sqlite") return [["drizzle.config.ts", DRIZZLE_CONFIG]]
@@ -68,7 +68,7 @@ function starterFiles(dialect: Dialect): ReadonlyArray<readonly [string, string]
 
 /**
  * Write each starter file of the dialect --dialect names that does not exist yet, refused when the
- * drizzle config already there states the other dialect (KC1 of r22b)
+ * drizzle config already there states the other dialect
  */
 function migrateInit(argv: readonly string[], io: CliContext): void {
 	const option = parseArgs(argv, "migrate init").options["dialect"] ?? "sqlite"
@@ -102,24 +102,24 @@ function migrateInit(argv: readonly string[], io: CliContext): void {
  */
 async function migrateDiff(argv: readonly string[], io: CliContext): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
-	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
+	/* parseArgs refuses a diff that names no database */
 	const [db, name] = args.positionals as [string, (string | undefined)?]
 	const env = args.options["env"] as string | undefined
 	const { d1, expected, exported, fts, migrationsDir, pg, provider, target } = await diffTarget(db, env, io)
-	/* a diff starts a missing directory, and refuses a file before anything runs (D2-7 of the area D round-two review) */
+	/* a diff starts a missing directory, and refuses a file before anything runs */
 	refuseNoDir(migrationsDir, { allowMissing: true })
-	/* Atlas diffs on the dev database (AD9 of the area D review) */
+	/* Atlas diffs on the dev database */
 	if (target?.provider.type === "postgres") refuseBlank(target, { devUrl: target.provider.devUrl })
-	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
+	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs */
 	const peers = await needPeers(io, "diff", { fts: fts !== undefined, provider })
-	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
+	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables */
 	checkDialect(exported.configPath, await statedDialect(exported.configPath), expected)
 	const { exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
-	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
+	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
 	const dialect = exported.dialect
 	const dryRun = args.options["dry-run"] === true
-	/* a Postgres diff reads the history and the export as the statements Postgres runs (M75) */
+	/* a Postgres diff reads the history and the export as the statements Postgres runs */
 	if (dialect === "postgres") await (await import("../migrate/core/pg-parser.ts")).loadPostgresParser()
 	await diffIn(migrationsDir, dryRun, async (dir) => {
 		const { files, notices, synced } = await generateIncrementalMigration({
@@ -132,7 +132,7 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 			target: pg,
 			targetSchema: await exportWith(binOf(peers, "drizzle-kit"), exported),
 		})
-		/* Atlas OSS may say it left part of the schema out of the diff (plan 14's 5.4) */
+		/* Atlas OSS may say it left part of the schema out of the diff */
 		for (const notice of notices) io.err(`Warning: Atlas: ${notice}`)
 		if (synced) io.out("Schema is already in sync — no migration needed")
 		else if (dryRun) reportDrift(db, files, io)
@@ -143,7 +143,7 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 /**
  * Runs `diff` on the directory it writes in: `migrationsDir` itself, or for a dry run a private
  * copy, since a diff writes its file and rehashes atlas.sum. The copy is empty when there is no
- * directory, and removed however the copying or the diff ends (D2-7 of the area D round-two review).
+ * directory, and removed however the copying or the diff ends.
  */
 async function diffIn(migrationsDir: string, dryRun: boolean, diff: (dir: string) => Promise<void>): Promise<void> {
 	if (!dryRun) return diff(migrationsDir)
@@ -162,7 +162,7 @@ const DRIZZLE_CONFIGS = ["drizzle.config.ts", "drizzle.config.js", "drizzle.conf
 /**
  * The drizzle config a diff exports with: the database's, which must exist, else the first of
  * DRIZZLE_CONFIGS in `cwd`; refused before drizzle-kit runs, whose own lookup names a file `init`
- * never writes (K21 of the 0.15.0 review)
+ * never writes
  */
 function drizzleConfig(configured: string | undefined, cwd: string): string {
 	if (configured !== undefined) {
@@ -192,7 +192,7 @@ async function diffTarget(db: string, env: string | undefined, io: CliContext) {
 		run: io.run,
 		schema: pg?.schema,
 	} as const
-	/* the codegen database a migrate database maps to; a name with no mapping says how to give one (C7) */
+	/* the codegen database a migrate database maps to; a name with no mapping says how to give one */
 	const codegen = {
 		hint:
 			target === undefined || target.codegen !== target.database
@@ -201,7 +201,7 @@ async function diffTarget(db: string, env: string | undefined, io: CliContext) {
 		name: target?.codegen ?? db,
 	}
 	const name = DIALECT_NAMES[exported.dialect]
-	/* the dialect its drizzle config must state (KC1 of r22b) */
+	/* the dialect its drizzle config must state */
 	const expected: Expected =
 		target === undefined
 			? { but: "a diff with no comb.migrate.config.ts is SQLite", dialect: "sqlite" }
@@ -235,7 +235,7 @@ function reportDrift(db: string, files: readonly string[], io: CliContext): neve
 export async function cmdMigrate(argv: readonly string[], io: CliContext, help: string): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
-		/* a bare migrate names no command: it fails, with the commands to pick from (K19) */
+		/* a bare migrate names no command: it fails, with the commands to pick from */
 		case undefined:
 			throw new CliError(help)
 		case "help":

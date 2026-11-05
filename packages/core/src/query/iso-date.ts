@@ -1,11 +1,10 @@
 /**
- * An ISO 8601 date or date-time as an ISO date filter takes it (U35, Q5 of the 0.14.1 review): a
+ * An ISO 8601 date or date-time as an ISO date filter takes it: a
  * real day and time by the proleptic Gregorian calendar, read as the instant it names in
  * `toISOString()`'s form, so every spelling of one instant compares as one. A bare date is midnight
  * UTC; a fraction past milliseconds is cut, as a JS Date holds none.
  */
 
-// Q4 of r17
 /**
  * An ISO date filter's value as validateFilter types it: the instant, by its epoch milliseconds and
  * its `toISOString()` text, so a lowering binds whichever its column stores. A bare date is
@@ -42,7 +41,7 @@ const ISO_DATE =
 /* days in each month of a common year */
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
 
-/** Days in `month` (1 to 12) of `year`, by the proleptic Gregorian calendar, where year 0 is a leap year (U35) */
+/** Days in `month` (1 to 12) of `year`, by the proleptic Gregorian calendar, where year 0 is a leap year */
 const daysIn = (year: number, month: number): number =>
 	month === 2 && year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : (MONTH_DAYS[month - 1] as number)
 

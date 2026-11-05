@@ -1,5 +1,5 @@
 /**
- * A plain SQLite column's write rule by its data type (A2-12 of r22). SQLite's NUMERIC affinity
+ * A plain SQLite column's write rule by its data type. SQLite's NUMERIC affinity
  * stores a text that reads as a number as an INTEGER or a REAL, which keeps 15 significant digits,
  * and a driver reads a number back as a JS number, so a `numeric()` write takes a value of at most
  * 15 digits, written as Postgres's numeric takes it: an exponent, a sign of +, blanks and a bare

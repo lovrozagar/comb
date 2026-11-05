@@ -1,9 +1,9 @@
 /**
- * What a CASCADE drop in a Postgres history takes with it, as rating reads the facts after it (P4
- * of r18): Postgres drops each view and materialized view that reads a dropped relation, column or
+ * What a CASCADE drop in a Postgres history takes with it, as rating reads the facts after it:
+ * Postgres drops each view and materialized view that reads a dropped relation, column or
  * function, each view over those, and each trigger that runs a dropped function; a dropped type
  * takes the columns of it, and a dropped schema everything in it. Rating alone reads this: baseline
- * reads what a cascade leaves from Postgres itself, on its replay of the history (P5 of r19).
+ * reads what a cascade leaves from Postgres itself, on its replay of the history.
  */
 import { type Facts, keyOf, names, type Node, nodesOf, type Reads, tableOf } from "./pg-nodes.ts"
 
@@ -82,8 +82,8 @@ const typed: Drops = (object, gone, facts) =>
 	dropType(keyOf(names((object["TypeName"] as Node)["names"]), facts.schema), gone, facts)
 
 /**
- * What each kind's DROP … CASCADE drops itself, by removeType, each read from its own node shape (P1
- * of r19). Every other kind (an extension, a cast, a language, an operator, a publication, a trigger,
+ * What each kind's DROP … CASCADE drops itself, by removeType, each read from its own node shape.
+ * Every other kind (an extension, a cast, a language, an operator, a publication, a trigger,
  * a policy, …) names nothing the facts follow, so it adds nothing and cannot throw; the structure
  * test parses every kind Postgres's DROP takes
  */

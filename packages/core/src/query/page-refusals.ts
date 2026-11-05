@@ -7,7 +7,7 @@ import type { ListPagination } from "./pagination.ts"
 /**
  * Rows that lack an extra their builder selected were read without the built query's extras, and
  * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
- * it yet (Q3 of r17)
+ * it yet
  */
 function refuseUnwired(items: readonly object[], pagination: ListPagination): void {
 	const missing = pagination.expects.filter((key) => items.some((item) => !Object.hasOwn(item, key)))
@@ -27,7 +27,7 @@ function refuseUnwired(items: readonly object[], pagination: ListPagination): vo
 	})
 }
 
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+/** Read before anything else, _total included: a list past a gone anchor is no page of it */
 function refuseGoneAnchor(items: readonly object[]): void {
 	if (
 		items.some((item) =>
@@ -71,7 +71,7 @@ function paginationIn<TMerged extends boolean>(
 	})
 }
 
-/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
+/** More rows than the built query reads are rows of another query: one that applied no limit */
 function refuseOverRead(count: number, pagination: ListPagination): void {
 	if (count <= pagination.window) return
 	throw new CombError({

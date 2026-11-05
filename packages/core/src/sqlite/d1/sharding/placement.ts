@@ -10,7 +10,7 @@ import type { ShardMapping, ShardMove, ShardPick, ShardPickInput } from "./types
 type ShardDb = ReturnType<typeof drizzle>
 
 /**
- * drizzle over a D1 client comb types by the methods it calls (K3 of r21): drizzle types its client
+ * drizzle over a D1 client comb types by the methods it calls: drizzle types its client
  * by @cloudflare/workers-types where that resolves, and either typing is the one runtime binding
  */
 const d1Drizzle = (client: D1DatabaseLike | D1SessionLike): ShardDb => drizzle(client as Parameters<typeof drizzle>[0])
@@ -65,7 +65,7 @@ function assertShard(shardId: number, totalShards: number): void {
 /**
  * Places an org on `shardId` unless it has a row already: the first writer wins, and an org
  * soft-deleted since is revived where it was, where its data is. Returns the row that stands, and
- * what this write did: inserted it, revived it, or found it live, having written nothing (U40).
+ * what this write did: inserted it, revived it, or found it live, having written nothing.
  */
 async function insertFirst(
 	db: ShardDb,
@@ -93,7 +93,7 @@ async function insertFirst(
 
 /**
  * Puts an org on `shardId` whatever row it had, live or soft-deleted, in one batch with the
- * caller's own statements on the core database (`with`), so all of them land or none (R4)
+ * caller's own statements on the core database (`with`), so all of them land or none
  */
 async function overwrite(client: D1DatabaseLike | D1SessionLike, move: ShardMove): Promise<ShardRow> {
 	const { orgId, shardId } = move

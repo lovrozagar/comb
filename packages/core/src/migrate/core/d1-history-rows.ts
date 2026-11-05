@@ -46,9 +46,9 @@ const noHistory = (): HistoryRead => ({
 const byName = (rows: Rows) => new Map(rows.map((row) => [String(row["name"]), String(row["hash"])]))
 
 /**
- * The history in as few wrangler calls as it takes, each a process of its own (R1): a listing says
+ * The history in as few wrangler calls as it takes, each a process of its own: a listing says
  * which tables exist, and one more call reads those. Nothing is made: apply and baseline write their
- * tables only once every check has passed (S5 of the 0.15.0 review), and a local database wrangler
+ * tables only once every check has passed, and a local database wrangler
  * keeps nowhere yet holds no history, read without a call that would create it.
  */
 async function readHistory(read: ReadConfig, target: D1Target, table: string): Promise<HistoryRead> {
@@ -82,7 +82,7 @@ type Hashed = ReadonlyArray<{ hash: string; name: string }>
 
 /**
  * The statements that record the hash each of `files` was applied under, comb's table made first.
- * The invariant every writer keeps (S2, S3 of r19): a name is in wrangler's table only once its hash
+ * The invariant every writer keeps: a name is in wrangler's table only once its hash
  * or its intent is in comb's. A hash row is proof of what ran, so only a file wrangler's table names
  * gets one; a pending file gets an intent (intentStatements)
  */
@@ -95,7 +95,7 @@ const hashStatements = (files: Hashed): Array<{ sql: string }> => [
 
 /**
  * The statements that record the hash each pending file of `files` is about to be applied under, as
- * an intent: never proof of what ran, as wrangler may run the file after an edit (S1 of r20). An
+ * an intent: never proof of what ran, as wrangler may run the file after an edit. An
  * intent whose name wrangler's table lacks is inert, and a read takes one whose name it has only
  * while it is the file's current hash (d1-history.ts)
  */
@@ -120,7 +120,7 @@ const settleStatements = (hashed: Hashed, intents: boolean): Array<{ sql: string
  * current hash: a lost move left them, and each is the hash wrangler ran its file under. A history
  * read takes them as recorded and writes nothing; the next apply or baseline records them. An
  * intent that is not its file's current hash is not: that file was edited before wrangler ran it,
- * and is read as applied before comb recorded it (S1 of r20)
+ * and is read as applied before comb recorded it
  */
 function settled(
 	files: ReturnType<typeof d1Files>,
@@ -148,9 +148,9 @@ async function moveIntents(conn: D1Target["conn"], moved: Hashed): Promise<strin
 
 /**
  * Whether `hash`, recorded for a file of text `sql`, is that text: its current hash; its folded one
- * (0.5.0 to 0.20), which no date tells apart from the current one's record (SL5 of r22); or its
+ * (0.5.0 to 0.20), which no date tells apart from the current one's record; or its
  * pre-0.5.0 one where comb's pre-0.8 history (`drizzle`) still holds it, proof the record is from
- * before 0.5.0, as a 0.13 baseline copied it (M44)
+ * before 0.5.0, as a 0.13 baseline copied it
  */
 const vouched = (sql: string, hash: string, drizzle: ReadonlySet<string> | undefined): boolean =>
 	hash === generateMigrationHash(sql) ||

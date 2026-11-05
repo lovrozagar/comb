@@ -1,5 +1,5 @@
 /**
- * A Postgres URL read as libpq reads it (P3, P4, P14 and P19 of the 0.14.1 review), for each part of
+ * A Postgres URL read as libpq reads it, for each part of
  * comb that reaches the database itself or judges where a URL reaches: a query key over the URI's
  * part for the host, port, database, user and password, the userinfo percent-decoded, and a host
  * that is a path a Unix socket's directory. WHATWG's URL takes no socket target with a password,
@@ -17,9 +17,9 @@ type LibpqUrl = {
 	database: string
 	/** a host name or address, or a Unix socket's directory: the server name TLS checks; localhost when none is given */
 	host: string
-	/** whether the URL gives a host, which a password file is matched on before its hostaddr (R3 of plan 17) */
+	/** whether the URL gives a host, which a password file is matched on before its hostaddr */
 	hostGiven: boolean
-	/** the address to connect to instead of looking up `host`, as libpq's hostaddr is (P7 of the 0.15.0 review) */
+	/** the address to connect to instead of looking up `host`, as libpq's hostaddr is */
 	hostaddr: string | undefined
 	params: ReadonlyMap<string, string>
 	password: string | undefined
@@ -87,7 +87,7 @@ function libpqUrl(raw: string): LibpqUrl | undefined {
 		const userinfo = userinfoOf(authority)
 		const { host, hostGiven, port } = hostOf(hostport, params)
 		if (!/^\d+$/.test(port)) return undefined
-		/* libpq's user for a URL that names none is the OS user's, never PGUSER's, which Atlas's environment lacks (P6) */
+		/* libpq's user for a URL that names none is the OS user's, never PGUSER's, which Atlas's environment lacks */
 		const user = (params.get("user") ?? userinfo.user) || userInfo().username
 		const database = params.get("dbname") ?? decodeURIComponent(path.replace(/^\//, ""))
 		return {
@@ -120,14 +120,14 @@ const SSL_MODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"verify-full",
 ])
 
-// lookup-table: the sslmodes under which libpq, Atlas's driver and comb read no TLS file, falling back to no TLS (5.3)
+// lookup-table: the sslmodes under which libpq, Atlas's driver and comb read no TLS file, falling back to no TLS
 const READS_NO_FILES: ReadonlySet<string> = /* @__PURE__ */ new Set(["disable", "allow", "prefer"])
 /* a PKCS#8 or a legacy PEM key that needs a passphrase, which Atlas's driver cannot read */
 const ENCRYPTED_KEY = /-----BEGIN ENCRYPTED PRIVATE KEY-----|^Proc-Type: 4,ENCRYPTED$/m
 
 /**
  * The sslmode `url` connects with: its own, else verify-full for sslrootcert=system, as libpq 16+ and
- * Atlas's driver read it (P7 of r19), else require, as Atlas's driver reads none (P19 of r18)
+ * Atlas's driver read it, else require, as Atlas's driver reads none
  */
 const sslmodeOf = (url: LibpqUrl): string =>
 	url.params.get("sslmode") ?? (url.params.get("sslrootcert") === "system" ? "verify-full" : "require")
@@ -158,8 +158,8 @@ function keyProblem(field: "devUrl" | "url", url: LibpqUrl, reads: boolean): str
 
 /**
  * Why `url`, which `field` names, cannot connect as its TLS options say: an sslmode libpq refuses, or
- * sslrootcert=system with one weaker than verify-full; where a file is read, one that cannot be (P20
- * of r18) or an encrypted key; and any sslpassword
+ * sslrootcert=system with one weaker than verify-full; where a file is read, one that cannot be
+ * or an encrypted key; and any sslpassword
  */
 function tlsProblems(field: "devUrl" | "url", url: LibpqUrl): string[] {
 	const mode = url.params.get("sslmode")
@@ -187,7 +187,7 @@ const anyHost = (): undefined => undefined
 
 /**
  * postgres.js's `ssl` for `url`'s sslmode, its files read: none on a socket, and require where the URL
- * names none, as Atlas's driver reads it, so comb and Atlas read one URL one way (P19 of r18)
+ * names none, as Atlas's driver reads it, so comb and Atlas read one URL one way
  */
 function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	if (url.socket) return false
@@ -196,7 +196,7 @@ function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	if (mode === "allow" || mode === "prefer") return "prefer"
 	const weak = systemProblem(field, url)
 	if (weak !== undefined) throw new Error(weak)
-	/* system is the store libpq and Atlas's driver verify against, read as they read it (R1 of 5.3) */
+	/* system is the store libpq and Atlas's driver verify against, read as they read it */
 	const system = url.params.get("sslrootcert") === "system" ? systemCas().cas : undefined
 	const files = Object.fromEntries(
 		Object.entries(TLS_FILES)
@@ -207,7 +207,7 @@ function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	if (mode === "verify-ca" || (mode === "require" && files["ca"] !== undefined))
 		return { ...files, checkServerIdentity: anyHost, rejectUnauthorized: true }
 	if (mode === "require") return "require"
-	/* a hostaddr is where comb connects; the certificate still names the host (P7) */
+	/* a hostaddr is where comb connects; the certificate still names the host */
 	if (mode === "verify-full")
 		return {
 			...files,
@@ -218,7 +218,7 @@ function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	throw new Error(`sslmode ${mode} is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full`)
 }
 
-/** The settings `url` sends the server: every key libpq does not read, application_name from fallback_application_name where it names none (P7) */
+/** The settings `url` sends the server: every key libpq does not read, application_name from fallback_application_name where it names none */
 function settingsOf(url: LibpqUrl): Record<string, string> {
 	const settings = Object.fromEntries([...url.params].filter(([key]) => !LIBPQ_KEYS.has(key)))
 	const fallback = url.params.get("fallback_application_name")
@@ -230,8 +230,8 @@ function settingsOf(url: LibpqUrl): Record<string, string> {
 /**
  * postgres.js's options for the database `url` reaches, as libpq reaches it: libpq's own keys read,
  * the rest sent as settings. The user, the database and the password are given whole, as postgres.js
- * fills what it is not given from PGUSER, PGDATABASE and PGPASSWORD, which Atlas never sees (P6 of
- * the 0.15.0 review); a URL without a password takes its passfile's, as libpq does (P7 of r18), else gives
+ * fills what it is not given from PGUSER, PGDATABASE and PGPASSWORD, which Atlas never sees;
+ * a URL without a password takes its passfile's, as libpq does, else gives
  * postgres.js one to call, so it reads none of its own.
  */
 function postgresOptions(url: LibpqUrl, field: "devUrl" | "url"): Record<string, unknown> {
@@ -268,10 +268,10 @@ function undecodable(text: string): boolean {
 }
 
 /**
- * Why a Postgres URL comb cannot read is refused, by where it goes wrong, never naming its value
- * (N2, N3 of plan 15's rerun): a bad escape in the query or in the host and database name; a socket
+ * Why a Postgres URL comb cannot read is refused, by where it goes wrong, never naming its value:
+ * a bad escape in the query or in the host and database name; a socket
  * spelled as a percent-encoded host, which libpq reads and Atlas refuses; a bad escape in the user
- * name (27.16); else the password's
+ * name; else the password's
  */
 function urlProblem(raw: string): "address" | "encoded socket" | "password" | "query" | "user" {
 	const [, authority = "", path = "", query = ""] = URI.exec(raw) ?? []

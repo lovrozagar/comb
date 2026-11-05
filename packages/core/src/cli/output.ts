@@ -22,19 +22,19 @@ export type CliIo = {
 }
 
 /**
- * What a command reads besides its io, comb's own unless its tests fake one (KT7 of r22b): typed by
+ * What a command reads besides its io, comb's own unless its tests fake one: typed by
  * comb's internals, so they stay off the public CliIo and reach the CLI through runCliWith alone.
  */
 export type CliDeps = {
-	/** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it (5.4b) */
+	/** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it */
 	readPgObjects?: LiveRead | undefined
-	/** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it (P5 of r19) */
+	/** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it */
 	replayPgHistory?: typeof replayCatalog | undefined
-	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
+	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it */
 	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined
-	/** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
+	/** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it */
 	locatePeer?: ((peer: string) => string) | undefined
-	/** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
+	/** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it */
 	readAtlasVersion?: (() => Promise<RunResult>) | undefined
 }
 
@@ -61,7 +61,7 @@ export class CliError extends Error {
 	}
 }
 
-/** A failure a command already reported as its --json object: printed on stderr, never as a second object (K10 of r18) */
+/** A failure a command already reported as its --json object: printed on stderr, never as a second object */
 export class Reported extends CliError {
 	constructor(error: unknown) {
 		super(error instanceof Error ? error.message : String(error), error instanceof CliError ? error.exitCode : 1)
@@ -111,12 +111,12 @@ export function processIo({
 	input = process.stdin,
 	output = process.stderr,
 }: { [K in keyof Terminal]?: Terminal[K] | undefined } = {}): CliIo {
-	// P4 of the 0.15.0 review: questions on stderr, so stdout stays a command's output
+	// Questions on stderr, so stdout stays a command's output
 	const terminal = { input, output }
 	return {
 		confirm: input.isTTY === true ? (question) => ask(terminal, question) : undefined,
 		cwd: process.cwd(),
-		/* plain text on every runtime: Bun's console.error colors a line red on a terminal (KC11 of r22b) */
+		/* plain text on every runtime: Bun's console.error colors a line red on a terminal */
 		err: (line) => void process.stderr.write(`${line}\n`),
 		out: (line) => console.log(line),
 	}

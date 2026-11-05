@@ -20,14 +20,14 @@ const D1_MESSAGE = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (
 
 /*
  * D1's exec(): `Error in line N: <the statement>: <message>`, the statement values and all, with
- * nothing that marks where it ends: no word of it is the engine's own (Q8 of r17)
+ * nothing that marks where it ends: no word of it is the engine's own
  */
 const D1_EXEC = /^(?:D1_EXEC_ERROR: )?Error in line \d+: /
 
 /*
- * libsql: `SQLITE_CONSTRAINT: <message>`, the prefix twice from batch() (Q8 of r18). sqld, remote libsql
+ * libsql: `SQLITE_CONSTRAINT: <message>`, the prefix twice from batch(). sqld, remote libsql
  * and Turso prefix SQLite's own words with `SQLite error: `, which the Hrana error under the client's
- * wrapper carries with no code prefix at all (QE1 of r22)
+ * wrapper carries with no code prefix at all
  */
 const LIBSQL_PREFIX = /^(?:SQLITE_[A-Z_]+: )*(?:SQLite error: )?/
 
@@ -71,7 +71,7 @@ const STEMS: Array<[RegExp, string]> = [
 	[/^FOREIGN KEY constraint failed/i, "SQLITE_CONSTRAINT_FOREIGNKEY"],
 	/* a STRICT column given another type, which libsql reports as UNKNOWN_SQLITE_ERROR_3091 */
 	[/^cannot store \w+ value in \w+ column /i, "SQLITE_CONSTRAINT_DATATYPE"],
-	/* SQLite's own words for a virtual table's key conflict, an FTS5 duplicate rowid, which D1 sends with no extended code (Q12 of r17) */
+	/* SQLite's own words for a virtual table's key conflict, an FTS5 duplicate rowid, which D1 sends with no extended code */
 	[/^constraint failed$/i, "SQLITE_CONSTRAINT_PRIMARYKEY"],
 ]
 
@@ -93,7 +93,7 @@ function readOne(error: Error): { code: string; message: string } | null {
 	if (!D1_EXEC.test(error.message)) return refine(d1[3] ?? (d1[2] as string), d1[1] as string)
 	/* the code alone, past the statement exec() quotes: each handler then answers its generic cause. SQLite's
 	   bare words for a virtual table's key conflict end the text with no code beyond the bare one, which an
-	   app's RAISE never is, as it carries _TRIGGER: read as prepare reads them (Q9 of r18) */
+	   app's RAISE never is, as it carries _TRIGGER: read as prepare reads them */
 	const vtabKey = d1[3] === undefined && d1[2] === "SQLITE_CONSTRAINT" && /: constraint failed$/i.test(d1[1] as string)
 	return refine(vtabKey ? "SQLITE_CONSTRAINT_PRIMARYKEY" : (d1[3] ?? (d1[2] as string)), "")
 }

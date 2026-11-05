@@ -1,5 +1,5 @@
 /**
- * The version of a peer comb loads, and whether a range of comb's admits it (K2 of r21): npm's
+ * The version of a peer comb loads, and whether a range of comb's admits it: npm's
  * semver for the forms comb's ranges take, without semver itself, which comb does not ship.
  */
 import { existsSync, readFileSync } from "node:fs"

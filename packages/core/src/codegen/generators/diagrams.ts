@@ -29,7 +29,7 @@ const PG_TYPES: Readonly<Record<string, string>> = {
 	updatedAt: "BIGINT",
 }
 
-/** Map a comb helper to its SQL type on the database's engine (F36) */
+/** Map a comb helper to its SQL type on the database's engine */
 function drizzleHelperToSqlType(helper: string, dialect: "postgres" | "sqlite"): string {
 	if (dialect === "postgres") return Object.hasOwn(PG_TYPES, helper) ? (PG_TYPES[helper] as string) : "TEXT"
 	switch (helper) {
@@ -50,7 +50,7 @@ function drizzleHelperToSqlType(helper: string, dialect: "postgres" | "sqlite"):
 
 /**
  * `tables` with each after the tables it references, so the DDL creates every table before a key
- * names it (F36): a table whose references are all placed goes next, in name order; a cycle, which
+ * names it: a table whose references are all placed goes next, in name order; a cycle, which
  * no order satisfies, keeps the rest in name order. A self-reference needs no other table.
  */
 function inDependencyOrder(tables: Table[]): Table[] {
@@ -77,7 +77,7 @@ const sqlNameOf = (table: TableMeta, name: string) =>
 
 /**
  * What `field`'s foreign key adds to the diagram: a one-column key's REFERENCES on the column, or a
- * composite key's FOREIGN KEY on the table, read at its first column (F46). A key names its target
+ * composite key's FOREIGN KEY on the table, read at its first column. A key names its target
  * by variable and property; SQL and the JSON name it by table and column.
  */
 function keyOf(
@@ -131,7 +131,7 @@ function transformTables(
 			const { reference, relation, tableKey } = keyOf(meta, field, byVar)
 			columns.push({
 				name: field.sqlName,
-				/* a key's column holds no NULL (F33) */
+				/* a key's column holds no NULL */
 				nullable: !field.isNotNull && !field.inCompositeKey,
 				primaryKey: field.isPrimaryKey,
 				...(reference && { reference }),
@@ -163,7 +163,7 @@ function referencesOf(
 	return clause
 }
 
-/** The outline's DDL; `identifiers` gives each table, by its qualified name, as SQL names it (F51) */
+/** The outline's DDL; `identifiers` gives each table, by its qualified name, as SQL names it */
 function generateDDL(
 	tables: Table[],
 	{
@@ -176,7 +176,7 @@ function generateDDL(
 	const lines: string[] = []
 	lines.push(`-- ${dbName} Database Schema (${dialect === "postgres" ? "Postgres" : "SQLite"})`)
 	lines.push(`-- Tables: ${tables.length}`)
-	/* what it renders, so no reader takes it for the database's own DDL (F33) */
+	/* what it renders, so no reader takes it for the database's own DDL */
 	lines.push(
 		"-- An outline of the schema: tables, types, keys, NOT NULL and references. Defaults, identity and generated columns are left out; drizzle-kit export writes the full DDL.",
 	)

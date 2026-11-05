@@ -174,7 +174,7 @@ function tableOf([table, exportName]: [Table, string], context: Context): Snapsh
 	const entries = Object.entries(getTableColumns(table)) as Array<[string, ReadColumn]>
 	/*
 	 * A column a third argument names, by its key: sqlite-core passes the table's own column, pg-core
-	 * a stand-in (an ExtraConfigColumn, or an index's IndexedColumn) matched by its SQL name (F45).
+	 * a stand-in (an ExtraConfigColumn, or an index's IndexedColumn) matched by its SQL name.
 	 * SQL is no column (undefined); any other column, one of another table, is refused naming this one.
 	 */
 	const keyOf = (column: unknown): string | undefined => {
@@ -196,7 +196,7 @@ function tableOf([table, exportName]: [Table, string], context: Context): Snapsh
 		const refs = reference.foreignColumns.map(
 			(column) => targetColumns.find(([, each]) => each === column)?.[0] as string,
 		)
-		/* every column of the key references its own target column, the key whole beside it (F46) */
+		/* every column of the key references its own target column, the key whole beside it */
 		const key = own.length > 1 ? { columns: own, refColumns: refs } : null
 		const targetExport = targetName(target, `${exportName}.${own[0]}`, context)
 		for (const [i, name] of own.entries()) {
@@ -236,7 +236,7 @@ function snapshotOf(loaded: readonly Loaded[], elementNulls: ElementNulls, unloa
 		const value = first.namespace[name]
 		if (isTable(value) && !tables.has(value)) tables.set(value, name)
 		/* drizzle assigns each column onto its table, so one named __proto__ replaces the table's
-		 * prototype: what is left keeps drizzle's table name but is no table (F36) */
+		 * prototype: what is left keeps drizzle's table name but is no table */
 		else if (!isTable(value) && hasTableName(value))
 			throw new Error(
 				`${name}: a column named __proto__ replaced this table's prototype, so drizzle cannot use it; rename the column`,
@@ -248,7 +248,7 @@ function snapshotOf(loaded: readonly Loaded[], elementNulls: ElementNulls, unloa
 
 /**
  * One table, read; an error the reader did not mean, of a class other than the plain Error its
- * own diagnostics throw, names the table and says the reader failed, never the module (F64)
+ * own diagnostics throw, names the table and says the reader failed, never the module
  */
 function readTable(entry: [Table, string], context: Context): SnapshotTable {
 	try {

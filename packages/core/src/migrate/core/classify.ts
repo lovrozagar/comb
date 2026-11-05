@@ -45,12 +45,10 @@ import { takenOptions } from "./classify-options.ts"
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
-	// S1 of r19, S1 of r22
 	/** where a SQLite file applies, whose own rule of what it runs the file is held to; default `local` */
 	kind?: TargetKind | undefined
 	/** how the file is read; default SQLite, as the CLI's */
 	dialect?: Dialect | undefined
-	// M72
 	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; default `public` */
 	schema?: string | undefined
 }
@@ -84,7 +82,7 @@ const CAUTIOUS = /* @__PURE__ */ new RegExp(
 	`^(?:DROP|GRANT|REVOKE|CALL|CREATE OR REPLACE|REPLACE|INSERT OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART|ALTER (?:INDEX|POLICY|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE)\\b.*\\bRENAME)\\b`,
 	"i",
 )
-/* on Postgres, what CAUTIOUS names but the parse tree does not rate: drops and renames (M70) and restarts (M82) are pg-ddl.ts's */
+/* on Postgres, what CAUTIOUS names but the parse tree does not rate: drops and renames and restarts are pg-ddl.ts's */
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const PG_CAUTIOUS = /* @__PURE__ */ new RegExp(`^(?:GRANT|REVOKE|CALL|CREATE OR REPLACE)\\b`, "i")
 // per-process-constant: a pattern composed from the name grammar, compiled once
@@ -109,7 +107,7 @@ function dropNames(code: string): string[] {
 /**
  * A CREATE INDEX that blocks writes to a table this file did not create. CREATE INDEX CONCURRENTLY
  * refuses a partitioned table, whose route is an index ON ONLY it, which builds nothing, and each
- * partition's index built concurrently and attached to it (PA10 of r22b)
+ * partition's index built concurrently and attached to it
  */
 function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 	const [, only, table] = INDEX_ON.exec(code) ?? []
@@ -173,13 +171,13 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 function findingsOf(code: string, ctx: FileContext): Finding[] {
 	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), ctx)
 	if (!/^ALTER TABLE\b/i.test(code)) return statementFindings(code, ctx)
-	/* on Postgres an ALTER TABLE is rated from its parse tree, command by command (pg-ddl.ts, M70) */
+	/* on Postgres an ALTER TABLE is rated from its parse tree, command by command (pg-ddl.ts) */
 	return ctx.dialect === "postgres" ? [] : alterTableFindings(code, ctx)
 }
 
 /**
  * One statement's findings: the rules', then on Postgres the parse tree's, which follows what the
- * statement makes, and the grammar's, which a whole-statement tree rating stands in for (P13 of r18)
+ * statement makes, and the grammar's, which a whole-statement tree rating stands in for
  */
 function statementReadings(
 	{ code, stmt, tree }: { code: string; stmt: string; tree: unknown },
@@ -206,8 +204,8 @@ function readFile(
 ): Read[] {
 	refuseHeader(sql, dialect)
 	const naming = namingOf(dialect, schema)
-	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), each tree kept */
-	/* on Postgres, each as Atlas sends it, its chunk's lead left off: a lead never reaches a rating (N1) */
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser, each tree kept */
+	/* on Postgres, each as Atlas sends it, its chunk's lead left off: a lead never reaches a rating */
 	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ sent }) => sent)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = createdOf(codes, naming)
@@ -258,7 +256,7 @@ function readFile(
 
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one (M86), and what check's
+ * Postgres `read` is the file's one parse, its caller's when it holds one, and what check's
  * replay on devUrl measured of it, when it `replayed` the file
  */
 const readings = (

@@ -22,7 +22,6 @@ export function extractDbName(filePath: string): string {
 	return "db"
 }
 
-// F53
 /**
  * How generated files write a relative import of a TypeScript file, as the consumer's compiler
  * takes it: `js` under `node16` and `nodenext`, `.js` for `.ts`; `ts` there under

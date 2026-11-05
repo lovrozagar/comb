@@ -29,7 +29,7 @@ function childEnv(): Record<string, string> {
 
 /**
  * The child's watch on its stdin, a pipe its supervisor holds and never writes: its close means the
- * supervisor is gone, however it died, and the child goes too (F43). Where it leads a group of its
+ * supervisor is gone, however it died, and the child goes too. Where it leads a group of its
  * own (`groups`, as the supervisor spawns it), it takes the group, every process a module started
  */
 function watchSupervisor(groups: boolean): string {
@@ -61,9 +61,9 @@ function supervisorArgs(
 function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 	const child = new URL("child.ts", import.meta.url).href
 	/* writeSnapshot has written and closed the result file when it returns, so the exit drops nothing; a
-	   module's timer or pool would otherwise keep the child alive past it (F42) */
+	   module's timer or pool would otherwise keep the child alive past it */
 	const script = `${watchSupervisor(GROUPS)}const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2)); process.exit(0)`
-	/* bun reads .env and .env.local from the working directory unless told not to (F41) */
+	/* bun reads .env and .env.local from the working directory unless told not to */
 	if (runtime === "bun") return ["--no-env-file", "-e", script, ...rest]
 	const hooks = new URL("node-hooks.mjs", import.meta.url).href
 	return [
@@ -82,7 +82,7 @@ function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 type LoadOptions = {
 	/**
 	 * The working directory the module loads in: comb's own, where the app and drizzle-kit run, so a
-	 * root-relative read finds what it finds for them (F58); the process's by default
+	 * root-relative read finds what it finds for them; the process's by default
 	 */
 	cwd?: string | undefined
 	/** The URL of the module comb runs from, which a Bun single-file executable embeds; this module's own unless a test gives one */
@@ -96,13 +96,13 @@ type LoadOptions = {
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
 async function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Promise<Snapshot> {
 	const { moduleUrl = import.meta.url } = options
-	/* the child would rerun the app itself, as process.execPath is the app (D3-4 of the area D round-three review) */
+	/* the child would rerun the app itself, as process.execPath is the app */
 	refuseCompiled(
 		moduleUrl,
 		"comb codegen loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run codegen with bun or node, not from a compiled executable",
 	)
 	/* the child reads the module's imports with ts-morph, an optional peer (under node its hooks load it
-	   first): resolved here, so a project without it is told so, not that its tables file failed (K7 of r20) */
+	   first): resolved here, so a project without it is told so, not that its tables file failed */
 	resolvePeer({ peer: "ts-morph", why: "read the modules a tables file imports" }, () =>
 		import.meta.resolve("ts-morph"),
 	)

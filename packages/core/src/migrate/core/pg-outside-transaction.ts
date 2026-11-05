@@ -1,7 +1,7 @@
 /**
- * The statements Postgres runs only outside a transaction block, read from their parse trees (P8 of
- * r19), the one table check's refusal and the dev replays (pg-replay.ts) both read. Each is named as
- * Postgres's refusal names it. Probed on Postgres 17 (.tmp/grunt/p18/runs/8954e05-probe-p8-*.log, and
+ * The statements Postgres runs only outside a transaction block, read from their parse trees,
+ * the one table check's refusal and the dev replays (pg-replay.ts) both read. Each is named as
+ * Postgres's refusal names it. Probed on Postgres 17 (and
  * f761199-probe-p8-*.log for failover):
  * VACUUM (never ANALYZE alone), a bare CLUSTER, every CONCURRENTLY build, drop, reindex and partition
  * detach, a REINDEX of a schema, a database or the system, ALTER SYSTEM, CREATE and DROP DATABASE,
@@ -9,20 +9,20 @@
  * PREPARED, and a subscription's slot work: CREATE SUBSCRIPTION making a slot (its default unless
  * `connect` or `create_slot` is false), DROP SUBSCRIPTION (whose slot comb cannot see), and ALTER
  * SUBSCRIPTION's REFRESH, a publication change that refreshes (its default) and a SET of failover,
- * and a CLUSTER, a REINDEX TABLE and a REINDEX INDEX of a partitioned table or index (P9 of r21,
- * .tmp/grunt/p20/logs/8.6-probe.log), which the caller says it is. A plain table's or index's
+ * and a CLUSTER, a REINDEX TABLE and a REINDEX INDEX of a partitioned table or index,
+ * which the caller says it is. A plain table's or index's
  * CLUSTER and REINDEX, a detach's FINALIZE and the rest run in one.
  *
- * Beside it, the other way round (PA13 of r22b): a LOCK, a SAVEPOINT, a RELEASE or ROLLBACK TO one,
+ * Beside it, the other way round: a LOCK, a SAVEPOINT, a RELEASE or ROLLBACK TO one,
  * and a cursor not held past its transaction run only inside a block, so the replay sends each bare
  * in a `txmode none` file, as Atlas does, and Postgres refuses it there as on the target.
  *
- * Beside it, the statements whose scope is the server or another database (P1 of r20, amended):
+ * Beside it, the statements whose scope is the server or another database:
  * the dev replay runs each history file as Atlas applies it, committed, in a database of its own,
  * so a statement that reaches past that database would change devUrl's server for good, the
  * target's own when they share one. A structure test holds every statement node type of the parser
  * to this table or to the ones ruled database-scoped. A statement that runs a function acting on the
- * server (pg-server-calls.ts) reaches as far (PR2 of r22b), unless the statement only defines it.
+ * server (pg-server-calls.ts) reaches as far, unless the statement only defines it.
  */
 import { serverCallIn } from "./pg-server-calls.ts"
 import { flag, num } from "./pg-nodes.ts"
@@ -108,7 +108,7 @@ const OUTSIDE: Readonly<Record<string, (node: Node, partitioned: Partitioned) =>
 	AlterDatabaseStmt: (node) => (optionsOf(node).has("tablespace") ? "ALTER DATABASE SET TABLESPACE" : undefined),
 	AlterSubscriptionStmt: (node) => {
 		if (node["kind"] === "ALTER_SUBSCRIPTION_REFRESH") return "ALTER SUBSCRIPTION ... REFRESH"
-		/* P4 of r20: Postgres 17 refuses any failover value in a transaction, beside other options or alone */
+		/* Postgres 17 refuses any failover value in a transaction, beside other options or alone */
 		if (node["kind"] === "ALTER_SUBSCRIPTION_OPTIONS" && optionsOf(node).has("failover"))
 			return "ALTER SUBSCRIPTION ... SET (failover)"
 		const refreshes = PUBLICATION_CHANGES.has(node["kind"]) && !isOff(optionsOf(node).get("refresh"))
@@ -157,7 +157,7 @@ function outsideOnly(type: string, node: Node, partitioned: Partitioned = () => 
 /* a DECLARE's option bit for WITH HOLD, as the parser sets it: a cursor kept past its transaction */
 const CURSOR_OPT_HOLD = 0x20
 
-// lookup-table: each statement Postgres runs only inside a transaction block, by node type, with how its refusal names it (PA13 of r22b)
+// lookup-table: each statement Postgres runs only inside a transaction block, by node type, with how its refusal names it
 const INSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
 	DeclareCursorStmt: (node) => ((Number(node["options"]) & CURSOR_OPT_HOLD) === 0 ? "DECLARE CURSOR" : undefined),
 	LockStmt: () => "LOCK TABLE",
@@ -183,7 +183,7 @@ function blockAfter(open: boolean, type: string, node: Node): boolean {
 /** What a statement is, by its parse tree's node `type`, when Postgres runs it only inside a transaction block */
 const insideOnly = (type: string, node: Node): string | undefined => INSIDE[type]?.(node)
 
-// lookup-table: the TRANSACTION kinds that begin, end or prepare a transaction, by how Postgres names them (PA2 of r22b); a savepoint nests
+// lookup-table: the TRANSACTION kinds that begin, end or prepare a transaction, by how Postgres names them; a savepoint nests
 const CONTROL: Readonly<Record<string, string>> = {
 	TRANS_STMT_BEGIN: "BEGIN",
 	TRANS_STMT_COMMIT: "COMMIT",

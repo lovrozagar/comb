@@ -25,7 +25,7 @@ import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
-/** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51) */
+/** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's */
 type Violation = {
 	maps: readonly ConstraintMap[]
 	read: PgErrorRead
@@ -52,7 +52,7 @@ function unique(v: Violation): CombError {
 	if (constraint !== undefined && v.read.table !== undefined && constraint === pkeyOf(v.read.table))
 		return primaryKey(v)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair. An
-	   expression may spell any column, a private one too, so a key holding one names none (Q3), and is
+	   expression may spell any column, a private one too, so a key holding one names none, and is
 	   found in the map by the index's name alone */
 	const { keyExpression } = v.read
 	const named = keyExpression ? [] : visible(v, columns)
@@ -85,7 +85,7 @@ function foreignKey(v: Violation): CombError {
 	const { constraint, keyColumns: columns, referenced } = v.read
 	const { table } = v
 	/* the key named is the parent's, on a child's constraint: nothing in the map describes it. The
-	   table is the statement's, the parent's, as SQLite can name it too (R11); unknown without the SQL */
+	   table is the statement's, the parent's, as SQLite can name it too; unknown without the SQL */
 	if (referenced) {
 		const fallback = {
 			cause: "The record is still referenced by other records",
@@ -99,7 +99,7 @@ function foreignKey(v: Violation): CombError {
 		})
 	}
 	/* a composite key is found in the map by its first column, as codegen writes it, and names no
-	   column: one would blame half the key, and may sit beside a private one (Q18 of r17) */
+	   column: one would blame half the key, and may sit beside a private one */
 	const entry = lookup(v.maps, table, (t) => own(t.foreignKey, columns[0]) ?? own(t.foreignKey, constraint))
 	const fallback = {
 		cause: "Referenced record does not exist or is still in use",
@@ -227,7 +227,7 @@ function classifyPgError(error: unknown, given: readonly ConstraintMap[]): CombE
 	const read = readPgError(error)
 	if (read === null) return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
 	/* the reported table, or for a partition its parent's entry lists, the parent; never the
-	   statement's table, which a trigger or a cascade did not write (Q7 of r18) */
+	   statement's table, which a trigger or a cascade did not write */
 	const violation: Violation = { maps: constraintMaps, read, source: error, table: mapTable(constraintMaps, read) }
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler(violation)

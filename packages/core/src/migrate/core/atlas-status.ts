@@ -21,20 +21,20 @@ type AtlasCommand = {
 	/** The process runner; tests pass a fake. */
 	exec?: Run | undefined
 	print(line: string): void
-	/** a history other than the target's own, by its schema: 0.12's shared one (M77), or another schema's own (M78) */
+	/** a history other than the target's own, by its schema: 0.12's shared one, or another schema's own */
 	revisions?: string | undefined
 	target: PgTarget
 }
 
 /**
  * What an Atlas call returned, as Atlas wrote it, for comb's decisions; `said`, its stderr as comb
- * prints it (explained, scrubbed, then trimmed to Atlas's words, K6 of r21); `scrub`, for any other text comb prints of it
+ * prints it (explained, scrubbed, then trimmed to Atlas's words); `scrub`, for any other text comb prints of it
  */
 type Ran = RunResult & { said: string; scrub(text: string): string }
 
 /**
  * `atlas migrate <args>` on the snapshot `copy` against the target. Its stdout is JSON comb parses
- * as written, its stderr too, and never scrubbed (M79), since a secret that spells a key, a name or
+ * as written, its stderr too, and never scrubbed, since a secret that spells a key, a name or
  * a word Atlas prints would change what comb reads; a caller scrubs a value only where it prints it.
  */
 function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Promise<Ran> {

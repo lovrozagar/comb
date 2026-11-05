@@ -116,14 +116,12 @@ type CombQueryMeta = {
 	maxFilterValues?: number | undefined
 	/** Values one `in` or `nin` list may hold */
 	maxInValues?: number | undefined
-	// Q8
 	/**
 	 * UTF-8 bytes of the escaped pattern of a `like` or `ilike` value with a `*` inside it, as SQLite
 	 * reads it: a `[` in a `like` is the three bytes `[[]`, a `%` or `_` in an `ilike` two. A value whose
 	 * only `*` are at its ends is no pattern and takes no cap. Not the raw value's characters.
 	 */
 	maxPatternBytes?: number | undefined
-	// U28
 	/** Bytes one `filter` may take however a client encodes it, beside its character cap */
 	maxFilterBytes?: number | undefined
 	/** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */

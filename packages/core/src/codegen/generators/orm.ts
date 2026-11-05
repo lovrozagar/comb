@@ -170,7 +170,7 @@ function generateNeonOrm(n: OrmNames): string {
 		`import { drizzle as drizzleServerless } from "drizzle-orm/neon-serverless"`,
 		...schemaImports(n),
 		"",
-		/* the cache is typed from the driver, not from the factory that fills it, which would make its type circular (F3) */
+		/* the cache is typed from the driver, not from the factory that fills it, which would make its type circular */
 		`const $clientType = () => drizzleHttp({ client: neon(""), relations })`,
 		"",
 		`const ${n.dbName}DbIsolateCache = new Map<string, ReturnType<typeof $clientType>>()`,

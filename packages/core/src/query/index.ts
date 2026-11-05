@@ -20,7 +20,7 @@ export { type ListExtra, type ListRow, paginate } from "./pagination.ts"
 export { createCursor } from "./cursor-mint.ts"
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
 
-/* Drizzle relational helpers, and each function queryHelpers groups (KT4 of r22b) */
+/* Drizzle relational helpers, and each function queryHelpers groups */
 export { drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers } from "./drizzle.ts"
 export { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 
@@ -45,7 +45,7 @@ export {
 	validateFilter,
 } from "./filter.ts"
 export { escapeLike, globPattern, likePattern } from "./like.ts"
-/* an ISO date filter's validated value: the instant, by its milliseconds and its text (Q4 of r17) */
+/* an ISO date filter's validated value: the instant, by its milliseconds and its text */
 export { IsoInstant } from "./iso-date.ts"
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts"
 

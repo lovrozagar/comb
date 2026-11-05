@@ -10,7 +10,7 @@ export const ORG_ID_MAX_LENGTH = 64
 
 /**
  * Refuse an org id longer than the column holds, measured in UTF-16 code units as `resolve`
- * measures it, so no row is written that `resolve` would answer as a miss (U41). The id is the
+ * measures it, so no row is written that `resolve` would answer as a miss. The id is the
  * caller's input: a route that takes it from a path validates it first.
  */
 export function assertOrgId(orgId: string): void {

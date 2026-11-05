@@ -1,4 +1,4 @@
-/** A Postgres target's lockTimeout, read once as Postgres reads lock_timeout (P6 of r18) */
+/** A Postgres target's lockTimeout, read once as Postgres reads lock_timeout */
 
 // lookup-table: each unit of a Postgres time setting, in milliseconds
 const UNIT_MS: Readonly<Record<string, number>> = {
@@ -21,7 +21,7 @@ const halfEven = (value: number): number => {
 }
 
 /**
- * `lockTimeout` in whole milliseconds, as Postgres reads lock_timeout (P6 of r18): a number, an
+ * `lockTimeout` in whole milliseconds, as Postgres reads lock_timeout: a number, an
  * optional space and an optional unit (milliseconds when none), rounded half to even; or why it is
  * none Postgres takes. Read once, so what Atlas is handed is the same value written with no space.
  */

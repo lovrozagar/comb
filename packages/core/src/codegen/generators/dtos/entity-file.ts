@@ -19,7 +19,7 @@ export const SUFFIX: Record<SchemaType, string> = {
 const SCHEMA_TYPES: SchemaType[] = ["read", "readPartial", "create", "update"]
 
 /* the update body has no timestamp spread: timestamps are not written by a caller */
-/* the schema types a timestamp spread fills: what is read back; a create or update body takes none (F4) */
+/* the schema types a timestamp spread fills: what is read back; a create or update body takes none */
 const SPREAD: Partial<Record<SchemaType, string>> = { read: "Read", readPartial: "ReadPartial" }
 
 export type EntityFileOptions = {
@@ -27,9 +27,9 @@ export type EntityFileOptions = {
 	entityDir: string
 	filePrefix?: string | undefined
 	metaImportFrom?: string | undefined
-	/** where comb is imported from, for its predicates a local schema names (C2 of r17) */
+	/** where comb is imported from, for its predicates a local schema names */
 	combFrom?: string | undefined
-	/** how the consumer takes a relative import (F53) */
+	/** how the consumer takes a relative import */
 	importStyle?: ImportStyle | undefined
 	/** the names the entity's schemas use, with where the tables file gets them */
 	schemaImports: ImportRef[]
@@ -58,7 +58,7 @@ function renderUniqueIndexes(indexes: CombEntityMetaInput["uniqueIndexes"]): str
 	return `[${indexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
 }
 
-/** Serialize `deriveEntityMeta`'s partialUniqueIndexes, each with its predicate (C7) */
+/** Serialize `deriveEntityMeta`'s partialUniqueIndexes, each with its predicate */
 function renderPartialUniqueIndexes(indexes: CombEntityMetaInput["partialUniqueIndexes"] = []): string {
 	if (indexes.length === 0) return "[]"
 	return `[${indexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)}, where: ${JSON.stringify(idx.where)} }`).join(", ")}]`
@@ -192,7 +192,7 @@ function importLines(
 ): string[] {
 	const lines = [`import * as z from "zod"`]
 	if (table.combMeta) lines.push(`import { combMeta } from "${options.metaImportFrom ?? "@lovrozagar/comb/meta"}"`)
-	/* a local schema kept beside a c.json import may name a comb predicate (C2 of r17) */
+	/* a local schema kept beside a c.json import may name a comb predicate */
 	if (body.some((line) => COMB_NAMESPACE.test(line))) lines.push(combImport(options.combFrom ?? "@lovrozagar/comb"))
 	lines.push(...schemaImportLines(options.schemaImports, options.entityDir, options.importStyle))
 	const shared = sharedImports(table, spread, options.sharedSchemas)

@@ -10,7 +10,7 @@ import { CliError, type CliIo } from "./output.ts"
 
 export type { CodegenConfig, DatabaseCodegen }
 
-/** `exported`, the config file `file` exports, held to its schema; a CliError naming the file and each key that is wrong (K14) */
+/** `exported`, the config file `file` exports, held to its schema; a CliError naming the file and each key that is wrong */
 function parsed(file: string, exported: unknown): CodegenConfig {
 	const result = codegenConfigSchema().safeParse(exported)
 	if (result.success) return result.data
@@ -19,8 +19,7 @@ function parsed(file: string, exported: unknown): CodegenConfig {
 
 /**
  * The config module `file`, a .json one parsed as its default export; a syntax error or a throw names
- * `file`, the error as its cause (KC7 of r22b), for comb.config.ts and the drizzle config alike (AD8 of
- * the area D review)
+ * `file`, the error as its cause, for comb.config.ts and the drizzle config alike
  */
 export async function loadModule(file: string): Promise<{ default?: unknown }> {
 	try {
@@ -71,7 +70,7 @@ export type DeclaredFts = { fts: Record<string, FtsTableConfig>; tables: string 
 
 /**
  * The FTS the database `name` declares in comb.config.ts, which a SQLite diff builds from its tables
- * file (KC3 of r22). No config, no database name, or no fts on the database declares none; a name
+ * file. No config, no database name, or no fts on the database declares none; a name
  * the config lacks is refused with `hint`.
  */
 export async function declaredFts(

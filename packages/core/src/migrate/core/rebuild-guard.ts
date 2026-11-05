@@ -12,7 +12,7 @@
  * each closure table into `_comb_keep_<t>` (generated columns left out), saves `T`'s
  * sqlite_sequence value, and empties the closure, each table after the tables that reference it.
  * The guard opens with `PRAGMA defer_foreign_keys = on` unless the file set it before the drop (as
- * Atlas's file does, atlas-env.ts; M48), so the refill's
+ * Atlas's file does, atlas-env.ts), so the refill's
  * keys are checked at commit: a closure that is a reference cycle has no order that satisfies
  * them one row at a time. After the rename it refills the closure in the opposite order, parents
  * first, restores the sequence, and drops the keep tables. The rows, keys and sequences end as

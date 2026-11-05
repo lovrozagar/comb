@@ -72,7 +72,6 @@ function buildFtsMatch(
  * rowid or its integer key)
  */
 export type FtsSource = {
-	// U16
 	/**
 	 * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
 	 * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it
@@ -136,7 +135,6 @@ type SpellfixSearch = FtsSource & {
 	maxEditDistance?: number | undefined
 	/** corrections taken per term (default 3) */
 	maxCorrections?: number | undefined
-	// Q4 of r20, Q3 of r21
 	/** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed; a D1 client is known without it */
 	spellfix?: boolean | undefined
 	/** the spellfix1 vocabulary table's name */
@@ -149,13 +147,13 @@ const NO_EDITDIST3 = /\bno such function: editdist3\b/
 // lookup-table: whether each database client has spellfix1 loaded, asked once, a failure to ask never kept
 const LOADED: WeakMap<object, Promise<boolean>> = /* @__PURE__ */ new WeakMap()
 
-/** What a probe's answer is kept under: the client a drizzle wrapper holds, so a wrapper per request asks once (Q4 of r20), else `db` */
+/** What a probe's answer is kept under: the client a drizzle wrapper holds, so a wrapper per request asks once, else `db` */
 const clientOf = (db: SpellfixDb): object => (typeof db.$client === "object" && db.$client !== null ? db.$client : db)
 
 /**
  * Whether `client` is D1's, a D1Database (`withSession`) or a session of one (`getBookmark`), the
  * duck test openD1Session makes: D1 loads no extension, and openD1Session makes a session per
- * request, which no probe kept per client would ever answer (Q3 of r21)
+ * request, which no probe kept per client would ever answer
  */
 const isD1 = (client: object): boolean =>
 	typeof (client as { withSession?: unknown }).withSession === "function" ||
@@ -164,7 +162,7 @@ const isD1 = (client: object): boolean =>
 /**
  * Whether `db` has spellfix1 loaded, asked once per client before any spellfix query: editdist3,
  * the function it registers, reads no table, so its absence is never a misspelled vocabulary
- * table (K1 of r19). D1 is answered unasked (Q3 of r21). Any other failure is thrown.
+ * table. D1 is answered unasked. Any other failure is thrown.
  */
 function spellfixLoaded(db: SpellfixDb): Promise<boolean> {
 	const key = clientOf(db)
@@ -189,7 +187,7 @@ function spellfixLoaded(db: SpellfixDb): Promise<boolean> {
 
 /**
  * Words spellfix1 offers for `term`. Any failure, a vocabulary table misspelled or a transient D1
- * error, is the caller's to see (K9 of r18): spellfixLoaded said the extension is there
+ * error, is the caller's to see: spellfixLoaded said the extension is there
  */
 async function corrections(db: SpellfixDb, term: string, search: SpellfixSearch): Promise<string[]> {
 	const { maxCorrections = 3, maxEditDistance = 300, spellfixTable } = search
@@ -224,7 +222,6 @@ async function buildFtsWhereWithSpellfix(
 /** A search: the `q` text in, its WHERE clause out; null when it searches nothing */
 type LikeSearchResolver = (q: string) => SQL | null
 
-// U21, QE2 of r22b
 /**
  * The search of a `_search` column that searchText wrote, or any other SQL expression. Each
  * whitespace-separated term is folded by searchText and trimmed, and kept only when it holds a letter

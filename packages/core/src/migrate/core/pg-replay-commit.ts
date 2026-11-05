@@ -1,9 +1,9 @@
 /**
  * The replay's transactions and the reads around them (pg-replay.ts): a file's or comb's own
  * statement's transaction, refused before its COMMIT when this backend's counts show it wrote past
- * its database (P1 of r21), and the server's shared catalogs read as committed around it and around
- * every bare statement, a change there the file's when it is to an object the file names (P1 and
- * P2 of r22); a `txmode none` file's statement in a transaction of its own first, bare only when
+ * its database, and the server's shared catalogs read as committed around it and around
+ * every bare statement, a change there the file's when it is to an object the file names;
+ * a `txmode none` file's statement in a transaction of its own first, bare only when
  * Postgres runs it outside a block alone.
  */
 import { adopt, bareAgain, type Run } from "./pg-replay-roles.ts"
@@ -22,7 +22,7 @@ import { ReplayFailed } from "./replay-failed.ts"
 /**
  * A transaction opened on the replay's connection, its counts so far taken as comb's own: a backend
  * keeps a committed transaction's counts in the next one's read until it flushes them, which it
- * never does inside a transaction (.tmp/grunt/r21-premise/p1-carry.log)
+ * never does inside a transaction
  */
 async function begin(run: Run): Promise<void> {
 	/* pipelined on the one connection: the read runs in the transaction BEGIN opens, a round trip saved */
@@ -43,13 +43,13 @@ type At = {
 	stops: string
 }
 
-/* the words that name devUrl's role in a file, as namesIn folds them: CURRENT_USER and its kin (AE6 of r22) */
+/* the words that name devUrl's role in a file, as namesIn folds them: CURRENT_USER and its kin */
 const SESSION_ROLE = ["current_role", "current_user", "session_user", "user"]
 
 /**
  * The server's shared catalogs read as committed against the last read: a change since to an object
  * the file `name` names (`names`), while `sent` or the whole file ran, is refused, and a role or
- * database it added is the cleanup's; a change to any other is another session's (P2 of r22). The
+ * database it added is the cleanup's; a change to any other is another session's. The
  * replay's own database is the file's whatever it spells, as only this replay runs in it, and is
  * the cleanup's too. `read` is that read when the caller took it
  */
@@ -106,9 +106,9 @@ const ROLE_AT: ReadonlyArray<[noun: string, at: readonly number[]]> = [
 
 /**
  * Which changes are the replay's own, one rule: a change whose subject is what the replay drops
- * after it, so nothing outlives the check. The database it runs in (P3 of r22): its row, but a field
+ * after it, so nothing outlives the check. The database it runs in: its row, but a field
  * that keeps the cleanup from dropping it, its settings for every role, and its comment and security
- * labels. And each of `roles`, those it made or adopts (P5 of r22, PR6 of r22b): its row, a
+ * labels. And each of `roles`, those it made or adopts: its row, a
  * membership in it or of it, its settings in any database, and its comment and security labels
  */
 function ownOf(run: Run, roles: ReadonlySet<string>): Own {
@@ -140,7 +140,7 @@ async function commit(run: Run, at: At): Promise<void> {
 	const { name, sent, stops } = at
 	/* two connections, one moment before COMMIT: the counts on the replay's, the committed catalogs on admin's, a round trip saved */
 	const [now, read] = await Promise.all([counts(run.sql), snapshot(run.admin)])
-	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
+	/* a superuser's file can turn the counts off for its transaction or its session */
 	if (!now.on)
 		throw new ReplayFailed(
 			`${name}: the file turned track_counts off, so devUrl's server counted nothing it changed past the database the replay runs in, and comb rolled it back and refuses the file; leave track_counts on; ${stops}`,
@@ -171,7 +171,7 @@ const BARE_ONLY: ReadonlySet<unknown> = /* @__PURE__ */ new Set(["25001", "2D000
 
 /**
  * A statement of a `txmode none` file `send` runs, first in a transaction of its own, refused before
- * its COMMIT as a file's is (the amendment to P1 of r22): a change it makes past its database never
+ * its COMMIT as a file's is: a change it makes past its database never
  * commits. Postgres refuses only an outside-only class and a COMMIT inside a DO block or a procedure
  * in a block; that try rolled back whole, so it runs bare, as Atlas sends it, with the server's
  * catalogs read around it

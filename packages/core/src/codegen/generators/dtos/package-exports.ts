@@ -11,7 +11,7 @@ export type PackageExportsInput = { config: DtosConfig; ctx: GeneratorContext; e
 /*
  * The subpaths this generator owns for a database, before any namespace: ./tables, ./relations,
  * and a ./dtos/ subpath only when its target is a generated file under its own output. The
- * package's own ./dtos/search, pointing at its own code, is the package's (F19).
+ * package's own ./dtos/search, pointing at its own code, is the package's.
  */
 const ownedUnder = (outputDir: string) => (key: string, target: ExportTarget | undefined) =>
 	key === "./tables" ||

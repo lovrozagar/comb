@@ -32,7 +32,7 @@ type Replay = {
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
-/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes (PR1 of r22b) */
+/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes */
 type Replaying = Replay & { refused: Refuse; waits: (sql: Sql) => Promise<void> }
 
 /** A statement of `name`: its type and node, as nodeOf reads its parse tree, and what Atlas sends */
@@ -45,7 +45,7 @@ async function runSent(run: Run, { name, node, sent, type }: Sent, replay: Repla
 	if (moved !== undefined) replay.movedTo?.(name, sent, moved.names)
 }
 
-/* PR9 of r22b: why a replay stops on a role the history creates, which devUrl's role cannot, as NO_CREATEDB says of the database */
+/* Why a replay stops on a role the history creates, which devUrl's role cannot, as NO_CREATEDB says of the database */
 const noCreaterole = (role: string) =>
 	`creates the role ${role}, which devUrl's server lacks, and devUrl's role cannot create a role (CREATEROLE), as comb replays the history in a database of its own on that server; grant the role CREATEROLE, or point devUrl at a server where it has it`
 

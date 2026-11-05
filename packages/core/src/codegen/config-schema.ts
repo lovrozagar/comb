@@ -1,5 +1,5 @@
 /**
- * The Zod schema comb.config.ts is held to as comb loads it (K14 of the 0.15.0 review): every object
+ * The Zod schema comb.config.ts is held to as comb loads it: every object
  * is strict, so a misspelled key is refused by name instead of falling back to its default, which a
  * config built through a helper passes `tsc --strict` with. Typed with CodegenConfig, so the two
  * cannot drift.
@@ -18,7 +18,7 @@ const databaseSchema = () =>
 			.record(nonBlank(), z.strictObject({ columns: z.array(nonBlank()).min(1), tokenizer: z.string().optional() }))
 			.optional(),
 		generators: z.array(z.enum(GENERATORS)).optional(),
-		/* an output set to undefined is that generator's left out, as codegen reads it (AD2 of the area D review) */
+		/* an output set to undefined is that generator's left out, as codegen reads it */
 		output: z.partialRecord(z.enum([...GENERATORS, "default"]), nonBlank().optional()).optional(),
 		partitions: z.record(nonBlank(), z.array(nonBlank()).min(1)).optional(),
 		tables: nonBlank(),
@@ -27,7 +27,7 @@ const databaseSchema = () =>
 /** comb.config.ts's schema */
 const codegenConfigSchema = (): z.ZodType<CodegenConfig> =>
 	z.strictObject({
-		/* S6 of r19: an empty map generates nothing, and CI would pass on stale files, as comb.migrate.config.ts refuses */
+		/* An empty map generates nothing, and CI would pass on stale files, as comb.migrate.config.ts refuses */
 		databases: z
 			.record(nonBlank(), databaseSchema())
 			.refine((databases) => Object.keys(databases).length > 0, { message: "databases declares no database" }),

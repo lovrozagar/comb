@@ -1,7 +1,7 @@
 /**
  * Whether a network is one Postgres's `cidr` takes: an IPv4 or IPv6 address, with or without a
  * prefix length, and no bit set past that length ('192.168.0.1/24' is refused, '192.168.0.0/24'
- * is taken). Generated write DTOs import it for a `cidr` column, so the rule has one source (F50).
+ * is taken). Generated write DTOs import it for a `cidr` column, so the rule has one source.
  */
 
 /** An IPv4 address's 32 bits, or null when it is no dotted-quad of decimal octets */
@@ -13,7 +13,7 @@ function ipv4Bits(address: string): string | null {
 
 /**
  * An IPv6 address's IPv4 tail's 32 bits: two to four decimal octets with no leading zero, the ones
- * left out zero, as Postgres reads `::ffff:1.2.3` as `::ffff:1.2.3.0` (AA12 of r22); null when it is none
+ * left out zero, as Postgres reads `::ffff:1.2.3` as `::ffff:1.2.3.0`; null when it is none
  */
 function tailBits(tail: string): string | null {
 	const octets = tail.split(".")

@@ -16,7 +16,6 @@ import {
 } from "./filter-validate.ts"
 import type { SortDirection, SortField } from "./types.ts"
 
-// QL7 of r22b
 /**
  * Parse PostgREST-style `order` string into SortField array.
  *

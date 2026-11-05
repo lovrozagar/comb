@@ -1,17 +1,16 @@
 /**
- * M77: a schema other than public that comb 0.12 migrated kept its history in the shared
+ * A schema other than public that comb 0.12 migrated kept its history in the shared
  * atlas_schema_revisions, which comb no longer reads for it. While the schema's own history is
  * missing or empty, the shared rows that match the directory's files as a prefix (in order,
  * version and hash equal, none skipped) are the files that ran: apply and baseline record them in
  * the schema's own history, and check and status say so. A shared row that names no file here is
- * another schema's, and stays as it is (M78). A matching prefix is no proof: public's own rows
+ * another schema's, and stays as it is. A matching prefix is no proof: public's own rows
  * live in that table too, so a schema beside it that shares its directory matches them by version
  * and hash alone. A schema that holds nothing made none of what they make, so they are another
- * schema's and its files are pending, in status, check, apply and baseline alike (PA6 of r22b);
+ * schema's and its files are pending, in status, check, apply and baseline alike;
  * holding nothing is read from pg_depend, so it holds for every kind of object alike. Any
  * other schema is adopted only once it holds what replaying the prefix leaves, its tables and every
- * kind COMPARED names (pg-live-catalog.ts's ARM_KINDS), and check proves it as apply does (P2 of
- * the 0.14.1 review, P9 of 0.15.0, P10 of r18, P12 of r19).
+ * kind COMPARED names (pg-live-catalog.ts's ARM_KINDS), and check proves it as apply does.
  */
 import { copyFileSync } from "node:fs"
 import { join } from "node:path"
@@ -70,7 +69,7 @@ async function proveAdoption(
 	copy: string,
 	ran: readonly string[],
 ): Promise<void> {
-	/* the replay reads each file as the statements Postgres runs, on a dev database holding the schema (P12) */
+	/* the replay reads each file as the statements Postgres runs, on a dev database holding the schema */
 	await loadPostgresParser()
 	const { schema } = options.target
 	await replayed(() => (options.readyDev ?? readyDevSchema)(options.target), schema, ran)
@@ -78,7 +77,7 @@ async function proveAdoption(
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
 		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
-		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it (P1 of r21) */
+		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it */
 		const warnings = await refuseObjectDrift(options, prefix, refusal)
 		for (const notice of await replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
 			options.print(`Warning: Atlas: ${notice}`)
@@ -96,7 +95,7 @@ async function holdsNothing(options: { readHeld?: ReadHeld | undefined; target: 
 	return !(await (options.readHeld ?? holdsAnything)(options.target))
 }
 
-/** What status, check, apply and baseline say of shared rows matching `ran` in a schema that holds nothing (PA6) */
+/** What status, check, apply and baseline say of shared rows matching `ran` in a schema that holds nothing */
 const theirs = (schema: string, ran: readonly string[]): string =>
 	`the rows 0.12's shared history holds for ${ran.join(", ")} are another schema's, public's where it migrates this directory: ${schema} holds nothing they make, so they are pending here`
 

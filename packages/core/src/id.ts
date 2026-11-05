@@ -61,7 +61,7 @@ function increment(digits: readonly number[]): number[] | null {
 	return null
 }
 
-/* a millisecond a ULID's time cannot hold is refused, rather than encode "undefined" or wrap (QE7 of r22b) */
+/* a millisecond a ULID's time cannot hold is refused, rather than encode "undefined" or wrap */
 function held(ms: number): number {
 	if (!(ms >= 0 && ms < MAX_TIME + 1)) {
 		throw new RangeError(`createUlidFactory: the clock must read a millisecond from 0 to 2^48 - 1, got ${ms}`)
@@ -76,7 +76,7 @@ const webRandom = (bytes: Uint8Array<ArrayBuffer>) => {
 	crypto.getRandomValues(bytes)
 }
 
-/** Throw for a prefix generateId refuses: c.id checks it too, so a tables module fails where the app would (F55) */
+/** Throw for a prefix generateId refuses: c.id checks it too, so a tables module fails where the app would */
 function checkPrefix(prefix: string): void {
 	if (!PREFIX_PATTERN.test(prefix)) {
 		throw new Error(
@@ -108,7 +108,7 @@ function createUlidFactory(options: UlidFactoryOptions = {}): {
 	function ulid(): string {
 		const time = Math.max(readClock(now), lastTime)
 		const counted = time === lastTime ? increment(lastDigits) : null
-		/* B2-11 of area B: moving on from ULID's last millisecond is refused as a clock reading past it is */
+		/* Moving on from ULID's last millisecond is refused as a clock reading past it is */
 		lastTime = counted === null && time === lastTime ? held(time + 1) : time
 		lastDigits = counted ?? randomDigits(random)
 		return encodeTime(lastTime) + encodeDigits(lastDigits)

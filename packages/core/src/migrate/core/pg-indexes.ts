@@ -1,5 +1,5 @@
 /**
- * Every index a Postgres history leaves, under the name Postgres gives it (PA12 of r22b), which
+ * Every index a Postgres history leaves, under the name Postgres gives it, which
  * rating reads: a partitioned index has no storage, so its REINDEX refuses a transaction and its SET
  * TABLESPACE moves nothing, and a DROP INDEX locks its table. An index the history does not name
  * takes the name ChooseIndexName chooses (pg-index-facts.ts). An index on a partitioned table reaches each partition,

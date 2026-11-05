@@ -1,13 +1,13 @@
 /**
- * The statements on roles a dev replay made that it runs rather than leaves out, one rule with P6 of
- * r21's GRANT (PR5 of r22b): a statement whose shared effect falls only on roles the replay made
+ * The statements on roles a dev replay made that it runs rather than leaves out, one rule with
+ * the GRANT's: a statement whose shared effect falls only on roles the replay made
  * dies with their drop, so it runs, as a later statement in the replay's own database may need its
  * effect. A GRANT or REVOKE of them, a rename, ALTER ROLE, ALTER GROUP and ALTER ROLE … SET of one,
  * DROP ROLE, and DROP OWNED and REASSIGN OWNED, which change what the roles own and hold in the
  * replay's database alone. A role another database still holds, as another replay of the same
  * history uses it too, is not this replay's alone, so a statement on it but a GRANT is left out.
  *
- * ALTER ROLE runs without what the replay keeps every role it makes from (P3 of r21): a login, a
+ * ALTER ROLE runs without what the replay keeps every role it makes from: a login, a
  * password, and the attributes BARE denies, as CREATE ROLE does (pg-replay-roles.ts).
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
@@ -26,7 +26,7 @@ const named = (spec: Spec | undefined): string | undefined =>
 const listed = (list: unknown): Array<string | undefined> =>
 	(list as Array<{ RoleSpec: Spec }>).map(({ RoleSpec }) => named(RoleSpec))
 
-/* the roles a GRANT or REVOKE of a role names; a membership in one the replay made dies with it (P6 of r21) */
+/* the roles a GRANT or REVOKE of a role names; a membership in one the replay made dies with it */
 const grantedOf = (node: Node): string[] =>
 	(node["granted_roles"] as Array<{ AccessPriv: { priv_name: string } }>).map(({ AccessPriv }) => AccessPriv.priv_name)
 

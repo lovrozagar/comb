@@ -1,6 +1,6 @@
 /**
  * The values a filter names for one field or several: queryHelpers.filterValue and filterValues.
- * A value is read only where the filter holds every row to it (QL9 of r22b): a condition under
+ * A value is read only where the filter holds every row to it: a condition under
  * the operator asked for (`eq` by default), at the top level of an AND, and the only one there on
  * its field. `project_id.ne.p1`, an `or()` group and a field named twice read as nothing, since
  * the SQL serves rows other than that value's.

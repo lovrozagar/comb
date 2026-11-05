@@ -155,7 +155,7 @@ function follow(schema: SchemaSoFar, stmt: string, naming: Naming): void {
 	const code = codeOf(stmt, dialectOf(naming))
 	followTableShape(schema, code, naming)
 	followTableLife(schema, code, naming)
-	/* the sync rule reads the 'delete' command, a literal codeOf blanks (M43) */
+	/* the sync rule reads the 'delete' command, a literal codeOf blanks */
 	followTriggers(schema, [code, normalizeSql(stmt).replace(/;$/, "")], naming)
 	followColumns(schema, code, naming)
 	const index = CREATE_INDEX.exec(code)?.[1]
@@ -177,7 +177,6 @@ const EMPTY: ExtractedSchema = {
 	triggers: [],
 }
 
-// M72, M75
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
  * migration leaves, after `from` when given, read as `readAs` names a dialect, SQLite by default.
@@ -205,7 +204,7 @@ function extractSchema(
 
 /**
  * extractSchema of a file its caller has read: on Postgres its one parse, shared with the file's
- * classification (M86); a Postgres name keyed under `searchSchema`
+ * classification; a Postgres name keyed under `searchSchema`
  */
 function schemaOfRead(
 	file: FileRead,
@@ -235,7 +234,7 @@ function schemaOfRead(
 		tables: new Map(from.tables),
 		triggers: [...from.triggers],
 	}
-	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser */
 	for (const stmt of read === undefined ? splitSqlStatements(sql) : read.statements.map(({ sent }) => sent)) {
 		follow(schema, stmt, naming)
 		schema.statements.push(stmt)

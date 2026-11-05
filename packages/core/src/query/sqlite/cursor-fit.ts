@@ -19,12 +19,12 @@ import { carriedStored, carriedText, heldApart, holdsText, inSeconds } from "./t
 /**
  * What a column of each drizzle `dataType` family holds, given its full `dataType`. Keyed by drizzle's
  * own family union, so a family drizzle adds is a type error here rather than a cursor every column of
- * it refuses (AB2 of area B). A json column holds nothing a cursor carries, nor an array one; a
- * buffer-mode blob its bytes (QL5 of r22b). A number column holds a bigint too where the driver returns
+ * it refuses. A json column holds nothing a cursor carries, nor an array one; a
+ * buffer-mode blob its bytes. A number column holds a bigint too where the driver returns
  * integers as one (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string
- * (libsql's intMode "string", Q2 of r19), and a cursor minted from its row carries it. A SQLite
+ * (libsql's intMode "string"), and a cursor minted from its row carries it. A SQLite
  * `numeric()` column reads every value as a string, but a list that binds it as read carries a value
- * as SQLite stored it, an integer as a bigint and a REAL as its double (B2-4 of area B), which NUMERIC
+ * as SQLite stored it, an integer as a bigint and a REAL as its double, which NUMERIC
  * affinity compares as the number it is, so it holds those too. A `customType`
  * column holds whatever its `fromDriver` read, opaque to comb: any value a cursor carries, bound back
  * through its `toDriver`.
@@ -49,7 +49,7 @@ const HOLDS: Record<ColumnDataType, (value: unknown, dataType: string) => boolea
 
 /**
  * Whether `value` is what `column` holds (HOLDS), and on SQLite any text on a number column: SQLite orders
- * every TEXT after every number and compares a bound text as itself, which drizzle's number mappers bind as is (AB4-1 of area B)
+ * every TEXT after every number and compares a bound text as itself, which drizzle's number mappers bind as is
  */
 const fitsColumn = (column: Column, value: unknown): boolean =>
 	(is(column, SQLiteColumn) && column.dataType.startsWith("number") && typeof value === "string") ||
@@ -77,8 +77,8 @@ const isInteger = (value: unknown) =>
 	(typeof value === "string" && INTEGER_TEXT.test(value))
 
 /**
- * Whether `value` is a time key's stored value as a list that binds the key as read carries it (QL2
- * of r22b): a Postgres date-mode column's text, or a SQLite timestamp's stored seconds or milliseconds
+ * Whether `value` is a time key's stored value as a list that binds the key as read carries it:
+ * a Postgres date-mode column's text, or a SQLite timestamp's stored seconds or milliseconds
  */
 const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
 	is(column, SQLiteColumn)
@@ -92,7 +92,7 @@ const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
  * binds: a string, a number, a bigint, a boolean or bytes (bun:sqlite and D1 refuse a Date that libsql
  * would bind); a value carried by reference, a key that reads it back (refersBack); and a SQLite key's value
  * of a class its mode reads as another, which a list reading it back carried (`carried`), as the row
- * held it: a timestamp's TEXT, a boolean's value but 0 or 1, a text's integer (B2-3, AB3-2, AB4-2 of area B)
+ * held it: a timestamp's TEXT, a boolean's value but 0 or 1, a text's integer
  */
 function fits(
 	column: SQLWrapper,
@@ -101,7 +101,7 @@ function fits(
 ): boolean {
 	if (value === null) return true
 	if (value instanceof CursorRef) return refersBack(column, table)
-	/* AB4-7 of area B: a REAL's text, as a list carries it: a timestamp's bound as read, a held key's read back */
+	/* A REAL's text, as a list carries it: a timestamp's bound as read, a held key's read back */
 	if (value instanceof RealText) return asRead ? holdsText(column) : heldApart(column)
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (asRead && carriedTime(column, value)) return true
@@ -124,7 +124,7 @@ function bindable(value: unknown): unknown {
 
 /**
  * Whether `column` reads its stored number rounded: a Postgres numeric in drizzle's number mode, whose
- * read is the nearest double (QL3 of r22b), so every list carries its text (`_combKeyTexts`) and a
+ * read is the nearest double, so every list carries its text (`_combKeyTexts`) and a
  * cursor binds that. A SQLite numeric stores an INTEGER or a REAL, which its driver reads as stored
  */
 const readsRounded = (column: SQLWrapper | undefined): boolean =>
@@ -135,7 +135,7 @@ const NUMERIC_TEXT = /^(?:-?\d+(?:\.\d+)?|NaN|-?Infinity)$/
 
 /**
  * Whether `column` is a Postgres `customType` column, which carries its text where Postgres's own type
- * of it is a numeric (AB2 of area B), as an expression key does: its mapper may read one as a number.
+ * of it is a numeric, as an expression key does: its mapper may read one as a number.
  * Carried, the text binds as itself, typed as the column; as read, a value goes through its `toDriver`
  */
 const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
@@ -145,11 +145,11 @@ const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
  * A cursor value as its key binds it. Stored text the list carried (`carried`, the cursor's flag)
  * binds as itself, past the column's mapper: cast to numeric on a key that reads rounded, and on a
  * Postgres custom column as a parameter Postgres types as the column it is compared with, its own type. A value as read binds through the mapper, so a custom
- * column's `toDriver` writes it as it writes the column (comb-9d's AB2 ruling), a text value that looks
+ * column's `toDriver` writes it as it writes the column, a text value that looks
  * like a number included; a cursor with no flag, as every released comb minted, holds only those
  */
 function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: boolean): unknown {
-	/* one SQLite parse of the text the list checked reads back as the key, on every driver (AB4-7 of area B) */
+	/* one SQLite parse of the text the list checked reads back as the key, on every driver */
 	if (value instanceof RealText) return sql`cast(${value.text} as real)`
 	if (carriedText(column, value, { asRead: false, carried })) return sql`${value}`
 	/* a mode's mapper binds the value as another (a boolean's as 0 or 1); D1 binds no bigint, so one past 2^53 goes as its digits */
@@ -163,7 +163,7 @@ function boundCarried(column: SQLWrapper | undefined, value: unknown, carried: b
 }
 
 /**
- * A Date on a seconds-mode timestamp key as the seconds it holds, to the millisecond (U10): drizzle
+ * A Date on a seconds-mode timestamp key as the seconds it holds, to the millisecond: drizzle
  * would floor it to the second. A key the keyset can read from its row reads it there instead
  * (cursor-ref.ts), as a stored fraction below a millisecond is one no Date holds.
  */
@@ -172,7 +172,7 @@ const exactSeconds = (value: Date): SQL => sql`${value.getTime() / 1000}`
 /**
  * A cursor value as a key bound as read takes it: a Date on a seconds-mode timestamp as its seconds
  * to the millisecond; a time key's carried stored value as itself, past the column's Date mapper,
- * Postgres reading the text as the key's own type (QL2 of r22b)
+ * Postgres reading the text as the key's own type
  */
 function boundAsRead(column: SQLWrapper | undefined, value: unknown): unknown {
 	if (value instanceof Date) return inSeconds(column) ? exactSeconds(value) : value
@@ -182,7 +182,7 @@ function boundAsRead(column: SQLWrapper | undefined, value: unknown): unknown {
 
 /**
  * A cursor value as a SQLite key binds it: an integer a number column's or a time key's driver read
- * as a decimal string as that integer, exact (Q2 of r19), which SQLite would otherwise compare as text
+ * as a decimal string as that integer, exact, which SQLite would otherwise compare as text
  */
 const bindableAs = (column: SQLWrapper | undefined, value: unknown): unknown =>
 	bindable(
@@ -195,7 +195,7 @@ const bindableAs = (column: SQLWrapper | undefined, value: unknown): unknown =>
 
 /**
  * A cursor value as a key of a `dialect` list binds it: SQLite's way on SQLite (bindableAs), itself on
- * Postgres, whose own cast reads the 'Infinity' its driver writes (QL4 of r22b)
+ * Postgres, whose own cast reads the 'Infinity' its driver writes
  */
 const bindableIn = (dialect: ListDialect, column: SQLWrapper | undefined, value: unknown): unknown =>
 	dialect === "sqlite" ? bindableAs(column, value) : value
@@ -220,7 +220,7 @@ type FitAt = {
  * The index of the first cursor value, the tiebreak id last, that does not fit its column, a reference
  * read back from `at.table`, or -1 when every one does; `at.asRead` says which keys bind as read, where a
  * time key may carry its stored value, and `at.carried` which the cursor flags as the stored text the
- * list carried. The open refuses a cursor by it, and the mint a row (AB4-1 of area B), so no list seals
+ * list carried. The open refuses a cursor by it, and the mint a row, so no list seals
  * a cursor its next page refuses
  */
 function unfitIndex(columns: readonly SQLWrapper[], values: readonly unknown[], at: FitAt = {}): number {

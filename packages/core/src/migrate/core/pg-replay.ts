@@ -1,12 +1,12 @@
 /**
  * The history replayed on devUrl's server, comb's objects and all, then read with the target's own
- * catalog query (P5 of r19): Postgres, not a model of it, decides what a cascade, a rename or a
+ * catalog query: Postgres, not a model of it, decides what a cascade, a rename or a
  * move leaves, and the two sides compare as one read of two databases.
  *
- * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file on a session of its own, as apply
- * gives each file an Atlas call (PA1 of r22b), and in a transaction of its own, a `--
+ * The replay runs as Atlas applies: each file on a session of its own, as apply
+ * gives each file an Atlas call, and in a transaction of its own, a `--
  * atlas:txmode none` file statement by statement, each in a transaction of its own first and bare,
- * as Atlas sends it, where Postgres runs it only so (P1 of r22 and its amendment), in a database
+ * as Atlas sends it, where Postgres runs it only so, in a database
  * made for it and dropped after (pg-replay-database.ts). One transaction for the whole history
  * filled Postgres's lock table and left a seed's deferred trigger events pending, and devUrl's own
  * database lent the history what it held. Committed, a statement whose scope is the server or
@@ -17,14 +17,14 @@
  *
  * A DO block, a function, EXECUTE and CALL hide such a change from the parse tree, so Postgres
  * decides, twice (pg-server-writes.ts). A file in a transaction has its writes to the shared
- * catalogs counted before its COMMIT (P1 of r21), and one that wrote past its database is refused
+ * catalogs counted before its COMMIT, and one that wrote past its database is refused
  * and rolled back, naming the file and the change, but for what the replay drops after it
  * (pg-replay-commit.ts): comb's own CREATE ROLE, a role such a statement adds, which the replay
  * adopts, a change to a role it made, and its own database. The counts are this backend's own, so
  * another session's work never trips them, and with `track_counts` off they read zero, so the
  * replay refuses a server that keeps none. And around every file and every statement a `txmode
  * none` file sends bare, the server's shared catalogs are read as committed, a replay's own rows
- * left out (P1 and P2 of r22): that sees a bare statement's change, which no transaction counts,
+ * left out: that sees a bare statement's change, which no transaction counts,
  * and one a second connection commits, as dblink's does, which this backend's counts never see.
  * Bare runs only a statement a block refuses (an outside-only class, a DO block or CALL that
  * commits), one only a block runs (a LOCK, a SAVEPOINT, a cursor not held) and the file's own
@@ -40,7 +40,7 @@
  * pg_authid alone, so a password a bare statement changes is seen by a superuser's devUrl only.
  *
  * A SIGINT or a SIGTERM, a Ctrl-C or a cancelled CI job, skips a `finally`, so either runs the
- * replay's cleanup first, once, and then ends the process as the signal would (P2 of r21); a run
+ * replay's cleanup first, once, and then ends the process as the signal would; a run
  * killed past it is swept by the next replay or apply on the server.
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
@@ -122,7 +122,7 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 	if (inFile) await commit(run, { ...file, sent: undefined })
 }
 
-/** `files` replayed each on a session `open`ed for it, as apply gives each file an Atlas call (PA1 of r22b) */
+/** `files` replayed each on a session `open`ed for it, as apply gives each file an Atlas call */
 async function replayEach(
 	run: Run,
 	files: readonly HistoryFile[],
@@ -164,7 +164,7 @@ async function prepare(
 /*
  * the startup settings Atlas's session applies a file on, which the replay's opens with too: Atlas's
  * driver pins DateStyle, and the target URL carries the schema, a plain name, as search_path, so a
- * RESET or DISCARD ALL returns to them and a date reads month first on any server (PR3 of r22b)
+ * RESET or DISCARD ALL returns to them and a date reads month first on any server
  */
 const ATLAS_SESSION = { DateStyle: "ISO, MDY" } as const
 

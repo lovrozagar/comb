@@ -13,7 +13,7 @@ import { outsideTransaction } from "./atlas-header.ts"
 /** A statement read, with what each rule found in it */
 type Read = ReadStatement & { findings: Finding[] }
 
-/** One entry per statement a kept finding names: the statement once, each of its notes once (S6 of r18) */
+/** One entry per statement a kept finding names: the statement once, each of its notes once */
 const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
 	reads.flatMap(({ findings, stmt }) => {
 		const kept = findings.filter(keep)

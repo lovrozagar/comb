@@ -49,7 +49,6 @@ export const combErrorKeys = {
 /** Lowercase error key values from combErrorKeys */
 export type CombErrorKey = (typeof combErrorKeys)[keyof typeof combErrorKeys]
 
-// C21
 /** A key a database error classifier answers with: classifyD1Error, classifySqliteError and classifyPgError alike */
 export type CombDatabaseErrorKey = (typeof combErrorKeys)[
 	| "CHECK_CONSTRAINT_VIOLATION"
@@ -66,7 +65,6 @@ export type CombDatabaseErrorKey = (typeof combErrorKeys)[
 	| "UNIQUE_CONSTRAINT_VIOLATION"
 	| "VALUE_TOO_LARGE"]
 
-// C21
 /**
  * The keys comb's database error classifiers answer with: the subset of combErrorKeys a consumer's
  * map of database errors (a translation, a status) iterates to cover each one. The query and router
@@ -116,7 +114,6 @@ export type ConstraintMap = {
 		 * and the statement sets that column; list every foreign key of the table, as codegen does.
 		 */
 		foreignKey?: Record<string, ConstraintMapEntry> | undefined
-		// Q7 of r18
 		/**
 		 * The partitions of this Postgres table, keyed as the map keys a table: Postgres reports a
 		 * violation on the partition, which is read as this table's, under its keys and its `private`
@@ -126,13 +123,11 @@ export type ConstraintMap = {
 		partitions?: readonly string[] | undefined
 		/** The primary key's violation, a duplicate id */
 		primaryKey?: ConstraintMapEntry | undefined
-		// F67
 		/**
 		 * The columns of this table the client never sees, by SQL name: an error names none of them,
 		 * in its `column` or its cause. Codegen writes it; a map without it names every column.
 		 */
 		private?: readonly string[] | undefined
-		// U43
 		/**
 		 * The columns of this table some foreign key points at, by SQL name: an UPDATE, or an
 		 * upsert's DO UPDATE, that assigns one may have failed on a row referencing the old value,

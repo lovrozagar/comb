@@ -1,5 +1,5 @@
 /**
- * comb's one cleanup rule (S2, KC5 and PA4 of r22): what a run makes outside itself (a scratch
+ * comb's one cleanup rule: what a run makes outside itself (a scratch
  * directory, a replay database) is held here until the run lets it go, and SIGINT or SIGTERM runs
  * every step still held before the process ends as the signal would. A scratch directory is named
  * for the process that made it, so a later run removes one a killed process left at once, by

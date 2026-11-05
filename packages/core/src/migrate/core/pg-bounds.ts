@@ -1,5 +1,5 @@
 /**
- * What a Postgres history proves of a partition's rows before an ATTACH PARTITION (PA16 of r22b):
+ * What a Postgres history proves of a partition's rows before an ATTACH PARTITION:
  * Postgres 17 skips the scan of the partition when its validated CHECK constraints and NOT NULL
  * columns imply the partition constraint (PartConstraintImpliedByRelConstraint, which logs "partition
  * constraint for table … is implied by existing constraints" at DEBUG1). comb proves the implication
@@ -10,7 +10,7 @@
  * for text and varchar). A CHECK counts only when every term of it is such a comparison of the key
  * column, so nothing but a change of that column or its own drop removes it; a term on another column
  * would fall with that column, which a DROP … CASCADE of its type, domain, collation, schema or
- * function drops (AE2-1 of r22). NOT VALID and NO INHERIT ones do not count
+ * function drops. NOT VALID and NO INHERIT ones do not count
  * until a VALIDATE. A DROP CONSTRAINT, DROP NOT NULL, or a drop, retype or rename of a column forgets
  * what the history proved of the table and every table under it, which inherit the change.
  *
@@ -286,7 +286,7 @@ function boundImplied(
 	/* a bound of another strategy than the parent's, a hash or default one among them, is one Postgres refuses */
 	if (key === undefined || bound["strategy"] !== strategy) return false
 	if (proof === undefined || pattern === undefined || !bare(facts, parent)) return false
-	/* a CHECK naming another column falls with that column, which a DROP … CASCADE of its type may take (AE2-1 of r22) */
+	/* a CHECK naming another column falls with that column, which a DROP … CASCADE of its type may take */
 	const terms = proof.checks
 		.filter((check) => check.valid && check.terms.every((term) => term.column === key))
 		.flatMap((check) => check.terms)

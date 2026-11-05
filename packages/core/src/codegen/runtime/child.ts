@@ -57,7 +57,7 @@ const COMB_SRC = /* @__PURE__ */ path.resolve(import.meta.dirname, "../..")
 /**
  * The first frame of `error`'s stack in the project's own code, `file:line:col`: past comb's own
  * source, a package and node's internals, so a throw in a module the tables file imports names
- * that module (F64); undefined when no frame is the project's
+ * that module; undefined when no frame is the project's
  */
 function projectFrame(error: unknown): string | undefined {
 	const stack = error instanceof Error ? (error.stack ?? "") : ""

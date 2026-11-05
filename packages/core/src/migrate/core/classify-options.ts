@@ -1,6 +1,6 @@
 /**
  * The options classifyMigration, parseMigration and extractDropStatements take, checked as they are
- * given (S1n of plan 21): 0.21 took `kind` in place of 0.20's `d1: true`, and an options object that
+ * given: 0.21 took `kind` in place of 0.20's `d1: true`, and an options object that
  * also sets another field compiles, as JavaScript takes anything, so `d1` was read as unset and a D1
  * file classified as a local SQLite file's. An option an entry does not take is refused, named, with
  * the ones it does.

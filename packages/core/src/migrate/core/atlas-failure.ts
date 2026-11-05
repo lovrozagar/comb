@@ -8,7 +8,7 @@
 
 /**
  * A statement Atlas names as the one that failed, without its own `;`, which reads as part of the
- * sentence comb puts it in (P17 of the 0.15.0 review, PA20)
+ * sentence comb puts it in
  */
 const failedStatement = (stmt: string): string => stmt.replace(/;\s*$/, "")
 
@@ -19,7 +19,7 @@ const NOT_CLEAN =
 /**
  * comb's answer to a database Atlas calls not clean, undefined for any other failure. Atlas snapshots
  * the dev database before it replays on it: not clean there is the dev database's, as is any on a
- * call that reached no other database (P3 of the 0.15.0 review, and its rerun on the RC); else the target's
+ * call that reached no other database; else the target's
  */
 function notClean(stderr: string, scrub: (text: string) => string, devOnly: boolean): string | undefined {
 	const dev = devOnly
@@ -41,7 +41,7 @@ const FIXED: ReadonlyArray<readonly [RegExp, string]> = [
 		/lock is held by other session/,
 		"another migrate apply is running on this database; run it again once that one finishes",
 	],
-	/* P19 of r18: Atlas's driver requires TLS where a URL names no sslmode, as comb's own reads now do */
+	/* Atlas's driver requires TLS where a URL names no sslmode, as comb's own reads now do */
 	[
 		/SSL is not enabled on the server/,
 		"the server takes no TLS, which Atlas and comb require where a URL names no sslmode; set sslmode=disable on the URL of a server without TLS",
@@ -62,7 +62,7 @@ function explainAtlasFailure(
 	if (fixed !== undefined) return fixed[1]
 	const unclean = notClean(stderr, scrub, devOnly)
 	if (unclean !== undefined) return unclean
-	/* Atlas is scoped to the schema and inspects it before anything runs, so no migration can create it (P15) */
+	/* Atlas is scoped to the schema and inspects it before anything runs, so no migration can create it */
 	const missing = scrub(/schema "([^"]+)" was not found/.exec(stderr)?.[1] ?? "")
 	if (missing !== "")
 		return `schema ${missing} does not exist on the target; create it once (CREATE SCHEMA ${missing}) before the first apply`

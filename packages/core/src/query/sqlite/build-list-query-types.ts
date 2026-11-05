@@ -20,7 +20,6 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	cursorSecret: string
 	/** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL, as on `CursorOptions` */
 	nonFinite?: "exact" | undefined
-	// K5 of r17
 	/**
 	 * Present for a list whose rows sit on several D1 shards: every shard reads it with this one
 	 * query, and `paginateMerged` merges what they read. A page by number reads every row to its end
@@ -50,7 +49,6 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	cursorScope: string
 	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
 	cursorSecret: string
-	// Q1 of r21
 	/**
 	 * the database the list reads, needed only where its id and keys hold no column: a column says it
 	 * wherever it sits, and a list of SQL expressions alone (a union, say) cannot
@@ -58,7 +56,6 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	dialect?: "postgres" | "sqlite" | undefined
 	/** the request's filter as SQL, lowered by your code; null or absent filters nothing */
 	filterWhere?: SQL | null | undefined
-	// Q12 of r18
 	/**
 	 * Present when the rows come from several shards, which `paginateMerged` merges, as on
 	 * `buildListQuery`: each shard reads its window, an offset page its count. A merged derived list
@@ -87,7 +84,6 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	>
 } & (
 	| {
-			// C3
 			/**
 			 * the one table the rows are, by its id column: a sort key too long for a cursor is
 			 * carried by reference and read back from it, as on a table's own list
@@ -109,25 +105,20 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	  }
 )
 
-// Q2
 /**
  * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
  * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them
  */
 /* each key absent or set, never undefined, so the extras go on to drizzle's select as they are */
 type ListExtras = Partial<{
-	// U26
 	/** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers with a 400 invalid_cursor */
 	_combAnchorGone: SQL.Aliased<number>
 	/** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
 	_combId: SQL.Aliased<unknown>
-	// Q2 of r19, Q2 of r21
 	/** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression */
 	_combKeyTypes: SQL.Aliased<string>
-	// QL2 of r22b
 	/** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds */
 	_combKeyTexts: SQL.Aliased<string>
-	// B2-3 of area B
 	/** each SQLite timestamp key's TEXT where the list reads it back and the row holds TEXT, a JSON array with null for any other key */
 	_combTextKeys: SQL.Aliased<string>
 	/** an offset page's count of every row the filter matches; a cursor page selects none */
@@ -164,7 +155,6 @@ type ListQueryResult = {
 	where: SQL | undefined
 }
 
-// K8 of r17
 /** A merged list's query, which every shard reads and `paginateMerged` alone pages; each shard reads from its first row, so `offset` is 0 */
 type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
 	/** How `paginateMerged` pages the rows every shard reads */

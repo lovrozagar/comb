@@ -1,7 +1,7 @@
 /**
  * Minting a cursor that `readCursor` will open: one whose sealed length stays within
- * MAX_CURSOR_LENGTH, a value too long for it carried by reference (R8, cursor-ref.ts) on a table's
- * list, and refused on a derived list, which no row holds to read a reference back from (U37).
+ * MAX_CURSOR_LENGTH, a value too long for it carried by reference (cursor-ref.ts) on a table's
+ * list, and refused on a derived list, which no row holds to read a reference back from.
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
@@ -64,12 +64,10 @@ function createCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
 	options: CursorOptions & {
-		// QL1 of r22b
 		/** the sort fields the list binds as the row read them, with no row to read a bound from; every one on a derived list */
 		asRead?: ReadonlySet<string> | undefined
 		/** the sort fields a long value of may go by reference to its row; every one when not given */
 		byReference?: ReadonlySet<string> | undefined
-		// AB2 ruling
 		/** the sort fields whose value in `row` is the key's stored text, which the next page binds as itself */
 		carried?: ReadonlySet<string> | undefined
 		/** the field of `row` that holds the tiebreak id; default `id` */
@@ -81,7 +79,7 @@ function createCursor(
 	return fitCursor(row, sort, options)
 }
 
-// B2-6 and AB3-3 of area B: paginate mints through here so readCursor returns the value its row read
+// Paginate mints through here so readCursor returns the value its row read
 /**
  * createCursor for the row paginate typed, bound by its stored values: `read` is the row as the driver
  * read it, whose value readCursor returns for a key bound otherwise
@@ -94,7 +92,7 @@ function fitCursor(
 	return fittedCursor(row, sort, options)()
 }
 
-// AB4-3 of area B: paginate runs it on every row it serves, so a row no cursor holds is refused wherever it lands
+// Paginate runs it on every row it serves, so a row no cursor holds is refused wherever it lands
 /**
  * fitCursor's every refusal of `row`, run with no seal, and what seals its cursor: the cap is measured
  * on the plaintext (sealedLength), so a page checks each row it serves and seals the last alone
@@ -103,16 +101,15 @@ function fittedCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
 	options: Parameters<typeof fitCursor>[2] & {
-		// AB4-1 of area B
 		/** the open's column check, run on the record sealed; none on a row no builder read */
 		holds?: ColumnCheck | undefined
 	},
 ): () => string {
-	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one (QL1 of r22b) */
+	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one */
 	const derived = options?.keyset === "derived"
 	const asRead = (field: string) => derived || (options?.asRead?.has(field) ?? false)
 	refuseInvalidDate(row, sort, { asRead, derived })
-	/* a key bound as the driver read it skips rows or repeats one once rounded (Q1 of r19, QL1 of r22b) */
+	/* a key bound as the driver read it skips rows or repeats one once rounded */
 	const rounded = roundedKey(row, sort, derived ? "derived" : { unread: asRead })
 	if (rounded !== undefined) throw rounded
 	/* options a JS caller left out are refused by seal, by name */
@@ -140,7 +137,7 @@ function fittedCursor(
 		.map(({ field }) => field)
 		.filter((field) => typeof row[field] === "string" && (options.byReference?.has(field) ?? true))
 		.sort((a, b) => (row[b] as string).length - (row[a] as string).length)
-	/* a long value no reference reads back is refused here, on the page that meets it, never minted to be refused (27.7) */
+	/* a long value no reference reads back is refused here, on the page that meets it, never minted to be refused */
 	const unread = sort.some(({ field }) => typeof row[field] === "string" && options.byReference?.has(field) === false)
 	if (long.length === 0 && unread) throw tooLong(fields, length, "unread")
 	let record = row
@@ -152,7 +149,7 @@ function fittedCursor(
 	throw tooLong(fields, length, "table")
 }
 
-/** A 500 naming a key bound as read (`at.asRead`) whose row read an Invalid Date, which no cursor binds; a date-mode ±infinity is bounded from its row (3.24) */
+/** A 500 naming a key bound as read (`at.asRead`) whose row read an Invalid Date, which no cursor binds; a date-mode ±infinity is bounded from its row */
 function refuseInvalidDate(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],

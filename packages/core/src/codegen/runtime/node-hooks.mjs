@@ -48,7 +48,7 @@ export function resolveSync(specifier, context, nextResolve) {
 }
 
 /**
- * A TypeScript file in the format node itself gives it, transpiled to that format (F54); anything
+ * A TypeScript file in the format node itself gives it, transpiled to that format; anything
  * else as node loads it
  * @param {string} url
  * @param {unknown} context

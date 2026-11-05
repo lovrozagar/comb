@@ -1,9 +1,9 @@
 /**
- * A Postgres EXECUTE read from its parse tree, as the pinned Atlas runs it (PA15 of r22b,
- * tests/integration/postgres/copy-execute-oracle.test.ts). Postgres runs an EXECUTE wherever it
- * stands, bare, under a CREATE TABLE AS or an EXPLAIN ANALYZE (AE2-2 of r22), so each is rated by
+ * A Postgres EXECUTE read from its parse tree, as the pinned Atlas runs it
+ * (tests/integration/postgres/copy-execute-oracle.test.ts). Postgres runs an EXECUTE wherever it
+ * stands, bare, under a CREATE TABLE AS or an EXPLAIN ANALYZE, so each is rated by
  * the query its file prepared under that name. comb's apply runs one Atlas call per file
- * (atlas-apply-runs.ts), so an earlier file's PREPARE never reaches it (AE2-9 of r22): one whose name
+ * (atlas-apply-runs.ts), so an earlier file's PREPARE never reaches it: one whose name
  * nothing before it in its file prepared fails the file, unless a statement before it ran user code,
  * which may PREPARE any name. A refusal is as sound as a rating, so comb refuses no file Postgres
  * runs: a DML statement fires triggers, a DDL statement fires event triggers (under a CREATE TABLE
@@ -16,8 +16,8 @@ import { kindOf, tagOf } from "./pg-events.ts"
 import { names, type Node, nodesOf } from "./pg-nodes.ts"
 
 /**
- * Every node of `stmts`, a statement's parse trees: a PREPARE as itself, never as the query it holds
- * (P21 of r19), and each EXECUTE followed by the nodes of the query `preparing` holds under its name.
+ * Every node of `stmts`, a statement's parse trees: a PREPARE as itself, never as the query it holds,
+ * and each EXECUTE followed by the nodes of the query `preparing` holds under its name.
  * A prepared query holds no PREPARE, so one level reads it whole
  */
 const executedNodes = (

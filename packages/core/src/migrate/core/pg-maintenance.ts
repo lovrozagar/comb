@@ -1,8 +1,8 @@
 /**
- * The maintenance commands that hold an exclusive lock while they run, read from their parse trees
- * (P7 of the 0.14.1 review), so every spelling Postgres takes is warned of: a VACUUM with FULL on,
+ * The maintenance commands that hold an exclusive lock while they run, read from their parse trees,
+ * so every spelling Postgres takes is warned of: a VACUUM with FULL on,
  * a REINDEX or REFRESH MATERIALIZED VIEW that is not concurrent, CLUSTER, a LOCK that blocks writes, and
- * an ATTACH PARTITION, which scans the partition (P1 of the 0.15.0 review).
+ * an ATTACH PARTITION, which scans the partition.
  */
 import type { Finding } from "./classify-alter.ts"
 import { boundImplied } from "./pg-bounds.ts"
@@ -26,7 +26,7 @@ const turnsOn = (options: unknown, name: string): boolean =>
 /**
  * An ATTACH PARTITION's finding: Postgres checks every row of `partition` against its bound under
  * ACCESS EXCLUSIVE, and every row of the parent's default partition, when it has one, against the
- * bound too (P12 of r18); a default partition's rows against every other bound (P20 of r19). `defaulted`
+ * bound too; a default partition's rows against every other bound. `defaulted`
  * names the parent's default partition, or is "default" when `partition` attaches as it
  */
 function attachFindings(partition: string, defaulted?: string): Finding[] {
@@ -34,8 +34,8 @@ function attachFindings(partition: string, defaulted?: string): Finding[] {
 }
 
 /**
- * An ATTACH whose bound the history's validated CHECKs on `partition` imply, so Postgres skips its scan
- * (PA16 of r22b): nothing, or the scan of the parent's default partition `defaulted`, which Postgres
+ * An ATTACH whose bound the history's validated CHECKs on `partition` imply, so Postgres skips its scan:
+ * nothing, or the scan of the parent's default partition `defaulted`, which Postgres
  * still checks for rows the bound takes
  */
 const impliedFindings = (partition: string, defaulted: string | undefined): Finding[] =>
@@ -64,7 +64,7 @@ function attachedFindings(cmd: Node, parent: string, facts: Facts): Finding[] {
 
 /** What an ATTACH of `partition` scans, and how to have it scan nothing; `defaulted` is "default" when it attaches as the default */
 function attachNote(partition: string, defaulted: string | undefined): string {
-	/* a default partition has no bound: Postgres checks that no row of it falls in another partition's (P20 of r19) */
+	/* a default partition has no bound: Postgres checks that no row of it falls in another partition's */
 	if (defaulted === "default")
 		return `scans ${partition} under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to ${partition} that excludes every other partition's bound NOT VALID, VALIDATE it in a later file, then ATTACH`
 	if (defaulted === undefined)
@@ -112,16 +112,16 @@ const PREPARES: Finding = {
 /**
  * A maintenance or locking statement's lock finding; undefined for a statement that is none. A
  * REFRESH MATERIALIZED VIEW that is not concurrent holds ACCESS EXCLUSIVE on its view, and a LOCK
- * what its mode takes (P1 of the 0.15.0 review)
+ * what its mode takes
  */
 function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "VacuumStmt") return turnsOn(node["options"], "full") ? [LOCKED] : []
 	if (type === "ReindexStmt") return turnsOn(node["params"], "concurrently") ? [] : [LOCKED]
 	if (type === "RefreshMatViewStmt") return flag(node["concurrent"]) ? [] : [LOCKED]
 	if (type === "LockStmt") return lockFindings(node)
-	/* a PREPARE runs nothing itself: the EXECUTE that runs it is rated by what it runs (P21 of r19) */
+	/* a PREPARE runs nothing itself: the EXECUTE that runs it is rated by what it runs */
 	if (type === "PrepareStmt") return [PREPARES]
-	/* an EXECUTE is the statement the file prepared, or one comb cannot read (pg-tree.ts, PA15 of r22b) */
+	/* an EXECUTE is the statement the file prepared, or one comb cannot read (pg-tree.ts) */
 	if (type === "ExecuteStmt") return []
 	if (type === "CopyStmt") return copyFindings(node)
 	return type === "ClusterStmt" ? [LOCKED] : undefined

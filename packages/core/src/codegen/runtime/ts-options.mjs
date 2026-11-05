@@ -10,8 +10,8 @@ import { ts } from "ts-morph"
 
 /**
  * The compiler options the tsconfig nearest `from` sets, as the consumer wrote them; none when
- * there is no tsconfig. What the consumer's TypeScript takes of comb's output is read from these
- * (F53), never from the defaults comb reads files with
+ * there is no tsconfig. What the consumer's TypeScript takes of comb's output is read from these,
+ * never from the defaults comb reads files with
  * @param {string} from
  * @returns {import("ts-morph").ts.CompilerOptions}
  */
@@ -125,8 +125,8 @@ function hasModuleSyntax(fileName, source) {
 
 /**
  * Whether node runs `file` as CommonJS, as it decides under type stripping: a .cjs or .cts file, one
- * of a package whose type is "commonjs", or one of a package with no type that has no module syntax
- * (F54); `source` is the file's text
+ * of a package whose type is "commonjs", or one of a package with no type that has no module syntax;
+ * `source` is the file's text
  * @param {string} file
  * @param {string} source
  * @returns {boolean}

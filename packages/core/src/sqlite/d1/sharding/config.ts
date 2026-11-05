@@ -1,5 +1,5 @@
 /**
- * The router's settings, checked when it is built (U39): a shard count or a cap that is no
+ * The router's settings, checked when it is built: a shard count or a cap that is no
  * positive integer would answer every allocation `shards_full`, a config error reported as
  * capacity, and a KV TTL under KV's 60-second floor fails every put, so KV would cache nothing.
  */

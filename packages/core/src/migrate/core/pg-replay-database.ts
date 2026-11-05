@@ -1,21 +1,21 @@
 /**
- * The database the dev replay runs in (P1 ⊃ P2 of r20): made on devUrl's server from template0 for
+ * The database the dev replay runs in: made on devUrl's server from template0 for
  * one replay and dropped after it, so the history runs file by file, committed, as Atlas applies it,
  * and nothing devUrl's own database holds changes the verdict. devUrl's installed extensions are
  * copied in first, each in its schema at its version, as Atlas replays in devUrl's database as it
- * is, but for one a replayed file creates, which the file makes where it says (P5 of r21). The
+ * is, but for one a replayed file creates, which the file makes where it says. The
  * roles it makes are pg-replay-roles.ts's.
  *
  * Postgres records no owner for a database or a role a session made, so the database's name and a
- * role's tag carry the backend that made them, its pid and its start (P2 of r21), and a run drops
+ * role's tag carry the backend that made them, its pid and its start, and a run drops
  * those whose backend is gone: what a killed run left goes on the next run, and a live run's is
  * never touched. A replay's connections carry its owner as their application_name, and on
  * Postgres 14 and later check every second that their client is there, so a run killed past its
- * cleanup leaves no statement running for long, and the sweep ends one that is left before it drops
- * (P4 of r22). Every replay database the sweep's role may drop is dropped, whichever role made it
- * (PR8 of r22b), but one with any other session in it, a person's psql among them, as a plain DROP
+ * cleanup leaves no statement running for long, and the sweep ends one that is left before it drops.
+ * Every replay database the sweep's role may drop is dropped, whichever role made it,
+ * but one with any other session in it, a person's psql among them, as a plain DROP
  * DATABASE fails after 5 s with another backend in it; and only tagged roles, none that still owns
- * anything. A drop that fails never decides the verdict (P4 of r21), and is said, never left unsaid:
+ * anything. A drop that fails never decides the verdict, and is said, never left unsaid:
  * what it left, dev's error, and whether a later run's sweep takes it.
  * 0.19 marked its databases and roles with the run's start alone; those go once they are an hour
  * old.
@@ -53,7 +53,7 @@ const CHECKS_CLIENT = 140_000
 
 /**
  * The backend `admin` runs on, as a replay's database name and role tag carry it, `<pid>_<start>`,
- * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
+ * and the settings a replay connection takes: that owner as its application_name, by
  * which the sweep finds a killed replay's backends, and on Postgres 14 and later a check every
  * second that its client is there, by which Postgres ends their statement itself; `admin` takes them
  * too. Its server's version comes with them
@@ -98,7 +98,7 @@ type Leftovers = { databases: Array<{ name: string; pids: unknown[]; template: b
 /**
  * What replays over at `now` left on `sql`'s server, which a sweep takes: the replay databases of
  * any role, or only those `sql`'s role may drop (`droppable`), but one with a session in it other
- * than the backends its own replay left (P4 of r22), and the tagged roles
+ * than the backends its own replay left, and the tagged roles
  */
 async function leftovers(sql: Sql, now: number, droppable: boolean): Promise<Leftovers> {
 	const sessions = await sql.unsafe(SESSIONS, [])
@@ -165,8 +165,8 @@ const EXTENSIONS =
 
 /**
  * The extensions the history `texts` create with a plain CREATE EXTENSION, the one statement that
- * needs its extension absent, which the replay leaves them to make (P5 of r21); one a file creates IF
- * NOT EXISTS is copied, as a platform installs it on the target (PR1 of r22b)
+ * needs its extension absent, which the replay leaves them to make; one a file creates IF
+ * NOT EXISTS is copied, as a platform installs it on the target
  */
 const extensionsOf = (texts: readonly string[]): Set<string> =>
 	new Set(
@@ -199,7 +199,7 @@ async function makeExtension(
 /**
  * Every extension `from` holds made in `to`, in its schema at its version, but those the history
  * `makes`; one `to` cannot make is `refused`. One that requires an extension the history makes waits
- * for it (PR1 of r22b): what is returned makes, in a later session, each waiting extension whose every
+ * for it: what is returned makes, in a later session, each waiting extension whose every
  * requirement that session's database now holds, so the replay calls it after each CREATE EXTENSION
  */
 async function copyExtensions(

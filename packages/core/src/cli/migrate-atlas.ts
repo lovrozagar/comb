@@ -29,7 +29,7 @@ export async function migratePostgres(
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
 		)
 	refuseNoDir(target.migrationsDir)
-	/* where init's starter reads the url, which an unset DATABASE_URL leaves blank (KC7 of r22b) */
+	/* where init's starter reads the url, which an unset DATABASE_URL leaves blank */
 	refuseBlank(target, { url: target.provider.url }, "; init's starter reads it from DATABASE_URL")
 	/* status alone never reaches the dev database */
 	if (mode !== "status") refuseBlank(target, { devUrl: target.provider.devUrl })
@@ -44,7 +44,7 @@ export async function migratePostgres(
 		target: target.provider,
 	}
 	if (mode === "baseline") {
-		/* baseline replays the history as the statements Postgres runs (M75) */
+		/* baseline replays the history as the statements Postgres runs */
 		await loadPostgresParser()
 		io.out(`\nBaseline done: ${(await baselineWithAtlas(options)).length} marked`)
 		return { applied: [], pending: [] }

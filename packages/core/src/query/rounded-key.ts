@@ -1,11 +1,11 @@
 /**
  * An integer sort key a driver read as a number past ±(2^53 − 1) is already rounded. A list that binds
- * the key as read cannot page it: a derived list with no anchor row to read the exact key back from
- * (Q1 of r19), and a merged list, whose shards' keys that round to one double compare equal (Q2 of r18).
+ * the key as read cannot page it: a derived list with no anchor row to read the exact key back from,
+ * and a merged list, whose shards' keys that round to one double compare equal.
  * A SQLite REAL and a Postgres double precision are doubles, so one past 2^53 is exact: the key's class,
- * which the builder selects as `_combKeyTypes`, decides (Q1 of r20, Q2 of r21), and only where none was
+ * which the builder selects as `_combKeyTypes`, decides, and only where none was
  * selected does the value alone. A class is trusted only when it names a double, so one comb cannot
- * place, such as a type no family covers, is refused as an integer is (Q1 of r22).
+ * place, such as a type no family covers, is refused as an integer is.
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
@@ -21,7 +21,7 @@ const ROUNDED: Readonly<Record<"derived" | "merged" | "unread", string>> = {
 		"the key is no column of the anchor table, nor an expression over its columns alone, so no row reads the exact key back: sort by a column of the anchor table, keep it within ±(2^53 − 1), or read it as bigint",
 }
 
-// lookup-table: why a list cannot page a fraction the driver may have rounded, by the list (QL3 of r22b)
+// lookup-table: why a list cannot page a fraction the driver may have rounded, by the list
 const FRACTION: Readonly<Record<"derived" | "merged" | "unread", string>> = {
 	derived: "a derived list has no row to read the exact key back from",
 	merged: "a merged list compares the keys as the driver read them",
@@ -29,15 +29,15 @@ const FRACTION: Readonly<Record<"derived" | "merged" | "unread", string>> = {
 }
 
 /**
- * The 500 for `row`'s first sort key the driver may have rounded, on a list that cannot page it (Q2
- * of r18, Q1 of r19): every key of a derived or a merged list, and of an anchored list the keys
- * `unread` names, which its anchor row doesn't supply (QL1 of r22b); none where every such key is
+ * The 500 for `row`'s first sort key the driver may have rounded, on a list that cannot page it:
+ * every key of a derived or a merged list, and of an anchored list the keys
+ * `unread` names, which its anchor row doesn't supply; none where every such key is
  * exact. A bigint, a safe integer and ±Infinity or NaN are exact, and so is a number SQLite stored
- * as a REAL (Q1 of r20) or Postgres typed a double precision or real (Q2 of r21). Under any other
- * class, an integer past ±(2^53 − 1) is not, and so is a fraction (QL3 of r22b), but under an
+ * as a REAL or Postgres typed a double precision or real. Under any other
+ * class, an integer past ±(2^53 − 1) is not, and so is a fraction, but under an
  * integer or a fixed class: no driver reads an integer type as a fraction, so one there is the app's
- * mapper's, a customType in cents, which the cursor binds back through its `toDriver` (B2-2 of area
- * B). A Postgres numeric, the one fixed type that holds a fraction, carries its text instead
+ * mapper's, a customType in cents, which the cursor binds back through its `toDriver`.
+ * A Postgres numeric, the one fixed type that holds a fraction, carries its text instead
  * (`_combKeyTexts`), so no number of one reaches here; with no class, only the integer is known
  * rounded.
  */
@@ -52,10 +52,10 @@ function roundedKey(
 		if (!judged(field)) return false
 		const value = row[field]
 		if (typeof value !== "number" || !Number.isFinite(value) || Number.isSafeInteger(value)) return false
-		/* with no class, only an integer past 2^53 is known rounded; under one, any number but a double's may be (QL3 of r22b) */
+		/* with no class, only an integer past 2^53 is known rounded; under one, any number but a double's may be */
 		if (stored === undefined) return Number.isInteger(value)
 		if (stored[i] === "real" || stored[i] === "float") return false
-		/* no driver reads an integer type as a fraction: one under it is the app's mapper's, bound back through its toDriver (B2-2 of area B) */
+		/* no driver reads an integer type as a fraction: one under it is the app's mapper's, bound back through its toDriver */
 		return Number.isInteger(value) || (stored[i] !== "integer" && stored[i] !== "fixed")
 	})
 	if (rounded === undefined) return undefined

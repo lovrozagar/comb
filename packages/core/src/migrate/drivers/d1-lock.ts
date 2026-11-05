@@ -3,7 +3,7 @@
  * out, and a failed apply names it.
  */
 
-/** how long a --local command waits out another process's lock on the local D1 file: BUSY_TIMEOUT's window for a SQLite file (SL4 of r22) */
+/** how long a --local command waits out another process's lock on the local D1 file: BUSY_TIMEOUT's window for a SQLite file */
 export const LOCAL_LOCK_MS = 5000
 
 /**

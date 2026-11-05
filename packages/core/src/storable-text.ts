@@ -1,14 +1,14 @@
 /**
  * Text every engine stores as sent. No engine does with U+0000 or a lone UTF-16 surrogate: jsonb
  * refuses both, Postgres text refuses U+0000 and takes a lone surrogate as U+FFFD, libsql cuts at
- * U+0000, and bun:sqlite reads a lone surrogate back as other text (F11). Generated write DTOs hold
+ * U+0000, and bun:sqlite reads a lone surrogate back as other text. Generated write DTOs hold
  * every text to it through `isStorableText`, so the rule has one source; `storableText()` gives an
- * app's own schema the same rule (G1). A refine, never a pattern: published as one, Go's and Rust's
- * engines refuse \u and a surrogate, and a field's own pattern would move into an allOf (F56).
+ * app's own schema the same rule. A refine, never a pattern: published as one, Go's and Rust's
+ * engines refuse \u and a surrogate, and a field's own pattern would move into an allOf.
  */
 import * as z from "zod"
 
-// F56: a refine, never a pattern
+// A refine, never a pattern
 /** The `x-comb-text` value a storable text schema publishes in JSON Schema, which names the rule a pattern cannot express */
 export const STORABLE_TEXT_RULE = "no U+0000 or unpaired surrogate"
 

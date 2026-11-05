@@ -11,7 +11,7 @@ function constraintsOf(raw: unknown, at: string): Record<string, boolean | numbe
 		if (value === undefined) continue
 		if (typeof value !== "boolean" && typeof value !== "number" && typeof value !== "string")
 			throw new Error(`${at}: the constraint ${key} is a ${typeof value}; comb reads a boolean, a number or a string`)
-		/* JSON carries no NaN or Infinity: the snapshot would hold null, and the bound would drop without a word (F60) */
+		/* JSON carries no NaN or Infinity: the snapshot would hold null, and the bound would drop without a word */
 		if (typeof value === "number" && !Number.isFinite(value))
 			throw new Error(
 				`${at}: the constraint ${key} is ${value}, no finite number; a bound read from the environment is NaN in codegen's child, which has none of it`,
@@ -28,7 +28,7 @@ const STATE_KEYS = ["initial", "terminal", "transitions", "values"]
 type Fill = { default?: unknown; defaultFn?: unknown; onUpdateFn?: unknown }
 
 /**
- * A state column's fill is its machine's `initial`, the value a row starts at (CD4 of r22b): a
+ * A state column's fill is its machine's `initial`, the value a row starts at: a
  * literal default other than it, or a fill comb cannot read as a value, is an error naming the column;
  * a machine that declares no `initial` starts anywhere
  */
@@ -51,14 +51,14 @@ function refuseOtherStart(initial: string | null, fill: Fill, at: string): void 
  */
 function statesOf(raw: unknown, at: string, fill: Fill = {}): SnapshotComb["states"] {
 	if (raw === undefined) return null
-	/* a misspelt key would leave its part of the machine unread (F9) */
+	/* a misspelt key would leave its part of the machine unread */
 	const unknown = Object.keys(raw as object).find((key) => !STATE_KEYS.includes(key))
 	if (unknown !== undefined)
 		throw new Error(
 			`${at}: its state machine has ${unknown}, which is none of initial, terminal, transitions and values`,
 		)
 	const { initial, terminal, transitions } = raw as Record<string, unknown>
-	/* an entry set to undefined is the key left out, as canTransition reads it (D2-3 of the area D round-two review) */
+	/* an entry set to undefined is the key left out, as canTransition reads it */
 	const map =
 		transitions === undefined
 			? undefined
@@ -113,11 +113,11 @@ function changesValue(schema: unknown): boolean {
 
 /**
  * A c.json column's schema is the stored document: the write DTOs store its output and the read DTO
- * parses the stored row with it (CD2 of r22b), so one whose output its input refuses is an error
+ * parses the stored row with it, so one whose output its input refuses is an error
  * naming the column; and a NOT NULL column of one value refuses a schema that takes null, whose
- * write DTO would take a body the insert fails (CD3, the sibling of r19 C5), as does one that takes
- * undefined where no default fills the column, a body that leaves the field out (AA4 of area A's
- * review). `notNull` is false for a Postgres array of documents, which holds null elements whatever
+ * write DTO would take a body the insert fails, as does one that takes
+ * undefined where no default fills the column, a body that leaves the field out.
+ * `notNull` is false for a Postgres array of documents, which holds null elements whatever
  * the column's own NOT NULL; `filled` says a default fills the column
  */
 function refuseJsonDocument(

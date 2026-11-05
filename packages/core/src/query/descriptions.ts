@@ -42,10 +42,9 @@ export type ParamMeta = {
 
 /*
  * A cursor publishes no example: it is sealed under the app's secret and the list's scope, so no
- * value opens on every endpoint, and one sealed under any other is an invalid_cursor (CS7 of r22b).
+ * value opens on every endpoint, and one sealed under any other is an invalid_cursor.
  */
 
-// QL8 of r22b
 /** The `limit` param's OpenAPI text, stating the endpoint's default and cap, which are its examples */
 function limitParamMeta(
 	defaultLimit: number,
@@ -62,7 +61,6 @@ function limitParamMeta(
 	}
 }
 
-// CS7, QL8 of r22b
 /**
  * The `select` param's OpenAPI text, listing the fields and relations `fields` declares. Its examples
  * are the first scalars, one relation with one of its fields when one has any, and `*`
@@ -155,7 +153,7 @@ function orderParamMeta(
 			`Sortable: ${sort.join(", ")}. Default: ${first}.desc.`,
 			"Nulls sort last ascending and first descending unless stated.",
 		].join(" "),
-		/* a second key only where the endpoint takes two (QL8 of r22b) */
+		/* a second key only where the endpoint takes two */
 		examples: second
 			? [`${first}.desc`, maxSortKeys > 1 ? `${second}.asc,${first}.desc` : `${second}.asc`]
 			: [`${first}.desc`, `${first}.asc`],

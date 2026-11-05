@@ -3,7 +3,7 @@
  * OSS will not take a view or an extension in what it loads, but what comes after one may depend on
  * it (a LANGUAGE sql body reading a view, a SETOF it, a column of its row type, a view over an
  * extension's function). Each is handed to the dev database in a DO block, which Atlas runs and its
- * OSS inspection does not read (P4 of r19).
+ * OSS inspection does not read.
  */
 
 /** `sql` inside a DO block, under a dollar tag `sql` does not hold */

@@ -1,5 +1,5 @@
 /**
- * The seed's foreign keys (SD1 of r22, 8.4): each table's keys as SQLite reads them, the tables grouped by cycles of
+ * The seed's foreign keys: each table's keys as SQLite reads them, the tables grouped by cycles of
  * keys with each group's parents first, and a cycle's keys closed once the tables they point at are seeded
  */
 import type { LocalDb } from "../drivers/local-db.ts"

@@ -21,12 +21,12 @@ function required(expression: ts.Expression | undefined): string | undefined {
 
 /**
  * The specifiers `file` loads as soon as it runs, read from the module it transpiles to, so an
- * import only types use, however written, loads nothing, as at runtime (F42a): its import and
+ * import only types use, however written, loads nothing, as at runtime: its import and
  * re-export declarations (an `import x = require`, no ES module syntax, transpiles to nothing), and
  * in a CommonJS file the `require("…")` its top-level statements make,
  * that file's static imports. An `import()` anywhere, and a `require()` inside a function, a
- * condition or a callback, loads its module only when that code runs, so it is no import here
- * (F44): codegen loads every project file this walk finds, to find the tables and enum lists they
+ * condition or a callback, loads its module only when that code runs, so it is no import here:
+ * codegen loads every project file this walk finds, to find the tables and enum lists they
  * hold, and a module it loads runs. A missed edge leaves a table or a list codegen cannot name.
  */
 function runtimeSpecifiers(file: string): string[] {
@@ -52,14 +52,14 @@ function runtimeSpecifiers(file: string): string[] {
 	return out
 }
 
-/* the sources a runtime runs; a JSON or other asset a module imports holds no table, and is no TypeScript to read (F52) */
+/* the sources a runtime runs; a JSON or other asset a module imports holds no table, and is no TypeScript to read */
 const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/
 
 /**
  * The file the runtime loads for a project file TypeScript resolved: a source as it is, and a
  * declaration file's runtime file beside it (`.d.ts` describes the `.js`, `.d.mts` the `.mjs`,
  * `.d.cts` the `.cjs`), as checked-in generated code ships; undefined for an asset, or a
- * declaration with no runtime file (F52)
+ * declaration with no runtime file
  */
 function runtimeFile(resolved: string): string | undefined {
 	const declaration = /\.d(\.[cm]?)ts$/.exec(resolved)

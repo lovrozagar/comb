@@ -66,7 +66,7 @@ function readGuards(
 			)
 		}
 		const current = guardOf(rebuild, schema)
-		/* a file that deferred its keys before the drop holds the guard without its pragma (M48), or with it, as 0.13 wrote it */
+		/* a file that deferred its keys before the drop holds the guard without its pragma, or with it, as 0.13 wrote it */
 		const forms = [
 			...(deferredAt(codes, rebuild.drop) ? [guardOf(rebuild, schema, { deferred: true })] : []),
 			current,

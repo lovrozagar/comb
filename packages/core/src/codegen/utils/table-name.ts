@@ -1,5 +1,5 @@
 /**
- * A table's names where a Postgres schema is set (F51): two tables of one name in two schemas,
+ * A table's names where a Postgres schema is set: two tables of one name in two schemas,
  * Supabase's auth.users beside the app's own users, are two tables, so each is named with its
  * schema wherever comb keys or publishes it, and plainly where none is set.
  */

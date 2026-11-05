@@ -46,8 +46,8 @@ function stripMeta(zodType: string): [string, string] {
 
 /**
  * `zodType` split into its layers: the base, `.nullable()` (the keys before it, on its member, so
- * `.unwrap()` keeps them: C1 of r20), the `x-comb-*` keys, which finish writes after it so they
- * publish beside the anyOf (C4 of r19), then `.optional()`. The keys stay with the field, so a core
+ * `.unwrap()` keeps them), the `x-comb-*` keys, which finish writes after it so they
+ * publish beside the anyOf, then `.optional()`. The keys stay with the field, so a core
  * is shared whatever keys its columns publish
  */
 function layersOf(zodType: string): { base: string; keys: string; nullable: string; optional: string } {
@@ -86,7 +86,7 @@ function usageOf(tables: TableInfo[], external: ReadonlySet<string>): Usage {
 /**
  * The structural core of every base a field uses, its `.meta()` stripped, that is more than a name
  * the shared file already holds (`_str`, `timestampSchema`). Each is shared by its own code alone,
- * never by how often tables use it, so a table's file depends only on its own columns (F59), and a
+ * never by how often tables use it, so a table's file depends only on its own columns, and a
  * field's own meta, an id's prefixed example among them, stays inline in its table's file. In
  * code-unit order, so the shared file's order is its content's too.
  */
@@ -99,12 +99,12 @@ const digestOf = (zodType: string) => createHash("sha256").update(zodType).diges
 
 /**
  * Emits each shared schema under a name its own code gives, `_z_<8 hex>`, so adding a column to
- * one table renames nothing another table's file uses (F35). Schemas whose 8 hex digits collide
+ * one table renames nothing another table's file uses. Schemas whose 8 hex digits collide
  * (`colliding`, read from every schema the run names) each take 16, whichever is added first.
  */
 class SharedNames {
 	readonly result = new Map<string, SharedSchema>()
-	/* a field and its assignment, no parameter property, so a consumer's erasableSyntaxOnly takes the file (K18 of r17) */
+	/* a field and its assignment, no parameter property, so a consumer's erasableSyntaxOnly takes the file */
 	private readonly colliding: ReadonlySet<string>
 
 	constructor(colliding: ReadonlySet<string> = new Set()) {
@@ -173,7 +173,7 @@ const on = (name: string, code: string): Rewritten => ({ code, names: [name] })
  * Rewrite an inline zodType to reference shared _z* constants where possible.
  * Decomposes into core + .meta() + .nullable() + keys + .optional(), then checks if
  * the core (or core+meta, or core+meta+nullable) matches a shared constant. The names are what
- * the code holds (C3 of r21): a substituted shared schema alone, which holds the shared names its
+ * the code holds: a substituted shared schema alone, which holds the shared names its
  * core `uses`; otherwise every one of `uses` and the base-type alias the rewrite put in.
  */
 export function rewriteWithShared(

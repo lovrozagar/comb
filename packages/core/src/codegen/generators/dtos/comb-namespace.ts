@@ -1,5 +1,5 @@
 /**
- * How generated DTO files reach comb's own predicates (C2 of r17): under one namespace, `comb`, so
+ * How generated DTO files reach comb's own predicates: under one namespace, `comb`, so
  * a c.json schema exported under a predicate's name cannot capture it. A global the generated code
  * calls is named through globalThis for the same reason; `comb` and `globalThis` are the names a
  * schema import is aliased away from (schema-aliases.ts).

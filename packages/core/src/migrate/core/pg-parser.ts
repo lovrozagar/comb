@@ -10,7 +10,7 @@ import { qualifySchemaElements } from "./pg-schema-elts.ts"
 
 type Parser = { parseSync(sql: string): { stmts?: unknown } }
 
-/* an optional peer, named by a string so a consumer without it still type-checks comb (K2 of r17) */
+/* an optional peer, named by a string so a consumer without it still type-checks comb */
 const LIBPG_QUERY: string = "libpg-query"
 
 // per-process-constant: the parser module, set once by loadPostgresParser

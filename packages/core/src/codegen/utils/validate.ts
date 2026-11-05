@@ -19,7 +19,7 @@ export type ValidationResult = {
 
 /**
  * A table's generated path segment, which its DTO, rqb-cols and sql-cols directories all take
- * (`subpathName`, C20): two tables on one segment would replace each other's files, so both are named
+ * (`subpathName`): two tables on one segment would replace each other's files, so both are named
  */
 function checkPaths(varName: string, paths: Map<string, string>, report: ValidationResult): void {
 	const segment = subpathName(varName)
@@ -37,7 +37,7 @@ function checkNames(tables: readonly TableMeta[], report: ValidationResult): voi
 	const paths = new Map<string, string>()
 	for (const table of tables) {
 		checkPaths(table.varName, paths, report)
-		/* auth.users beside the app's users is two tables (F51) */
+		/* auth.users beside the app's users is two tables */
 		const name = qualifiedName(table)
 		if (sqlNames.has(name)) report.errors.push(`Duplicate SQL table name: "${name}" (var: ${table.varName})`)
 		sqlNames.add(name)

@@ -12,7 +12,7 @@ import { normalizeSql } from "./sql-scan.ts"
 
 /**
  * The relations a view's or materialized view's query, or a policy's USING and WITH CHECK, read, by
- * their bare names, from its parse tree, as a CASCADE drop reads them (pg-cascade.ts, R1 of plan 17)
+ * their bare names, from its parse tree, as a CASCADE drop reads them (pg-cascade.ts)
  */
 function relationsOf(object: PgObject): Set<string> {
 	const [stmt] = (parsePostgres(object.sql) as { stmts: Array<{ stmt: Node }> }).stmts

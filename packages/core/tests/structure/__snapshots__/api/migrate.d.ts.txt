@@ -69,7 +69,7 @@ export declare function loadConfig(configPath?: string, cwd?: string): Promise<L
 
 // migrate/core/d1-history-tables.d.ts
 /**
- * The tables a D1 database's migration history lives in (M2 of the 0.13.0 consumers review): a tool
+ * The tables a D1 database's migration history lives in: a tool
  * that empties a database keeps them, rows and all, or every applied file loses what comb knows of
  * it. wrangler's own table records each applied file by name; comb's records the hash each was
  * applied under, which refuses a file applied, then edited, and the hash each pending file is about
@@ -82,7 +82,7 @@ export declare const D1_MIGRATIONS_TABLE = "d1_migrations";
 export declare const D1_HASH_TABLE = "_comb_migration_hashes";
 /**
  * comb's record of the hash each pending D1 file is about to be applied under, written before
- * wrangler runs it and moved into D1_HASH_TABLE once wrangler's table names it (S1 of r20)
+ * wrangler runs it and moved into D1_HASH_TABLE once wrangler's table names it
  */
 export declare const D1_HASH_INTENT_TABLE = "_comb_migration_hash_intents";
 /** comb's migration history before 0.8, which `comb migrate baseline` copies into wrangler's */
@@ -149,7 +149,7 @@ export type DrizzleExportOptions = {
  * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
  */
 export declare function exportDrizzleSchema(options: DrizzleExportOptions): Promise<string>;
-/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
+/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin */
 export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): Promise<string>;
 
 // migrate/core/parse.d.ts
@@ -170,7 +170,7 @@ export declare function generateMigrationHash(sql: string): string;
 export declare function legacyMigrationHash(sql: string): string;
 /**
  * The hash comb 0.5.0 to 0.20 recorded, whose normalizing folded every Unicode space, which SQLite
- * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it (SL5 of r22)
+ * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it
  */
 export declare function foldedMigrationHash(sql: string): string;
 /** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
@@ -183,7 +183,7 @@ export type AcceptedHash = {
 /**
  * Every hash `sql` may be recorded under, current first, each with the time before which a row may
  * hold it: the current and the folded one (0.5.0 to 0.20) on any row, as no date tells which comb
- * recorded it (SL5 of r22), the pre-0.5.0 one before V0_5_0
+ * recorded it, the pre-0.5.0 one before V0_5_0
  */
 export declare function migrationHashes(sql: string): AcceptedHash[];
 export { extractSchema };
@@ -194,7 +194,7 @@ export { classifyMigration, extractDropStatements };
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
 /**
- * parseMigration of a file its caller has read: on Postgres its one parse (M86), with what check's
+ * parseMigration of a file its caller has read: on Postgres its one parse, with what check's
  * replay on devUrl measured of it when it `replayed` the file
  */
 export declare function parseRead(file: FileRead & {
@@ -339,7 +339,7 @@ export declare function getTursoCredentials(request: TursoCredentialsRequest): P
  */
 export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
 /**
- * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
+ * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it: the scheme in
  * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
  * another scheme, or a path libsql itself refuses to decode.
  */
@@ -691,7 +691,7 @@ type ClassifyOptions = {
 };
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one (M86), and what check's
+ * Postgres `read` is the file's one parse, its caller's when it holds one, and what check's
  * replay on devUrl measured of it, when it `replayed` the file
  */
 declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, { read, replayed }?: {
@@ -708,10 +708,10 @@ export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements
 
 // migrate/core/classify-target.d.ts
 /**
- * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
- * S1 of r22): a local SQLite file runs what SQLite does, and a libsql server (sqld) what its parser and
- * authorizer let through. A D1 database runs what its own engine does, which check asks it (d1-engine.ts,
- * SD1 of r22), so no list here. No `-- comb:allow-unsafe:` clears a refusal here: the target would fail
+ * What each kind of SQLite target runs, which check holds a file to before anything applies:
+ * a local SQLite file runs what SQLite does, and a libsql server (sqld) what its parser and
+ * authorizer let through. A D1 database runs what its own engine does, which check asks it (d1-engine.ts),
+ * so no list here. No `-- comb:allow-unsafe:` clears a refusal here: the target would fail
  * the file at apply.
  */
 import type { Pragma } from "./sql-code.ts";
@@ -780,9 +780,9 @@ type PgTarget = {
 type AtlasNeeds = {
     dev?: boolean | undefined;
     dir?: string | undefined;
-    /** the target unscoped, for the one call that lists the database's schemas (M78) */
+    /** the target unscoped, for the one call that lists the database's schemas */
     allSchemas?: boolean | undefined;
-    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
     revisions?: string | undefined;
     url?: boolean | undefined;
 };
@@ -814,7 +814,7 @@ declare const atlasUrls: (target: PgTarget) => {
 };
 /** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
 declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
-/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database (P2 of r19) */
+/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database */
 declare function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
@@ -823,7 +823,7 @@ declare function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void;
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
 /**
  * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
- * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ * OSS may say it left part of a schema out of what it compared
  */
 declare const atlasNotices: (stderr: string) => string[];
 export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, refuseUrlProblems, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
@@ -852,7 +852,7 @@ export type RunResult = {
 };
 /**
  * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
- * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * I/O and refuses outside it: the floor is the oldest release comb's integration suite
  * passes on, and the next major may change what comb reads from Atlas
  */
 export declare const ATLAS_RANGE = ">=1.2.0 <2";
@@ -897,7 +897,7 @@ export type Run = (cmd: string, args: readonly string[], options?: RunOptions) =
 export declare const run: Run;
 /**
  * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
- * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ * holds, the one comb checked, never a name looked up on PATH
  */
 export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 
@@ -951,7 +951,7 @@ export type MigrateDiffOptions = {
     run?: Run | undefined;
     /** Postgres: the database's dev database and schema Atlas diffs in */
     target?: PgTarget | undefined;
-    /** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it (P12) */
+    /** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it */
     readyDev?: ((target: PgTarget) => Promise<void>) | undefined;
 };
 export type MigrateDiffResult = {
@@ -1006,7 +1006,7 @@ type ReadStatement = {
 /**
  * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
  * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
- * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
+ * the migration (tests/structure/pragma-scope.test.ts asks the
  * running engines). A read of one is any other pragma.
  */
 declare const PROCESS_PRAGMAS: ReadonlySet<string>;
@@ -1024,7 +1024,7 @@ declare const outsideRefusal: (stmt: string, outside: string) => string;
  */
 declare function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void;
 /**
- * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
+ * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas: apply
  * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
  */
 declare function refuseHeader(sql: string, dialect: Dialect): void;
@@ -1048,7 +1048,7 @@ type RawStmt = {
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
  * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
- * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); the line,
+ * the text Atlas sends without the lead, which every rating reads; the line,
  * from 1, `sent` starts on in the file; and its tree
  */
 type PgStatement = {
@@ -1067,7 +1067,7 @@ type PgRead = {
     statements: PgStatement[];
     unreadable: Unreadable | undefined;
 };
-/** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
+/** A migration file as its dialect reads it: a Postgres file always with its one parse */
 type FileRead = {
     dialect: "sqlite";
     sql: string;
@@ -1118,7 +1118,7 @@ declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dia
 }): ExtractedSchema;
 /**
  * extractSchema of a file its caller has read: on Postgres its one parse, shared with the file's
- * classification (M86); a Postgres name keyed under `searchSchema`
+ * classification; a Postgres name keyed under `searchSchema`
  */
 declare function schemaOfRead(file: FileRead, searchSchema: string | undefined, from?: ExtractedSchema): ExtractedSchema;
 export { extractSchema, schemaOfRead };
@@ -1142,7 +1142,7 @@ declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
  * in data or names never. A migration's hash is taken over this form, so it stays as recorded: a
  * word written against a quoted name stays against it. `foldAll` is the form comb 0.5.0 to 0.20
  * hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type b, and a
- * column named a b) normalized alike (SL5 of r22).
+ * column named a b) normalized alike.
  */
 declare function hashedSql(sql: string, foldAll?: boolean): string;
 /**
@@ -1157,7 +1157,7 @@ export { hashedSql, normalizeSql, splitSqlStatements };
 import { type ProjectBin, type Run } from "../core/process.ts";
 import type { Connection, ConnectionProvider, D1ProviderConfig } from "../types.ts";
 /**
- * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22), and
+ * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec`, and
  * whether another process holds the local database's write lock now (d1-lock.ts lockedOut)
  */
 type Wrangler = {
@@ -1169,7 +1169,7 @@ type Wrangler = {
 declare function wranglerFlags(config: D1ProviderConfig): string[];
 /**
  * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
- * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
+ * for them all: wrangler answers a result per statement, and one that fails fails the call
  */
 declare function executeAll(exec: Run, { flags, held, name, wrangler }: Omit<Wrangler, "exec"> & {
     flags: readonly string[];
@@ -1179,7 +1179,7 @@ export { executeAll, wranglerFlags };
 /**
  * The connection to the D1 database `config` names, through `wrangler`, the bin the command
  * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
- * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
+ * the environment's name the resolved config carries, which wrangler knows nothing of
  */
 export declare function connectD1(config: D1ProviderConfig, spawn: Wrangler): Connection;
 /**
@@ -1254,7 +1254,7 @@ declare const unquote: (name: string) => string;
 declare const lastPart: (name: string) => string;
 /**
  * How names are keyed: SQLite's way, or Postgres's under the schema comb scopes every URL's
- * search_path to, where an unqualified name resolves (M72)
+ * search_path to, where an unqualified name resolves
  */
 type Naming = "sqlite" | {
     schema: string;
@@ -1267,7 +1267,7 @@ declare const dialectOf: (naming: Naming) => Dialect;
  * The name a table, trigger or routine is matched by, as `naming` resolves it. SQLite matches
  * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
  * unquoted name to lower case and keeps a quoted one exact, and resolves an unqualified name in its
- * schema: under `app`, `users` and `app.users` are one table, `public.users` another (M72).
+ * schema: under `app`, `users` and `app.users` are one table, `public.users` another.
  */
 declare function nameKey(name: string, naming: Naming): string;
 /**
@@ -1277,7 +1277,7 @@ declare function nameKey(name: string, naming: Naming): string;
 declare const asciiFold: (name: string) => string;
 /**
  * A pragma statement as SQLite reads it: its name and schema unquoted and folded, the value or argument it gives,
- * and whether its name was written quoted, which sqld's parser refuses (S1 of r22)
+ * and whether its name was written quoted, which sqld's parser refuses
  */
 type Pragma = {
     name: string;
@@ -1285,18 +1285,18 @@ type Pragma = {
     schema: string | undefined;
     value: string | undefined;
 };
-/** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
+/** The pragma `code` runs (read once, so a quoted name is the name), or undefined for any other statement */
 declare function pragmaOf(code: string): Pragma | undefined;
 /** A whole name as SQLite resolves it, each part folded, with the schema it was written with (`main."Post"` is `main.post`) */
 declare const qualifiedKey: (name: string) => string;
 /**
  * Every name SQLite code can spell, as SQLite resolves one: each bare word and each quoted name unquoted, and each
  * word of a string, which SQLite reads as a name where one stands (`FROM 'post'`) and a module as its option's
- * (`content='post'`), folded by asciiFold; never a word of a comment (8.5 of plan 21)
+ * (`content='post'`), folded by asciiFold; never a word of a comment
  */
 declare function sqliteNames(sql: string): Set<string>;
 /**
- * Every name Postgres text can spell (P2 of r22): an unquoted word folded, a quoted one exact, and a
+ * Every name Postgres text can spell: an unquoted word folded, a quoted one exact, and a
  * string, single or dollar-quoted, as its exact contents and as the SQL it may be, which a DO body,
  * dblink_exec or format() runs; never a comment's words
  */
@@ -1346,7 +1346,7 @@ export type ScratchDb = LocalDb & {
     /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
     reopen(): void;
 };
-/** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on (SL3 of r22) */
+/** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on */
 export type ScratchEngine = "libsql" | "runtime";
 /** How a database file, or `:memory:`, opens on an engine; with `create` false, only a file that is there, read-write */
 export type Open = (file: string, create?: boolean) => LocalDb;
@@ -1363,6 +1363,6 @@ export declare function writeLocked(file: string): Promise<boolean>;
  * A new scratch database on `engine`, that only this process can reach: on the runtime's, a file in a
  * directory of its own that only this user can open (0700), removed with it on close; on libsql's, a
  * database in memory. SIGINT and SIGTERM remove the directory too, and a process killed past both
- * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
+ * leaves it only until the next process's first scratch, which sweeps it.
  */
 export declare function openScratch(engine?: ScratchEngine): Promise<ScratchDb>;

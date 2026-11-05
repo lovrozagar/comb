@@ -1,6 +1,6 @@
 /**
- * The event triggers a Postgres history made, and the statements of a later file that fire one
- * (M73): ddl_command_start and ddl_command_end fire on a DDL command whose tag the trigger's
+ * The event triggers a Postgres history made, and the statements of a later file that fire one:
+ * ddl_command_start and ddl_command_end fire on a DDL command whose tag the trigger's
  * `WHEN TAG IN (…)` lists, or on every one when it lists none; sql_drop on a statement that drops
  * something; table_rewrite on a command that rewrites a table. A statement is matched by its
  * command tag, read from its parse tree; a DDL statement whose tag comb does not know matches
@@ -128,8 +128,8 @@ function tagOf(type: string, node: Node): string | undefined {
 }
 
 /**
- * What a top-level statement is, as Postgres's command tag names it, for a reason that names its kind
- * (P21 of r19): its event tag, else its tag in LABELS, else its node type's own words (PrepareStmt is
+ * What a top-level statement is, as Postgres's command tag names it, for a reason that names its kind:
+ * its event tag, else its tag in LABELS, else its node type's own words (PrepareStmt is
  * PREPARE)
  */
 function kindOf(type: string, node: Node): string {
@@ -155,7 +155,7 @@ function drops(type: string, node: Node): boolean {
 	)
 }
 
-/** Whether a top-level statement rewrites a table, as table_rewrite takes one: a command M70 warns of */
+/** Whether a top-level statement rewrites a table, as table_rewrite takes one: a command whose rewrite comb warns of */
 const rewrites = (type: string, node: Node, facts: Facts): boolean =>
 	(ddlFindings(type, node, facts) ?? []).some((finding) => finding.level === "lock" && finding.note === REWRITES)
 

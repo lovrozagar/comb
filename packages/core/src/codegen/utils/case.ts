@@ -16,7 +16,7 @@ export function snakeToPascal(str: string): string {
 /**
  * Convert camelCase to kebab-case, a word starting at each capital after a lowercase letter or a
  * digit and at an acronym's last capital before a lowercase one: HTTPLog is http-log, oauth2Token
- * oauth2-token (C12 of r17)
+ * oauth2-token
  */
 export function camelToKebab(str: string): string {
 	return str
@@ -27,7 +27,7 @@ export function camelToKebab(str: string): string {
 
 /**
  * A table variable as every generated subpath of it names it, its DTOs', rqb-cols' and sql-cols'
- * alike: kebab case, from camelCase and snake_case both, so blogPost and blog_post are blog-post (C20)
+ * alike: kebab case, from camelCase and snake_case both, so blogPost and blog_post are blog-post
  */
 export const subpathName = (varName: string): string => camelToKebab(varName).replaceAll("_", "-")
 

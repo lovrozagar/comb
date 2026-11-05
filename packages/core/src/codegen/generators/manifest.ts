@@ -33,12 +33,9 @@ type ManifestColumn = {
 	 * The column's SQL type, its modifier included, as drizzle writes it (`timestamp(3) with time
 	 * zone`, `interval day`, `numeric(3, -2)`): with `kind`, the check a plain Postgres type's rule is
 	 */
-	// AA8 of r22
 	sqlType: string
-	// A2-5 of r22
 	/** An array column's dimensions, 0 for a column of one value: its `sqlType` is its element's */
 	dimensions: number
-	// A2-9 of r22
 	/** Whether a written array's element may be null, as the column's drizzle type declares; false for a column of one value */
 	nullElements: boolean
 	/** the column is NOT NULL */
@@ -53,7 +50,6 @@ type ManifestColumn = {
 	 * holds; an array's are each element's. Null where none, and on a plain Postgres column whose
 	 * type has a rule of its own (a uuid, an inet, a real), which `kind` and `sqlType` name
 	 */
-	// C2 of r20
 	max: number | null
 	/** The most bytes a written JSON value takes serialized, null for none and for any other column */
 	maxBytes: number | null
@@ -61,7 +57,6 @@ type ManifestColumn = {
 	min: number | null
 	/** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind` and `sqlType`'s */
 	patterns: string[]
-	// C8 of r19
 	/** A text column's format, null for any other */
 	textKind: "email" | "imageUri" | "name" | "password" | "url" | null
 	/** The rewrites a written value takes before `min`, `max` and `patterns` bind it, in order: the DTO's own list (meta-contract §2.1) */
@@ -102,7 +97,6 @@ type ManifestRelation = {
 				refColumns: string[]
 		  }
 		| undefined
-	// CS5 of r22b
 	/** the referenced entity, by its `name`: schema-qualified on Postgres, never the TypeScript variable (since `v` 3) */
 	table: string
 	/** the referenced column, by its name among that entity's `columns` */
@@ -140,7 +134,6 @@ type ManifestEntity = {
 		/** the indexed columns, by name, in index order */
 		columns: string[]
 	}[]
-	// C7 of r17
 	/** each with its predicate, SQL over SQL names, as the stamp publishes them (meta-contract §6.8) */
 	partialUniqueIndexes: {
 		/** the index's name, which a violation of it reports */
@@ -184,7 +177,7 @@ function toColumn(field: FieldMeta, dialect: GeneratorContext["dialect"]): Manif
 	const { max, maxBytes, min, patterns } = writeRules(field, dialect)
 	return {
 		enumValues: field.enumValues,
-		/* what the write bodies do, read off the rule the DTOs and the stamp read, a private column's too (CS4, CS6 of r22b) */
+		/* what the write bodies do, read off the rule the DTOs and the stamp read, a private column's too */
 		generated: !writesOf(field).create,
 		immutable: !writesOf(field).update,
 		kind: field.drizzleHelper,

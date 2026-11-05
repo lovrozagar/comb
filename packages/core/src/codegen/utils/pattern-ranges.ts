@@ -1,5 +1,5 @@
 /*
- * AA4-2 of r24: engines on other Unicode versions read one \p{…} name as other sets (Rust's regex
+ * Engines on other Unicode versions read one \p{…} name as other sets (Rust's regex
  * 1.13.1 and Node 22 on Unicode 16, Go and Node 24 on 17), so comb publishes each General_Category as
  * the ranges of the codegen runtime's tables, and every engine reads one fixed set.
  */

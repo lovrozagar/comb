@@ -1,6 +1,6 @@
 /**
  * The foreign keys and primary keys a Postgres history leaves, read from its parse trees, and the
- * tables a statement reaches through them (the gaps 1–4 of 0005 of r22b): Postgres locks the table at
+ * tables a statement reaches through them: Postgres locks the table at
  * a key's other end when the key is dropped, rebuilt or checked, so a dropped key, a dropped table's
  * keys, a key column retyped, a TRUNCATE CASCADE and a partition under a parent's keys each lock a
  * table the statement does not name. A key Postgres names is named as ChooseConstraintName names it;

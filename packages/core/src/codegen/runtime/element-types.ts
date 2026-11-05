@@ -1,6 +1,6 @@
 /**
- * Whether a Postgres array column's element takes null, as its drizzle type declares it (A2-9 of
- * r22): drizzle types `text().array()` as `string[]` and `text().array().$type<string | null>()` as
+ * Whether a Postgres array column's element takes null, as its drizzle type declares it:
+ * drizzle types `text().array()` as `string[]` and `text().array().$type<string | null>()` as
  * `(string | null)[]`, so a write DTO takes a null element only where the table's insert does. The
  * type leaves no trace at runtime, so TypeScript's checker reads it from the tables file, under the
  * project's tsconfig with strictNullChecks, which a declared `| null` needs to mean anything. A
@@ -24,8 +24,8 @@ const isUnresolved = (type: ts.Type): boolean =>
 	(type as ts.Type & { intrinsicName?: string | undefined }).intrinsicName === "error"
 
 /**
- * The checker over `tablesPath`, a TypeScript or JavaScript module whatever the project's allowJs (A3-1
- * of r23), and what it exports: none for a script, which the read refuses naming the column. A type
+ * The checker over `tablesPath`, a TypeScript or JavaScript module whatever the project's allowJs,
+ * and what it exports: none for a script, which the read refuses naming the column. A type
  * error elsewhere in the file is the project's own typecheck's to report: the read fails only where
  * it cannot resolve what it needs
  */

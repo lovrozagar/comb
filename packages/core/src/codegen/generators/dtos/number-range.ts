@@ -49,11 +49,11 @@ export function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range
 	return field.dataType === "number int16" ? INT2 : SAFE
 }
 
-/** A declared bound clamped to the column's, the column's where none is declared (CD8 of r22b) */
+/** A declared bound clamped to the column's, the column's where none is declared */
 export const clamp = (declared: number | null, bound: number, pick: (a: number, b: number) => number): number =>
 	declared === null ? bound : pick(declared, bound)
 
-/** Refuses an integer's bounds, clamped to what the column holds, that leave no integer: every write would be refused (F8) */
+/** Refuses an integer's bounds, clamped to what the column holds, that leave no integer: every write would be refused */
 export function refuseNoInteger(name: string, annotations: FieldConstraints, range: Range): void {
 	const min = clamp(annotations.min, range.min, Math.max)
 	const max = clamp(annotations.max, range.max, Math.min)
@@ -62,7 +62,7 @@ export function refuseNoInteger(name: string, annotations: FieldConstraints, ran
 }
 
 /**
- * The bounds a written number of `field` takes, as numberBase checks them (C2 of r20): an integer's
+ * The bounds a written number of `field` takes, as numberBase checks them: an integer's
  * and a timestamp's declared bounds clamped to what the column holds, a float's as declared, and
  * none on a boolean or a timestamp comb fills
  */

@@ -91,7 +91,7 @@ async function createTursoDatabase(
 	log(`Created "${dbName}"`)
 }
 
-/** `call`, its failure to reach the API at all said with each cause under it, as `fetch failed: connect ECONNREFUSED …` (S2 of r21) */
+/** `call`, its failure to reach the API at all said with each cause under it, as `fetch failed: connect ECONNREFUSED …` */
 const reaching = (call: typeof fetch, name: string): typeof fetch =>
 	((...args: Parameters<typeof fetch>) =>
 		call(...args).catch((error: unknown) => {
@@ -142,7 +142,7 @@ function createLibsqlConnection(client: Client): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void> {
 			const batch = statements.map(({ params, sql }) => ({ args: (params ?? []) as InValue[], sql }))
-			/* "write" begins it IMMEDIATE: the write lock is taken, or waited for, before any statement (SL4 of r22) */
+			/* "write" begins it IMMEDIATE: the write lock is taken, or waited for, before any statement */
 			await client.batch(batch, "write")
 		},
 
@@ -167,7 +167,6 @@ function createLibsqlConnection(client: Client): Connection {
    TURSO PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// S1 of r21
 /**
  * A Turso database's provider. Each connect opens a new client, so each migration file has a
  * connection of its own; the credentials are fetched once per provider for a reader and once for a
@@ -187,7 +186,7 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
 			await pastStop()
-			/* the client first: a project without it is refused before Turso creates a database or mints a token (S2 of r21) */
+			/* the client first: a project without it is refused before Turso creates a database or mints a token */
 			const { createClient } = await libsql()
 			const creds = await credentials(dbConfig.readonly === true)
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
@@ -202,7 +201,7 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /**
- * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
+ * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it: the scheme in
  * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
  * another scheme, or a path libsql itself refuses to decode.
  */
@@ -232,7 +231,7 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 			const open = () =>
 				createClient({ ...(config.authToken === undefined ? {} : { authToken: config.authToken }), url: config.url })
 			if (file === undefined || file === ":memory:") return createLibsqlConnection(open())
-			/* libsql has no read-only mode for a file, and creates a missing one; a file waits for a lock another process holds (SL4 of r22) */
+			/* libsql has no read-only mode for a file, and creates a missing one; a file waits for a lock another process holds */
 			const client = await openFileDatabase(file, dbConfig?.readonly === true, async () => {
 				const opened = open()
 				await opened.execute({ args: [], sql: BUSY_TIMEOUT })

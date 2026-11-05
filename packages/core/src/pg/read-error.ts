@@ -19,7 +19,6 @@ type PgErrorRead = {
 	constraint: string | undefined
 	/** the columns in `detail`'s `Key (a, b)=(…)`, its expressions left out */
 	keyColumns: string[]
-	// Q3 of the 0.14.1 review
 	/** the key holds an expression, an expression index's, which may spell any column */
 	keyExpression: boolean
 	/** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
@@ -28,7 +27,6 @@ type PgErrorRead = {
 	query?: string | undefined
 	/** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
 	referenced: boolean
-	// F51
 	/** the violated table's schema, which a pgSchema's table is keyed by in the maps */
 	schema: string | undefined
 	/** the violated table's name, without its schema */
@@ -68,7 +66,7 @@ function sqlstate(error: DriverError): string | undefined {
 }
 
 /* one name in a Key list: an identifier Postgres quoted, its doubled quotes standing for one, or
-   bare text up to a top-level comma, an expression's parentheses included (U44) */
+   bare text up to a top-level comma, an expression's parentheses included */
 // per-process-constant: see above
 const KEY_NAME = /\s*(?:"((?:[^"]|"")*)"|((?:[^,()]|\((?:[^()]|\([^()]*\))*\))+))\s*(,|\)=)/y
 

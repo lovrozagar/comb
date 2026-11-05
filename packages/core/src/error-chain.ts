@@ -1,7 +1,7 @@
 /**
  * An error and the ones under it on `.cause`, past wrappers such as drizzle's DrizzleQueryError,
  * which keeps the engine's own words only on its cause: the one walk every classifier that reads a
- * driver's error takes (K1 of r19), outermost first and at most MAX_DEPTH deep, as a cause chain a
+ * driver's error takes, outermost first and at most MAX_DEPTH deep, as a cause chain a
  * driver builds is never deeper.
  */
 
@@ -21,7 +21,7 @@ function causeChain(error: unknown): object[] {
 /**
  * `chain`, a cause chain or a mapping of one, innermost first: the deepest link is the driver's or
  * the engine's own error. Built by a loop, not `toReversed`, as the runtime subpaths keep to lib
- * ES2022 (K2 of r20)
+ * ES2022
  */
 function innermostFirst<T>(chain: readonly T[]): T[] {
 	const reversed: T[] = []

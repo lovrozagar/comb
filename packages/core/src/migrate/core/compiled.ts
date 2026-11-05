@@ -2,7 +2,7 @@
  * In a Bun single-file executable, process.execPath is the app itself and comb's own modules live in
  * the filesystem it embeds, which no second process can read and from which a project's package
  * cannot be loaded. Codegen's child, the D1 proof's child and wrangler's module each need one, so
- * each is refused up front with what it needs (D3-4 and D4-5 of the area D reviews).
+ * each is refused up front with what it needs.
  */
 
 /* where a Bun single-file executable embeds its modules, on posix and on windows */
@@ -13,7 +13,6 @@ export function refuseCompiled(moduleUrl: string, refusal: string): void {
 	if (EMBEDDED.test(moduleUrl)) throw new Error(refusal)
 }
 
-// D4-5, D5-2 and D6-6 of the area D reviews
 /**
  * What comb says when a Bun single-file executable runs a migrate command or an API call that loads
  * `peers` from the project: the executable embeds comb's modules, from which no installed package
@@ -22,7 +21,6 @@ export function refuseCompiled(moduleUrl: string, refusal: string): void {
 export const compiledRefusal = (peers: readonly string[]): string =>
 	`comb loads ${peers.join(" and ")} from the project, which a Bun single-file executable cannot do: run it with bun or node, not from a compiled executable`
 
-// D6-2 of the area D round-six review
 /**
  * What comb says when a Bun single-file executable runs `command`, whose tables file loads in a
  * child process: the child is the executable itself, as codegen says of its own load

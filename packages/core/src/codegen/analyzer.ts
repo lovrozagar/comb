@@ -8,7 +8,6 @@ import type { AnalysisResult, TableMeta } from "./analyzer-types.ts"
 import { loadSnapshot } from "./runtime/load.ts"
 import { toAnalysis } from "./runtime/to-meta.ts"
 
-// F58
 /**
  * Load and analyze a tables file. Loading runs the module in a child process, so it must be safe to
  * import: no top-level connection, server or side effect

@@ -1,7 +1,7 @@
 /**
- * What a TypeScript older than 5.7 reads for every subpath of comb: nothing (KT2 of r22b).
+ * What a TypeScript older than 5.7 reads for every subpath of comb: nothing.
  *
- * comb's declarations use `NoInfer` (TypeScript 5.4) and `Uint8Array<ArrayBuffer>` (5.7). An older
+ * comb's declarations use `NoInfer` (TypeScript 5.4) and `Uint8Array<ArrayBuffer>`. An older
  * compiler with `skipLibCheck` on, as every starter template sets it, reads each as `any` and drops
  * the check it carries with no error: a misspelled transition, a `random` that takes no bytes. Each
  * export's `types@>=5.7` condition names the real declarations, and the plain `types` condition after

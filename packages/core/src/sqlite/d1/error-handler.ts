@@ -35,7 +35,7 @@ const QUERY_FAILED: Outcome = {
 	status: "internal_server_error",
 }
 
-/* D1 caps a LIKE or GLOB pattern at 50 bytes (SQLITE_LIMIT_LIKE_PATTERN_LENGTH): the request's to shorten (U21) */
+/* D1 caps a LIKE or GLOB pattern at 50 bytes (SQLITE_LIMIT_LIKE_PATTERN_LENGTH): the request's to shorten */
 const PATTERN_TOO_LONG: Outcome = {
 	cause: "A like or ilike filter value with a * inside it may be at most 50 bytes on D1, once escaped.",
 	errorKey: combErrorKeys.INVALID_VALUE,
@@ -61,7 +61,7 @@ function platformMessage(error: Error): string | null {
 
 /**
  * Whether D1 refused a pattern over its LIKE cap: the engine's code and its exact words, never a
- * phrase found in a message, which a D1_TYPE_ERROR fills with the bound value (Q4, Q10 of r17)
+ * phrase found in a message, which a D1_TYPE_ERROR fills with the bound value
  */
 const tooComplex = (read: SqliteErrorRead | null): boolean =>
 	read?.code === "SQLITE_ERROR" && read.message === "LIKE or GLOB pattern too complex"
@@ -77,7 +77,7 @@ function platformOutcome(message: string): Outcome {
 			status: "service_unavailable",
 		}
 	}
-	/* D1's own words for a database past its size, classed as SQLite's full disk is (N4 of plan 15's rerun) */
+	/* D1's own words for a database past its size, classed as SQLite's full disk is */
 	if (["size limit", "storage limit", "exceeded maximum db size"].some((words) => lower.includes(words)))
 		return STORAGE_FULL
 	return QUERY_FAILED

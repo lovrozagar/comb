@@ -2,7 +2,7 @@
  * The one lowering of `like` / `ilike` for SQLite. Every filter path calls this,
  * so the two operators cannot drift apart between builders.
  *
- * A value whose only `*` are at its ends is a fixed text to find, not a pattern (U21): it lowers
+ * A value whose only `*` are at its ends is a fixed text to find, not a pattern: it lowers
  * to `instr`, `substr` or `=`, which no length cap limits, where D1 refuses a LIKE or GLOB
  * pattern over 50 bytes. `like` stays case-sensitive, as GLOB is; `ilike` compares both sides
  * through `lower()`, ASCII as LIKE folds. A NULL column matches neither, as it matches no pattern.
@@ -30,7 +30,7 @@ function fixedToSQL(column: SQLWrapper, folded: boolean, [, head, text, tail]: R
 	const find = folded ? sql`lower(${text})` : sql`${text}`
 	if (opensStart && opensEnd) return sql`instr(${side}, ${find}) > 0`
 	/* the text bound once, its length written as SQLite's length() counts it, in code points, which
-	   lower()'s ASCII fold keeps: a bound value the budget counts once (Q2 of the 0.14.1 review) */
+	   lower()'s ASCII fold keeps: a bound value the budget counts once */
 	/* FIXED's middle group takes part in every match, an empty text included */
 	const length = countLiteral([...(text as string)].length)
 	if (opensEnd) return sql`substr(${side}, 1, ${length}) = ${find}`

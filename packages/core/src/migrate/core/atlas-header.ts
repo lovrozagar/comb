@@ -1,5 +1,5 @@
 /**
- * A migration file's header as Atlas reads it (PA3 of r22b), the one reader of it in comb: the run
+ * A migration file's header as Atlas reads it, the one reader of it in comb: the run
  * of comment lines, `--` or `#`, that opens the file, closed by a line empty once spaces and tabs are
  * trimmed, CRLF read as LF; comment lines that run into a statement are that statement's, and no
  * header. A directive is a header line, trimmed, that matches Atlas's own pattern, `atlas:<name>`
@@ -64,7 +64,7 @@ function atlasHeader(file: string): AtlasHeader {
 
 /**
  * The first `atlas:` directive line of the comments `file` opens with when no blank line closes
- * them (PA3n of r22b), by its line number from 1 and its text: Atlas reads it as a comment and runs
+ * them, by its line number from 1 and its text: Atlas reads it as a comment and runs
  * the file in one transaction. A first-line `-- atlas:delimiter` is left out, as Atlas's lexer reads
  * it where it stands, by atlas-scan.ts's rule
  */

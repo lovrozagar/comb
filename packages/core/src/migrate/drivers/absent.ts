@@ -1,8 +1,7 @@
 /**
  * A database that does not exist yet, read as the empty database it is: every read answers as an
  * empty SQLite would, and a write refuses. A run reads a missing target through it, so a refused
- * run creates nothing, and opens the real database only once every check has passed (S5 and S6 of
- * the 0.15.0 review).
+ * run creates nothing, and opens the real database only once every check has passed.
  */
 import type { Connection } from "../types.ts"
 import { openMemory } from "./local-db.ts"

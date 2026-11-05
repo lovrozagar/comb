@@ -68,7 +68,7 @@ const NO_EXAMPLE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 /* sensitive or structured values get no example: the schema says enough, the value would leak */
 function hasNoExample({ combKind, constraints, dataType, dimensions, foreignKey }: FieldMeta): boolean {
 	/* a pattern decides what the value looks like, which no generic example can know; an array's
-	 * example would be its element's, of the wrong shape (F49) */
+	 * example would be its element's, of the wrong shape */
 	if (constraints.private || constraints.password || constraints.pattern !== null || foreignKey !== null) return true
 	if ((dimensions ?? 0) > 0) return true
 	if (combKind === null) return dataType === "object json"
@@ -86,7 +86,7 @@ function midpoint(field: FieldMeta, key: keyof typeof SHARED_NUMBER): ExampleRes
 	const { max, min } = field.constraints
 	const fits = (value: number) => (min === null || value >= min) && (max === null || value <= max)
 	if (fits(SHARED_NUMBER[key])) return shared(key)
-	/* an integer's example is an integer within its bounds, a fractional bound rounded inward (F8) */
+	/* an integer's example is an integer within its bounds, a fractional bound rounded inward */
 	const whole = key !== "real"
 	const low = min === null || !whole ? min : Math.ceil(min)
 	const high = max === null || !whole ? max : Math.floor(max)
@@ -97,7 +97,7 @@ function midpoint(field: FieldMeta, key: keyof typeof SHARED_NUMBER): ExampleRes
 
 /**
  * The midpoint of `low` and `high` at the fewest significant digits that keep it strictly between
- * them, so a float's example reads 0.15, never 0.15000000000000002 (C13 of r17); `low` when they meet
+ * them, so a float's example reads 0.15, never 0.15000000000000002; `low` when they meet
  */
 function shortestBetween(low: number, high: number): number {
 	const mid = (low + high) / 2
@@ -126,7 +126,7 @@ type Rule = (field: FieldMeta) => ExampleResult | null | undefined
 /* each text kind's example, which its own check accepts: an image URI is an HTTPS URL to an image */
 const KIND_EXAMPLES = { email: "user@example.com", imageUri: "https://example.com/a.png", url: "https://example.com" }
 
-/** The example of a text kind, or none when the column is shorter than it (F31) or needs more (F30) */
+/** The example of a text kind, or none when the column is shorter than it or needs more */
 function kindExample(field: FieldMeta): ExampleResult | null | undefined {
 	const { constraints } = field
 	const kind = constraints.email ? "email" : constraints.url ? "url" : constraints.imageUri ? "imageUri" : undefined
@@ -143,7 +143,7 @@ const RULES: Rule[] = [
 	({ combKind, prefix }) => (combKind === "id" ? inline(`"${prefix ?? "id"}_${EXAMPLE_ULID}"`) : undefined),
 	({ combKind }) =>
 		combKind === "serialId" ? shared("serialId") : combKind === "boolean" ? shared("boolean") : undefined,
-	/* a state column's example is the value a row starts at, which its create alone takes (CD4 of r22b) */
+	/* a state column's example is the value a row starts at, which its create alone takes */
 	({ enumValues, states }) =>
 		enumValues !== null && enumValues.length > 0 ? inline(JSON.stringify(states?.initial ?? enumValues[0])) : undefined,
 	(field) =>

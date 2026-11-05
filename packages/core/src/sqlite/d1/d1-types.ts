@@ -1,4 +1,4 @@
-// the D1 surface typed structurally (K3 of r21)
+// the D1 surface typed structurally
 /**
  * The D1 surface comb calls, as structural types of its own, as the router's KV is: a
  * Worker typed by `wrangler types`, whose globals declare D1, and one typed by

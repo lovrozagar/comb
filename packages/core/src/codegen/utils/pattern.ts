@@ -1,19 +1,19 @@
 /**
  * A constraint's `pattern`, checked at codegen and written back as a regex literal comb built.
  * The value is spliced into the generated DTOs, so one comb cannot emit (no slashes, a newline, a
- * slash unescaped, a template string) failed tsc, or compiled and threw when the module loaded
- * (F5). JSON Schema's `pattern` has no flags, so `i`, `m` and `s`, which change what matches, would
- * publish another rule than the server applies; `g` and `y` mean nothing to one test (F6). JSON
+ * slash unescaped, a template string) failed tsc, or compiled and threw when the module loaded.
+ * JSON Schema's `pattern` has no flags, so `i`, `m` and `s`, which change what matches, would
+ * publish another rule than the server applies; `g` and `y` mean nothing to one test. JSON
  * Schema compiles a pattern under `u`, as Ajv does, where a `v` source (set subtraction) does not
- * compile (the 0.12 review's F5). And a source read without `u` means another rule: `\p{L}` is a
- * literal `p{L}`, `.` and `[^x]` match a UTF-16 unit, not a code point (CS1 of r22b). So a pattern
+ * compile. And a source read without `u` means another rule: `\p{L}` is a
+ * literal `p{L}`, `.` and `[^x]` match a UTF-16 unit, not a code point. So a pattern
  * is `/source/flags` with `u` at most, compiled and emitted under `u` whether it was written or not.
  * And ECMAScript, Go's RE2 and Rust's regex read \d, \w, \s and \b, and their capitals, as other
- * sets (RE2's \s is ASCII, Rust's \d and \w Unicode), so a pattern writes each class out (AA7 of r22),
+ * sets (RE2's \s is ASCII, Rust's \d and \w Unicode), so a pattern writes each class out,
  * a `.` too, and holds no lookaround or backreference, which neither compiles, nor a `\0`, which Rust's
- * regex refuses (A2-7 of r22). It holds only the escapes and classes every engine reads alike, as Go
- * and Rust compile the source comb publishes (A3-2 of r23), in the grammar all three read as one rule:
- * pattern-grammar.ts holds it (AA4-1 of r24).
+ * regex refuses. It holds only the escapes and classes every engine reads alike, as Go
+ * and Rust compile the source comb publishes, in the grammar all three read as one rule:
+ * pattern-grammar.ts holds it.
  */
 
 import { unportableOf } from "./pattern-grammar.ts"

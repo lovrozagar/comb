@@ -1,15 +1,15 @@
 /**
- * The rule a write DTO gives a plain Postgres column by its data type (F50): what Postgres takes
+ * The rule a write DTO gives a plain Postgres column by its data type: what Postgres takes
  * for that type, as a zod check can say it, so a value the database would refuse is a 400 here
  * rather than a 22P02 from the insert. A rule is stricter than Postgres only for a spelling the
- * 0.14 changelog lists. A read DTO keeps the plain type, as a read never refuses a stored row (F65).
+ * 0.14 changelog lists. A read DTO keeps the plain type, as a read never refuses a stored row.
  */
 import type { FieldMeta } from "../../analyzer-types.ts"
 import { inetRule } from "./ip-patterns.ts"
 
 /**
  * A Postgres type's modifier, parsed once from drizzle's `getSQLType()` so every rule reads the
- * same value and none matches the text (CD5, CD6 of r22b): a time's precision and zone, a
+ * same value and none matches the text: a time's precision and zone, a
  * numeric's precision and signed scale (Postgres 15 takes a scale past the precision, or below 0),
  * an interval's last field and precision, a bit string's length
  */
@@ -63,18 +63,18 @@ function modifierAs<B extends PgModifier["base"]>(sqlType: string, base: B): Ext
 
 /*
  * an offset as RFC 3339 writes one, Z or ±hh:mm, as JSON Schema's time and date-time formats and
- * z.iso.datetime take it, its hours at most 15 as Postgres holds one (F4 of the 0.14.1 review): the
- * one source a timetz and a timestamptz read, so they take one spelling (CD11 of r22b)
+ * z.iso.datetime take it, its hours at most 15 as Postgres holds one: the
+ * one source a timetz and a timestamptz read, so they take one spelling
  */
 const OFFSET = "(?:Z|[+-](?:0[0-9]|1[0-5]):[0-5][0-9])"
 
 /*
  * zod's ISO date, date-time and time regexes, each \d written as [0-9] and nothing else changed (a test
  * holds each copy to zod's own, read as it runs): zod's publish \d, which Rust's regex reads as any
- * Unicode digit, so comb publishes its own, which ECMAScript, Go's RE2 and Rust's regex read alike
- * (AA7 of r22). Each is a z.stringFormat of zod's format name, which checks and publishes the regex it
+ * Unicode digit, so comb publishes its own, which ECMAScript, Go's RE2 and Rust's regex read alike.
+ * Each is a z.stringFormat of zod's format name, which checks and publishes the regex it
  * is given: zod's types refuse a `pattern` param on z.iso.*, which a consumer's tsc reads. One
- * departure: the date's year is 0001 at least, as Postgres's year 0000 is a 22008 (A2-3 of r22)
+ * departure: the date's year is 0001 at least, as Postgres's year 0000 is a 22008
  */
 const YEAR = "(?:000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})"
 const ISO_DATE = `(?:(?:[0-9][0-9][2468][048]|[0-9][0-9][13579][26]|[0-9][0-9]0[48]|(?:[2468][048]|0[48])00|[13579][26]00)-02-29|${YEAR}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|(?:02)-(?:0[1-9]|1[0-9]|2[0-8])))`
@@ -106,7 +106,7 @@ function fractionRule(type: string, precision: number | null, tail: string): str
 	return `.regex(/(?:[^.0-9][0-9][0-9]${fraction})${tail}$/u, { message: "${roundedBy(type, precision)}" })`
 }
 
-/* a time with an offset, which z.iso.time does not take: hh:mm[:ss[.f]], then the offset (F4 of the 0.14.1 review) */
+/* a time with an offset, which z.iso.time does not take: hh:mm[:ss[.f]], then the offset */
 const timetz = (precision: number | null): string =>
 	`z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9]${fractionOf(precision)})?${OFFSET}$/u${precision === null ? "" : `, { message: "Must be a time with an offset${precision === 0 ? " and no fraction of a second" : ` and at most ${precision} digits after the second's point`}, which time(${precision}) with time zone would round" }`})`
 
@@ -114,7 +114,7 @@ const timetz = (precision: number | null): string =>
  * A timestamp keeps no zone: given an offset or Z it discards it, so the instant is lost. A
  * timestamptz given a local time reads it in the session's TimeZone, so the instant depends on
  * the server's config. Each takes only the form whose instant it keeps, and a precision rounds a
- * longer fraction, perhaps into the next day, so each takes none (CD6 of r22b).
+ * longer fraction, perhaps into the next day, so each takes none.
  */
 function timestampRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
 	const type = withTimeZone ? "timestamp with time zone" : "timestamp"
@@ -123,18 +123,18 @@ function timestampRule({ precision, withTimeZone }: { precision: number | null; 
 	return `z.stringFormat("datetime", /${ISO_OFFSET}/u).regex(/${OFFSET}$/u, { message: "Must have an offset of at most 15:59, as Postgres holds one" })${fractionRule(type, precision, OFFSET)}`
 }
 
-/** A time, local or with its offset, its fraction held to its precision (CD5, CD6 of r22b) */
+/** A time, local or with its offset, its fraction held to its precision */
 function timeRule({ precision, withTimeZone }: { precision: number | null; withTimeZone: boolean }): string {
 	return withTimeZone
 		? timetz(precision)
 		: `z.stringFormat("time", /${ISO_TIME}/u)${fractionRule("time", precision, "")}`
 }
 
-/* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it (CS3 of
- * r22b): weeks alone, or at least one date or time part, the seconds alone taking a fraction. Its
- * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007 (AA6 of r22). Each
- * part takes at most the digits whose every value Postgres holds alone, past which it is a 22015
- * (A2-3 of r22): 8 for years and weeks, 9 for months, days and hours, 11 for minutes, 12 for whole
+/* an ISO 8601 duration as z.iso.duration takes one, with no lookaround, so RE2 compiles it:
+ * weeks alone, or at least one date or time part, the seconds alone taking a fraction. Its
+ * decimal mark is `.` alone, as Postgres refuses ISO 8601's comma with a 22007. Each
+ * part takes at most the digits whose every value Postgres holds alone, past which it is a 22015:
+ * 8 for years and weeks, 9 for months, days and hours, 11 for minutes, 12 for whole
  * seconds. A sum past its range is the handler's 400, a 22008 or 22015 */
 const YEARS = "[0-9]{1,8}"
 const MONTHS = "[0-9]{1,9}"
@@ -158,8 +158,8 @@ const KEPT_BY: Readonly<Record<Exclude<IntervalField, "second">, string>> = {
 /**
  * An interval: an ISO 8601 duration with no part below its last field, which Postgres drops
  * (`PT1H` into an `interval day` is stored as 0), and no fraction of a second past its precision,
- * which it rounds (CD6 of r22b). A string and its pattern, with no `format: "duration"`: that format
- * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one (AA10 of r22). Its precision
+ * which it rounds. A string and its pattern, with no `format: "duration"`: that format
+ * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one. Its precision
  * is never 0: drizzle writes `precision: 0` as no precision, which a test holds
  */
 function intervalRule({ field, precision }: { field: IntervalField | null; precision: number | null }): string {
@@ -175,7 +175,7 @@ function intervalRule({ field, precision }: { field: IntervalField | null; preci
 }
 
 /**
- * A numeric as text: its digits, within its precision and scale (CD5 of r22b). Postgres rounds a
+ * A numeric as text: its digits, within its precision and scale. Postgres rounds a
  * longer fraction first, which may carry it past the precision (999.995 into numeric(5,2) is a
  * 22003), so the DTO takes none. A scale past the precision leaves a fraction alone, its first
  * scale - precision digits zeros; a scale below 0 a whole number whose last -scale digits are zeros
@@ -212,7 +212,7 @@ function notAbove(limit: string): string {
 }
 
 /* a bigint in drizzle's string mode: decimal digits within int8's range, as one pattern a JSON
-   Schema reader applies too (CS8 of r22b): at most 18 significant digits, or 19 not past the bound */
+   Schema reader applies too: at most 18 significant digits, or 19 not past the bound */
 const int64Text = (): string =>
 	`z.string().regex(/^(?:0*(?:[0-9]{1,18}|${notAbove("9223372036854775807")})|-0*(?:[0-9]{1,18}|${notAbove("9223372036854775808")}))$/u, { message: "Must be a whole number within bigint's range, -2^63 to 2^63 - 1" })`
 
@@ -230,9 +230,9 @@ export const CIDR = "cidrSchema"
  * The spellings Postgres takes for a MAC address. A macaddr: octets of one or two hex digits each,
  * all split by `:` or all by `-`; two halves of six digits; groups of four split by `.` or `-`; or
  * the digits bare. A macaddr8 reads two digits an octet, and one separator, `:`, `-` or `.`, at
- * any of the gaps between them or at none; it takes eight octets, or six, which it widens with ff:fe
- * (AA5 of r22). Its case is written into the classes and each separator is its own branch, as JSON
- * Schema publishes no flag and RE2 takes no backreference (CS2 of r22b)
+ * any of the gaps between them or at none; it takes eight octets, or six, which it widens with ff:fe.
+ * Its case is written into the classes and each separator is its own branch, as JSON
+ * Schema publishes no flag and RE2 takes no backreference
  */
 const HEX = "[0-9A-Fa-f]"
 const OCTET = `${HEX}{1,2}`
@@ -282,7 +282,7 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => timeRule(modifierAs(sqlType, "time")),
 	"string timestamp": ({ sqlType }) => timestampRule(modifierAs(sqlType, "timestamp")),
-	/* the canonical spelling, as README says (F3 of the 0.14.1 review) */
+	/* the canonical spelling, as README says */
 	"string uuid": () => "z.guid()",
 }
 

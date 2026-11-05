@@ -1,5 +1,5 @@
 /**
- * A Postgres file as Postgres runs it (M75): the chunks Atlas sends one at a time (atlas-scan.ts),
+ * A Postgres file as Postgres runs it: the chunks Atlas sends one at a time (atlas-scan.ts),
  * each split into the statements Postgres's parser reads in it, by each RawStmt's `stmt_location`
  * and `stmt_len`, offsets in UTF-8 bytes. A chunk the parser cannot read stays one statement: the
  * classifier rates it unsafe, and a history holding one fails the classification. Each file is
@@ -17,7 +17,7 @@ type RawStmt = { stmt_len?: number | undefined; stmt_location?: number | undefin
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
  * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
- * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); the line,
+ * the text Atlas sends without the lead, which every rating reads; the line,
  * from 1, `sent` starts on in the file; and its tree
  */
 type PgStatement = { line: number; sent: string; text: string; tree: RawStmt[] | undefined }
@@ -31,7 +31,7 @@ type Read = { error?: string | undefined; statements: PgStatement[] }
 /** A Postgres file read: its statements in order, and the first the parser cannot read */
 type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
 
-/** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
+/** A migration file as its dialect reads it: a Postgres file always with its one parse */
 type FileRead = { dialect: "sqlite"; sql: string } | { dialect: "postgres"; read: PgRead; sql: string }
 
 /** A chunk with the line, from 1, its text starts on in the file */
@@ -43,7 +43,7 @@ const newlines = (text: string): number => text.split("\n").length - 1
 /**
  * The statements Postgres reads in one chunk, the comments before it kept on the first. Atlas
  * sends the chunk's text without its lead, and Postgres nests block comments where Atlas's split
- * does not, so the text alone is parsed: a lead can never hide what runs (P1 of the 0.14.1 review)
+ * does not, so the text alone is parsed: a lead can never hide what runs
  */
 function readChunk(chunk: Lined): Read {
 	/* the parser is loaded, or this throws before a chunk is read as unreadable */
@@ -116,7 +116,7 @@ type Trees = Array<RawStmt[] | undefined>
 
 // lru-cache: each Postgres schema's history trees, released with the schema; one without a record is parsed again.
 // A schema is public data (ExtractedSchema) that a caller of classifyMigration or parseMigration builds with
-// extractSchema and hands back as `before`, so its trees cannot travel on it (M86)
+// extractSchema and hands back as `before`, so its trees cannot travel on it
 const TREES = /* @__PURE__ */ new WeakMap<object, Trees | undefined>()
 
 /** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */

@@ -1,5 +1,5 @@
 /**
- * libsql's vector indexes (SL3 of r22): `CREATE INDEX i ON t (libsql_vector_idx(c))` makes, as it
+ * libsql's vector indexes: `CREATE INDEX i ON t (libsql_vector_idx(c))` makes, as it
  * runs, a shadow table `i_shadow`, its index `i_shadow_idx`, and, with the first, the table
  * `libsql_vector_meta_shadow`. Those three are libsql's, never a file's: a copy creates the index
  * and lets libsql make them, and a baseline compares the index alone, since no engine but libsql's

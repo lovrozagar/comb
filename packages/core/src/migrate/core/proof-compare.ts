@@ -112,7 +112,7 @@ function compareTable(db: LocalDb, table: string, { now, was }: { now: Shape; wa
 
 /**
  * Where `now` holds each column of `was`: by its name, or under a new one matched by its values as
- * renamedTo matches it, with the renames; none when a column has no match or the rows differ (C9)
+ * renamedTo matches it, with the renames; none when a column has no match or the rows differ
  */
 function columnMoves(was: Shape, now: Shape): Array<[string, string]> | undefined {
 	const moves: Array<[string, string]> = []

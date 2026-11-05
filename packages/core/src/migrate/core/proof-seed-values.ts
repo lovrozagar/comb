@@ -5,9 +5,9 @@
  * holds outer whitespace and an empty string, so a trim or a NULLIF shows; BLOB slots are bytes.
  * The shapes a CHECK commonly asks for are each affinity's fallbacks: JSON, an email, a UUID, a
  * hex digest, digits and a datetime() text for text, a ratio in [0, 1] for reals, epoch
- * milliseconds and a 32-bit number counting down from 2^31 - 1 for integers (M47); and epoch
+ * milliseconds and a 32-bit number counting down from 2^31 - 1 for integers; and epoch
  * milliseconds after the seed's own time, for a CHECK that wants one later than a column whose
- * default reads now (C14 of the 0.14.1 review). A CHECK cannot read now itself: SQLite refuses it.
+ * default reads now. A CHECK cannot read now itself: SQLite refuses it.
  */
 import { affinityOf } from "./sqlite-affinity.ts"
 
@@ -84,13 +84,13 @@ const shapeCount = (): number => Math.max(...Object.values(SHAPES).map((shapes) 
 /**
  * Which values a row tries: its slot; whether every column with a default takes it; whether the
  * slot's values go in plain (without the column's offset); a text shape; whether it is a fallback,
- * where row 4 takes values instead of NULLs; whether every nullable column is left NULL (C14)
+ * where row 4 takes values instead of NULLs; whether every nullable column is left NULL
  */
 type Attempt = {
 	defaults: boolean
 	fallback: boolean
 	nulls?: true | undefined
-	/** the one nullable column, by its nullOrdinal, that takes a value, every other nullable one NULL (27.17) */
+	/** the one nullable column, by its nullOrdinal, that takes a value, every other nullable one NULL */
 	only?: number | undefined
 	plain: boolean
 	row: number
@@ -127,7 +127,7 @@ function ownValue(value: unknown, index: number): unknown {
 	return number + (number < 0 ? -1 : 1) * index * 1000
 }
 
-/** The dimensions of a libsql vector column (`F32_BLOB(3)` and its kin), whose index takes only a vector of that many (SL3 of r22) */
+/** The dimensions of a libsql vector column (`F32_BLOB(3)` and its kin), whose index takes only a vector of that many */
 const vectorDimensions = (type: string): number | undefined => {
 	const dimensions = /^\s*F(?:32|64|16|B16|8|1BIT)_BLOB\s*\(\s*(\d+)\s*\)\s*$/i.exec(type)?.[1]
 	return dimensions === undefined ? undefined : Number(dimensions)
@@ -166,8 +166,8 @@ function valueFor(column: Column, at: Attempt & { variant: number }, listed: rea
  * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
  * table refuses, every default with each slot, each slot plain, each shape, then every nullable
  * column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for, alone and with each shape,
- * as a table that also asks for a time past now does (N6 of plan 15's rerun), then each of the
- * `nullables` nullable columns set alone, the rest NULL, which "exactly one of them" asks for (27.17), alone and with each shape (27.20)
+ * as a table that also asks for a time past now does, then each of the
+ * `nullables` nullable columns set alone, the rest NULL, which "exactly one of them" asks for, alone and with each shape
  */
 function attempts(row: number, nullables: number): Attempt[] {
 	const own = slotOf(row)
@@ -203,7 +203,7 @@ function attempts(row: number, nullables: number): Attempt[] {
 			row,
 			slot: own,
 		})),
-		/* each of them with each shape too, as a table that also asks for a time past now does (27.20) */
+		/* each of them with each shape too, as a table that also asks for a time past now does */
 		...Array.from({ length: nullables * shapeCount() }, (_, n) => ({
 			defaults: true,
 			fallback: true,

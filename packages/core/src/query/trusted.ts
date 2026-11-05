@@ -34,11 +34,11 @@ function assertSchemaParsed(parsed: Parsed): void {
 }
 
 /**
- * Throw a 400 for a page that is not a whole number from 1 (U5), which would bind a negative or
+ * Throw a 400 for a page that is not a whole number from 1, which would bind a negative or
  * fractional offset, or that passes the default maxPage: an offset that deep makes the database
- * skip every row before it, which a list schema refuses (C4). A schema's output states its own
+ * skip every row before it, which a list schema refuses. A schema's output states its own
  * maxPage as `pageBound`, which replaces the default here, so a spread of it stays held to that
- * number (C7 of r19); `validated` says the filter and the order were checked, never the page (U29).
+ * number; `validated` says the filter and the order were checked, never the page.
  */
 function assertPageWithin(parsed: {
 	page?: number | null | undefined
@@ -54,7 +54,7 @@ function assertPageWithin(parsed: {
 
 /**
  * Throw a 400 for a limit that is not a whole number from 1, which reaches LIMIT and OFFSET as a
- * page does (Q16 of r17); a schema's own limit is one already. The key is the page's, so an app's
+ * page does; a schema's own limit is one already. The key is the page's, so an app's
  * map of error keys needs no new one
  */
 function assertLimitWithin(parsed: { limit: number; limitBound?: number | undefined }): void {
@@ -65,7 +65,7 @@ function assertLimitWithin(parsed: { limit: number; limitBound?: number | undefi
 			status: "bad_request",
 		})
 	}
-	/* a limit no schema bounded is held to the default maxLimit, as such a page is to maxPage (Q16 of r18) */
+	/* a limit no schema bounded is held to the default maxLimit, as such a page is to maxPage */
 	const bound = parsed.limitBound ?? PAGINATION_DEFAULTS.maxLimit
 	if (parsed.limit <= bound) return
 	throw new CombError({
@@ -75,7 +75,7 @@ function assertLimitWithin(parsed: { limit: number; limitBound?: number | undefi
 	})
 }
 
-/** The 400 for a page that is no whole number from 1, from a list schema or from a builder (U36) */
+/** The 400 for a page that is no whole number from 1, from a list schema or from a builder */
 function invalidPage(page: unknown): CombError {
 	return new CombError({
 		cause: `page ${typeof page === "string" ? JSON.stringify(page) : String(page)} is not a whole number from 1`,

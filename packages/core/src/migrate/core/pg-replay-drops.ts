@@ -1,8 +1,8 @@
 /**
- * What a dev replay drops on devUrl's server (P2 and P4 of r21, P4 of r22): its own database, roles
+ * What a dev replay drops on devUrl's server: its own database, roles
  * and slots once it ends or a signal stops it (cleanUp), and what a replay killed past that left,
  * which the next replay or apply sweeps. A drop that fails never decides the verdict, and is said,
- * never left unsaid (r22b): what it left, dev's error, and whether a later sweep takes it, as a
+ * never left unsaid: what it left, dev's error, and whether a later sweep takes it, as a
  * stray of a refused window carries no tag a sweep finds. The replay database is dropped WITH
  * (FORCE), so a backend that came in after the cleanup ended the others cannot hold it.
  */
@@ -84,14 +84,14 @@ async function dropMade(admin: Sql, role: string): Promise<void> {
 
 /**
  * Drop what replays over at `now` left, each drop that fails `leave`d: every replay database this
- * role may drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are
- * ended (P4 of r22) and one a template no more, and the tagged roles
+ * role may drop, whichever role made it, once the backends its replay left in it are
+ * ended and one a template no more, and the tagged roles
  */
 async function sweep(admin: Sql, now: number, leave: Leave): Promise<void> {
 	const { databases, roles } = await leftovers(admin, now, true)
 	for (const { name, pids, template } of databases) {
 		for (const pid of pids) await settle(() => admin.unsafe("SELECT pg_terminate_backend($1)", [pid]))
-		/* Postgres drops no template, which a committing DO can make the replay's database (AE8 of r22) */
+		/* Postgres drops no template, which a committing DO can make the replay's database */
 		if (template) await settle(() => admin.unsafe(`ALTER DATABASE ${sqlIdentifier(name)} IS_TEMPLATE false`, []))
 		await dropOr(leave, { swept: true, what: `database ${name}` }, () =>
 			admin.unsafe(`DROP DATABASE IF EXISTS ${sqlIdentifier(name)}`, []),
@@ -107,11 +107,11 @@ const SWEEPS = "sweep what a killed check left on a postgres:// devUrl's server"
 const SWEEP_TIMEOUT = 5
 
 /**
- * The sweep, run on `target`'s dev server before an apply (P2 of r21): a check killed past its
+ * The sweep, run on `target`'s dev server before an apply: a check killed past its
  * cleanup leaves a role there, which apply's CREATE ROLE of it stops at where dev and target share
  * a server. Only that server matters, so apply asks the target's own server first, which it reaches
  * anyway, and connects to devUrl only when the target's holds what a sweep would take, waiting
- * SWEEP_TIMEOUT for it (PR7 of r22b). Housekeeping never stops an apply, so without the postgres
+ * SWEEP_TIMEOUT for it. Housekeeping never stops an apply, so without the postgres
  * package, on Atlas's docker:// container or with nothing left it sweeps nothing, and a sweep that
  * fails is `print`ed and passed
  */

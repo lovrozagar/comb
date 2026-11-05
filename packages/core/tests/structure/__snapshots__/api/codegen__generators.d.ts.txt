@@ -58,9 +58,9 @@ export type ConstraintsConfig = {
 /**
  * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
  * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
- * the one translation would name the wrong column for one (F20). Renaming the keys would break
+ * the one translation would name the wrong column for one. Renaming the keys would break
  * every consumer's translations, so a repeat is refused instead. The one answer a table's private
- * constraints share is no repeat: to a client that never sees the column, they mean one thing (F66).
+ * constraints share is no repeat: to a client that never sees the column, they mean one thing.
  */
 export declare function buildConstraintMap(tables: readonly TableMeta[], dialect?: Dialect, partitions?: Readonly<Record<string, readonly string[]>>): ConstraintMap;
 /** Every constraint in the map, flattened */
@@ -422,7 +422,7 @@ export type SharedName = "cidrSchema" | "jsonValueSchema" | "timestampSchema";
 export type FieldInfo = {
     key: string;
     type: SchemaType;
-    /** The shared schemas the field's code names, as its builder says (C4 of r20) */
+    /** The shared schemas the field's code names, as its builder says */
     uses: readonly SharedName[];
     zodType: string;
 };
@@ -843,7 +843,7 @@ declare function withCombColumn<B>(builder: B, meta: {
 }): B;
 /** The comb metadata a built column (or its builder) carries; undefined for a column no `c` helper built */
 declare function combColumnMeta(column: unknown): CombColumnMeta | undefined;
-/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state (F9) */
+/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state */
 declare function enumMeta(values: readonly string[], options?: {
     nomutate?: boolean | undefined;
     private?: boolean | undefined;
@@ -1056,7 +1056,7 @@ declare const isStringArray: (value: unknown) => value is string[];
 declare function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid";
 /**
  * `partialUniqueIndexes` arrived in 0.15, after `uniqueIndexes`: absent, it reads as []; each needs
- * its predicate, without which it would read as the uniqueness it is not (C7)
+ * its predicate, without which it would read as the uniqueness it is not
  */
 declare function readPartialUniqueIndexes(raw: unknown): PartialUniqueIndexMeta[] | "invalid";
 export { isRecord, isStringArray, readPartialUniqueIndexes, readUniqueIndexes };

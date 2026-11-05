@@ -274,9 +274,9 @@ declare class ShardRouter {
     private placeFirst;
     /**
      * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
-     * its mapping; logs the placement only when the write placed it, so the events count rows (U40).
+     * its mapping; logs the placement only when the write placed it, so the events count rows.
      * Cached only while no invalidate here came after `generation`, which was taken before the
-     * write read the row: one that did, a move's among them, may have remapped it (Q6 of r18)
+     * write read the row: one that did, a move's among them, may have remapped it
      */
     private settle;
 }
@@ -290,7 +290,7 @@ import { c, type SqliteColumns } from "../../columns.ts";
 export declare const ORG_ID_MAX_LENGTH = 64;
 /**
  * Refuse an org id longer than the column holds, measured in UTF-16 code units as `resolve`
- * measures it, so no row is written that `resolve` would answer as a miss (U41). The id is the
+ * measures it, so no row is written that `resolve` would answer as a miss. The id is the
  * caller's input: a route that takes it from a path validates it first.
  */
 export declare function assertOrgId(orgId: string): void;
@@ -495,7 +495,7 @@ export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, Sess
 
 // query/pagination.d.ts
 /**
- * How a built list pages what it fetched (Q6, C3, C19, C2 of the 0.14.1 review). Each builder
+ * How a built list pages what it fetched. Each builder
  * (`buildListQuery`, its `merged` list included, `buildDerivedListQuery`, `queryHelpers.listOptions`)
  * hands over a `pagination` descriptor: the page it read, whether a cursor can resume it, how a
  * long key is carried, and how many rows it asked for. `paginate` reads it, so nothing about the
@@ -562,7 +562,7 @@ type ListPagination = {
 };
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
-    /** the sort fields whose keys the list binds as read, with no row to read a bound from (QL1 of r22b); every one on a derived list */
+    /** the sort fields whose keys the list binds as read, with no row to read a bound from; every one on a derived list */
     asRead?: ReadonlySet<string> | undefined;
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
@@ -934,7 +934,7 @@ declare function sortSignature(parsedSort: readonly SortField[]): string;
 declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
- * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap. A
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
  * the row as the driver read it, whose value readCursor returns for a key `record` binds otherwise
  */
@@ -961,7 +961,7 @@ declare function openCursor(cursor: string, options: CursorOptions): OpenedCurso
 declare function readKeyset(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): OpenedCursor;
 /**
  * The cursor as the merge compares rows with it: readKeyset's, a REAL's text as the number typedKeys
- * parses each shard's row's text to, the same parse of the same text (AB4-7 of area B)
+ * parses each shard's row's text to, the same parse of the same text
  */
 declare function readCompared(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
 /**
@@ -1044,7 +1044,7 @@ declare function assertCursorWired(options: CursorOptions): void;
 declare const sealedLength: (length: number) => number;
 /**
  * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
- * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
+ * bytes first: AEAD hides the bytes, not their count, and a cursor carries a hidden column's
  * value too. openSealed strips them: what seal takes ends in no space of its own.
  */
 declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
@@ -1056,7 +1056,7 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
 
 // query/list-extras.d.ts
 import type { SortField } from "./types.ts";
-/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from */
 declare const COMB_ID: "_combId";
 declare const INTEGER_TEXT: RegExp;
 /**
@@ -1064,7 +1064,7 @@ declare const INTEGER_TEXT: RegExp;
  * or on Postgres its family (`float`, `fixed`, `time`, `other`), which no key's value is read by
  */
 type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text" | "time";
-/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
+/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint */
 declare const unencoded: (value: unknown) => unknown;
 /**
  * The class of each of `sort`'s keys, then the tiebreak's, from the row's `_combKeyTypes`; none where
@@ -1073,37 +1073,37 @@ declare const unencoded: (value: unknown) => unknown;
 declare function storedClasses(row: Record<string, unknown>): readonly KeyClass[] | undefined;
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
- * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
+ * kind. An extra rendered by hand as its own alias reads as that string.
  */
 declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
 /**
  * A 500 naming the first of `sort`'s keys whose stored value the row's `_combKeyTexts` marks as none
  * a list binding it as read places: a SQLite value of a class its mode reads as another, `!` and the
- * class (a timestamp's TEXT, a boolean's value but 0 or 1, AB4-2 of area B); and a Postgres float the session's extra_float_digits prints rounded on any list (AB4-4 of area B).
+ * class (a timestamp's TEXT, a boolean's value but 0 or 1); and a Postgres float the session's extra_float_digits prints rounded on any list.
  * paginate asks it of every row it serves, so the refusal never hangs on which row ends a page
  */
 declare function refuseUnheld(row: Record<string, unknown>, sort: readonly SortField[]): void;
 /**
  * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
- * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
+ * carries: an integer the driver read as a decimal string as that integer, so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
- * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
- * stored value `_combKeyTexts` carries (QL2 of r22b), and a SQLite key holding a value of a class
- * its mode reads as another the value `_combTextKeys` carries: a timestamp's TEXT (B2-3 of area B), a
- * boolean's value but 0 or 1 (AB3-2), a text's integer (AB4-2 of area B). A text key that looks like a number stays
- * text. The merge compares rows through it (Q2 of r20).
+ * integer; a REAL ±Infinity D1's transport read as null as itself; a time key its
+ * stored value `_combKeyTexts` carries, and a SQLite key holding a value of a class
+ * its mode reads as another the value `_combTextKeys` carries: a timestamp's TEXT, a
+ * boolean's value but 0 or 1, a text's integer. A text key that looks like a number stays
+ * text. The merge compares rows through it.
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
 /**
  * The sort fields whose value in `typedKeys(row, sort)` is the stored text `_combKeyTexts` or `_combTextKeys` carried in
- * place of the value as read (comb-9d's AB2 ruling), which a cursor binds as itself, past the
+ * place of the value as read, which a cursor binds as itself, past the
  * column's mapper; every other key binds through it, a text key that looks like a number included
  */
 declare function carriedTexts(row: Record<string, unknown>, sort: readonly SortField[]): Set<string>;
 /**
  * `typedKeys(row, sort)` as a cursor carries it: each SQLite REAL key's text, held (`_combTextKeys`)
  * or a timestamp's carried (`_combKeyTexts`), as its RealText, which the next page binds as the list
- * checked it (AB4-7 of area B); the merge compares typedKeys' numbers, the same parse of the same text
+ * checked it; the merge compares typedKeys' numbers, the same parse of the same text
  */
 declare function cursorKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
 export { carriedTexts, cursorKeys, COMB_ID, INTEGER_TEXT, type KeyClass, malformed, refuseUnheld, storedClasses, typedKeys, unencoded, };
@@ -1272,7 +1272,7 @@ declare class CursorRef {
     constructor(prefix: string, length: number);
 }
 /**
- * A SQLite REAL key's stored value as the text of it SQLite reads back as it (AB4-7 of area B): the
+ * A SQLite REAL key's stored value as the text of it SQLite reads back as it: the
  * cursor carries the text and flags it (`r`), and the next page binds `cast(? as real)`, one SQLite
  * parse of one text, as the list checked it, where a JS number's shortest form D1 may parse as another
  */
@@ -1663,7 +1663,7 @@ type LimitsGiven<T> = {
 };
 /**
  * `given` over `defaults`, a key set to undefined left out as every other option bag reads it, each
- * other a whole number from 0, a TypeError naming it and `owner` otherwise (KT1 of r22b): a cap of
+ * other a whole number from 0, a TypeError naming it and `owner` otherwise: a cap of
  * NaN or undefined compared false, which turned it off. No cap is a large whole number
  */
 declare function limitsOver<T extends Record<string, number>>(owner: string, defaults: T, given: LimitsGiven<T> | undefined): T;

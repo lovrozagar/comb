@@ -3,13 +3,13 @@
 /* a run of the combining marks NFKD splits off a letter (é is e + U+0301), with the letter before it when that letter is Cyrillic */
 const MARKS = /(\p{Script=Cyrillic})?([\u0300-\u036f]+)/gu
 /* Hebrew points and cantillation, Arabic harakat, the superscript alef and Quranic marks, and the
-   tatweel that stretches a word: optional, and not typed (U31) */
+   tatweel that stretches a word: optional, and not typed */
 const SEMITIC_MARKS = /[\u0591-\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed\u0640]/gu
 
 /**
  * `text` without its combining marks, but those that make a Cyrillic letter of its own (й is и +
  * U+0306, ї is і + U+0308): a mark stays only where NFC puts it back into one letter with the one
- * before it, so a stress mark (а́, which no letter holds) goes, as FTS5's unicode61 drops it (U7)
+ * before it, so a stress mark (а́, which no letter holds) goes, as FTS5's unicode61 drops it
  */
 const unmarked = (text: string): string =>
 	text

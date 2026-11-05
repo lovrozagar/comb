@@ -1,13 +1,13 @@
 /**
  * The value a cursor's row read for each key the keyset binds as another, as the cursor's `d`
  * carries it: one slot per key, null where the two are one, else the read value encoded
- * alone in an array, so a read null (D1's for a REAL ±Infinity) is told from a key read as bound
- * (AB3-3 of area B). A cursor minted before holds a Date's epoch milliseconds, or "invalid" for an
+ * alone in an array, so a read null (D1's for a REAL ±Infinity) is told from a key read as bound.
+ * A cursor minted before this encoding holds a Date's epoch milliseconds, or "invalid" for an
  * Invalid Date, in a slot; both still read.
  */
 import { carried, CursorRef, type CursorValue, decodeValue, encodeValue, sameValue } from "./cursor-codec.ts"
 
-/* the Date of a row that holds none, as a cursor minted before AB3-3 writes it */
+/* the Date of a row that holds none, as a cursor minted before this encoding writes it */
 const INVALID_READ = "invalid"
 
 /** A key's read value, or null for a key read as bound */

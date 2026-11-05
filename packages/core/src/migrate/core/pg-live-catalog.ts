@@ -1,22 +1,22 @@
 /**
  * The one catalog read a Postgres baseline makes (pg-live-objects.ts), in one round trip, of what
  * Atlas OSS leaves out of its comparison. Each row says `what` it is; `how` spells its settings as
- * the history's are spelled (P10 of r18), so the two compare as text.
+ * the history's are spelled, so the two compare as text.
  *
  * - The target schema's functions and procedures, but an extension's (a member of it through
  *   pg_depend, deptype e) and one another object makes (deptype i: a range type's constructors),
  *   each with its input argument types as the parser spells them (the catalog's type name, an array
  *   as its element's and [], the schema left out for pg_catalog and the target's).
  * - Its tables' triggers, but the internal ones a constraint makes, with tgtype and whether they
- *   fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and DISABLE (P13);
+ *   fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and DISABLE;
  *   a partition's clone of its parent's trigger is Postgres's, so it is left out (tgparentid).
  * - Its views, materialized views and sequences, but an extension's and a sequence a column owns (a
  *   serial's or an identity's, deptype a or i), a sequence with its settings; each table's policies,
- *   with their command, roles and whether they are permissive (P9 of the 0.15.0 review).
+ *   with their command, roles and whether they are permissive.
  * - Its domains, composite and range types and collations, but an extension's; each table's rules but
  *   a view's own; each table's row level security where it is on; every extension but plpgsql.
- * - The role the read connects as, which a policy's CURRENT_USER names (R2 of plan 17).
- * - P12 of r19, as `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
+ * - The role the read connects as, which a policy's CURRENT_USER names.
+ * - As `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
  *   its operators; each cast over one of its types or functions; each view's and materialized view's
  *   options (security_invoker, security_barrier, check_option); each materialized view's indexes; each
  *   table's replica identity where it is not the default. As `platform` labels, database-wide, which a

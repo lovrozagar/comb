@@ -2,7 +2,7 @@
  * The shard router's cache tiers: this isolate's LRU (stale-while-revalidate), the orgs the primary
  * had no mapping for, and KV (kv-cache.ts). A read that began before an invalidate in this isolate
  * holds the mapping from before it and must not cache it: a generation per org says so. Across
- * isolates, KV's tombstone nonce decides which mapping a reader trusts (Q7, C1 of the 0.14.1 review).
+ * isolates, KV's tombstone nonce decides which mapping a reader trusts.
  */
 import { LruCache } from "../../../lru.ts"
 import { DEFAULTS } from "./config.ts"
@@ -16,7 +16,7 @@ type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv; tag: string | nul
 /**
  * What a KV read gives the org: a mapping to trust, or none; the nonce of a live tombstone, when
  * there is one, which fences the core read: it goes to the primary and tags what it fills; and
- * whether a KV read failed, when the core read goes to the primary and fills the LRU alone (Q6)
+ * whether a KV read failed, when the core read goes to the primary and fills the LRU alone
  */
 type KvLookup = { fence: string | null; kvFailed: boolean; mapping: ShardMapping | null }
 
@@ -57,7 +57,7 @@ class ShardCache {
 	async readKv(orgId: string, kv: ShardKv): Promise<KvLookup> {
 		const view = await kvView(kv, orgId, this.log)
 		const local = this.tombstoneOf(orgId)
-		/* a tombstone KV could not read may be shadowing the mapping: trust none (Q6) */
+		/* a tombstone KV could not read may be shadowing the mapping: trust none */
 		if (view.failed) return { fence: local, kvFailed: true, mapping: null }
 		const live = new Set([view.nonce, local].filter((n) => n !== null))
 		const fence = view.nonce ?? local
@@ -83,7 +83,7 @@ class ShardCache {
 		return this.tombstones.get(orgId) ?? null
 	}
 
-	/** Cache a mapping a core read gave: in the LRU, and in KV tagged with its fence unless KV could not be read (Q6) */
+	/** Cache a mapping a core read gave: in the LRU, and in KV tagged with its fence unless KV could not be read */
 	fill(mapping: ShardMapping, lookup: Pick<KvLookup, "fence" | "kvFailed">, targets: Omit<CacheTargets, "tag">): void {
 		if (lookup.kvFailed) this.lru.set(mapping.orgId, mapping)
 		else this.populate(mapping.orgId, mapping, { ...targets, tag: lookup.fence })
@@ -101,7 +101,7 @@ class ShardCache {
 	/**
 	 * Forget the org in this isolate's tiers and in KV, leaving a tombstone; another isolate's LRU
 	 * keeps it until it expires. Returns the tombstone's nonce, for a mapping read after the remap,
-	 * and the generation it set, which an invalidate here during its KV write moves on (Q6 of r18)
+	 * and the generation it set, which an invalidate here during its KV write moves on
 	 */
 	async invalidate(orgId: string, kv: ShardKv): Promise<{ generation: number; nonce: string }> {
 		const nonce = crypto.randomUUID()

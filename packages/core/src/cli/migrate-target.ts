@@ -2,7 +2,7 @@
  * The database a `comb migrate` command works on, from comb.migrate.config.ts: its provider, its
  * dialect, and its paths resolved against the config file. `apply` needs an environment when the
  * database declares them; `diff` takes one, and without it reads environments that agree on what a
- * diff reads (KC4 of r22b).
+ * diff reads.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -23,7 +23,7 @@ type TargetRequest = {
 
 /** A database resolved for one command */
 type MigrateTarget = {
-	/** the comb.config.ts database it maps to: its own name unless it says another (C7) */
+	/** the comb.config.ts database it maps to: its own name unless it says another */
 	codegen: string
 	database: string
 	dialect: Dialect
@@ -51,11 +51,11 @@ const diffReads = (provider: ResolvedDatabaseConfig["provider"]): Record<string,
 /**
  * What a diff named no environment reads: the database's provider when it has no environments,
  * else its environments', each falling back to the database's, when they agree on what a diff
- * reads; never one picked by key order (KC4 of r22b), nor the fallback no apply uses alone (KC4a)
+ * reads; never one picked by key order, nor the fallback no apply uses alone
  */
 function diffConfig(name: string, db: DatabaseConfig, resolve: Resolve): ResolvedDatabaseConfig {
 	if (db.environments === undefined) return resolve(db)
-	/* the config's schema refuses a database whose environments name none (K13) */
+	/* the config's schema refuses a database whose environments name none */
 	const [first, ...others] = Object.keys(db.environments).map((env) => resolve(db, env)) as [
 		ResolvedDatabaseConfig,
 		...ResolvedDatabaseConfig[],
@@ -72,7 +72,7 @@ function diffConfig(name: string, db: DatabaseConfig, resolve: Resolve): Resolve
 
 /**
  * `resolve`, its refusals prefixed with the database they are about, as a project of several
- * databases needs (D2-11 of the area D round-two review); each one resolveDatabaseConfig throws is an Error
+ * databases needs; each one resolveDatabaseConfig throws is an Error
  */
 const naming =
 	(name: string, resolve: Resolve): Resolve =>
@@ -114,7 +114,7 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 	const { findConfigFile, loadConfig, resolveDatabaseConfig } = await import("../migrate/config.ts")
 	const configFile = findConfigFile(request.cwd)
 	if (configFile === undefined) {
-		/* an option is refused, never dropped (P17 of r18): diff and every other command alike (AD7 of the area D review) */
+		/* an option is refused, never dropped: diff and every other command alike */
 		if (request.env !== undefined) throw new CliError("-e/--env needs comb.migrate.config.ts to define environments")
 		return undefined
 	}
@@ -149,7 +149,7 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 /**
  * Refuse a field of `target`'s provider, given as `{ <field>: <value> }`, when it is blank, as one
  * read from an unset variable loads: the field to set and whose it is, in a project of several
- * databases and environments (KC7 of r22b, AD9 of the area D review), then `hint`
+ * databases and environments, then `hint`
  */
 function refuseBlank(
 	target: Pick<MigrateTarget, "label" | "provider">,
@@ -166,8 +166,8 @@ function refuseBlank(
 
 /**
  * Refuse `dir` unless it is a directory: one missing, or a file --dir names, which reading it would
- * fail on as ENOTDIR (AD10 of the area D review). `allowMissing` takes a missing one, which a diff
- * starts (D2-7 of the area D round-two review).
+ * fail on as ENOTDIR. `allowMissing` takes a missing one, which a diff
+ * starts.
  */
 function refuseNoDir(dir: string, { allowMissing = false }: { allowMissing?: boolean | undefined } = {}): void {
 	if (!fs.existsSync(dir)) {

@@ -10,7 +10,7 @@ import { pgStatements } from "./pg-split.ts"
  * Where SQLite ends a statement: the token state machine of its sqlite3_complete() (complete.c,
  * public domain). A ; ends one unless it is inside a trigger's body, which ends only at END then ;.
  * Only CREATE [TEMP] TRIGGER, after an optional EXPLAIN, opens a body, so begin, end and case are
- * whatever SQLite reads them as: a column, a table, a CASE (SL2 of r22).
+ * whatever SQLite reads them as: a column, a table, a CASE.
  */
 const SEMI = 0
 const WS = 1
@@ -76,7 +76,7 @@ function finish(reading: Reading): string {
 	return statement
 }
 
-// pg-split.ts, M75
+// pg-split.ts
 /**
  * The statements of `sql`, without their terminating `;`. On SQLite they end where SQLite ends
  * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On
@@ -99,7 +99,7 @@ function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] 
 	return statements.filter((statement) => statement !== "")
 }
 
-/* the whitespace SQLite's tokenizer skips (sqlite3Isspace): any other space, U+00A0 or U+3000, is part of a name (SL5 of r22) */
+/* the whitespace SQLite's tokenizer skips (sqlite3Isspace): any other space, U+00A0 or U+3000, is part of a name */
 const SQLITE_SPACE = /[\t\n\f\r ]+/g
 
 /**
@@ -108,7 +108,7 @@ const SQLITE_SPACE = /[\t\n\f\r ]+/g
  * in data or names never. A migration's hash is taken over this form, so it stays as recorded: a
  * word written against a quoted name stays against it. `foldAll` is the form comb 0.5.0 to 0.20
  * hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type b, and a
- * column named a b) normalized alike (SL5 of r22).
+ * column named a b) normalized alike.
  */
 function hashedSql(sql: string, foldAll = false): string {
 	return collapsed(sql, foldAll, false)

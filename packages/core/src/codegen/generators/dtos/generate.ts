@@ -93,7 +93,7 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
  * Generate DTO schemas from analyzed tables
  */
 export function generateDtos(ctx: GeneratorContext, config: DtosConfig): void {
-	/* each c.json schema under a name of its own in every file that imports it (F1, F2) */
+	/* each c.json schema under a name of its own in every file that imports it */
 	const named = { ...ctx, analysis: aliasSchemaImports(ctx.analysis, ctx.cwd) }
 	const tables = named.analysis.tables.map((meta) => tableInfoOf(meta, named))
 	/* Pass 2: auto-deduplicate repeated schemas across all entities */

@@ -28,7 +28,7 @@ const LIST_QUERY_LIMITS: ListQueryLimits = {
 /*
  * A URL limit counts bytes once percent-encoded: Cloudflare's is 16 KB. Of it 2 KB is left for the
  * path and the handler's own params, so the query string comb accepts stays within 14 KB however a
- * client encodes it (U28): the cursor's 8192, and these caps, measured the widest way.
+ * client encodes it: the cursor's 8192, and these caps, measured the widest way.
  */
 const URL_BYTES = 16_384
 const PATH_BUDGET = 2048

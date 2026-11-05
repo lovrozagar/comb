@@ -35,7 +35,6 @@ type DrizzleListOptions = {
 	offset: number
 	/** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
 	orderBy: (table: RelationalTable) => SQL[]
-	// Q3 of r17, Q2, U26
 	/**
 	 * For `findMany({ extras })`: the columns `paginate` reads from each row, and refuses a page
 	 * without. `project` strips them from the rows it returns
@@ -46,10 +45,8 @@ type DrizzleListOptions = {
 	} & Partial<{
 		/** on a cursor whose row may be gone: 1 when it is, which `paginate` answers with a 400 asking to start again */
 		_combAnchorGone: (table: RelationalTable) => SQL<number>
-		// QL3 of r22b
 		/** each sort key's stored text where reading it back rounds it; on every list with a sort */
 		_combKeyTexts: (table: RelationalTable) => SQL<string>
-		// B2-3 of area B
 		/** each SQLite timestamp sort key's stored TEXT, which the next cursor binds as stored; on every list with a sort */
 		_combTextKeys: (table: RelationalTable) => SQL<string>
 		/** on a page read by number: every row the filter matches, which `paginate` reports as the count */
@@ -70,7 +67,7 @@ type DrizzleListOptions = {
 
 /**
  * The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake,
- * `sort_not_wired` as buildListQuery answers it (QL11 of r22b). A table with no `id` has no tiebreak,
+ * `sort_not_wired` as buildListQuery answers it. A table with no `id` has no tiebreak,
  * which listOptions needs on every request, so it is refused by its own cause, keyed as buildListQuery
  * keys a cursor over it
  */
@@ -95,7 +92,7 @@ function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: Sor
 
 /**
  * Refuse a computed sort where the options are built, not lazily in `orderBy`: the relational
- * API orders by the table's columns alone, and no table is needed to know it (QL11 of r22b)
+ * API orders by the table's columns alone, and no table is needed to know it
  */
 function refuseComputed(sort: readonly SortField[]): void {
 	const computed = sort.find(({ field }) => field.startsWith("@"))
@@ -107,14 +104,13 @@ function refuseComputed(sort: readonly SortField[]): void {
 	})
 }
 
-/** The id a cursor resumes from: the tiebreak itself, decoded as its column decodes (Q2 of r17) */
+/** The id a cursor resumes from: the tiebreak itself, decoded as its column decodes */
 function tiebreakOf(table: RelationalTable): SQL {
 	/* drizzle's relational callbacks hand over the table's columns, each a decoder */
 	const column = keysOn(table, []).tiebreak.column as Column
 	return sql`${column}`.mapWith(column)
 }
 
-// AB4-1 of area B
 /**
  * The `_combId` extra, which notes the table drizzle reads the rows from, as it hands it to every query's
  * callbacks, and the check positionOn opens the next cursor by, run on that table's columns, so the next
@@ -140,7 +136,7 @@ const countOver = (): SQL<number> => sql<number>`cast(count(*) over() as integer
 
 /**
  * The extras that carry a key's text where its read rounds it or loses its time, and a SQLite
- * timestamp's TEXT, which the next cursor binds (QL3 of r22b, B2-3 and AB3-4 of area B), in the
+ * timestamp's TEXT, which the next cursor binds, in the
  * dialect the table's columns are of; none on a list with no sort
  */
 function textsOf(sort: readonly SortField[]) {
@@ -171,7 +167,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		const { keys, tiebreak } = keysOn(table, sort)
 		return orderByKeys(keys, tiebreak)
 	}
-	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3); the return checks `extras` */
+	/* every row carries what paginate reads, and a page whose rows do not is refused; the return checks `extras` */
 	const texts = textsOf(sort)
 	const { holds, idOf } = checkedOn(sort)
 	const base = <E extends object>(given: E) => {
@@ -190,7 +186,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		}
 	}
 	if (!query.cursor) {
-		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
+		/* a page no schema bounded is bounded here, as buildListQuery bounds it */
 		assertPageWithin(query)
 		return { ...base({ _combId: idOf, _total: countOver }), offset: ((query.page ?? 1) - 1) * query.limit }
 	}

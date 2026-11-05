@@ -1,8 +1,8 @@
 /**
- * The apply itself, once comb approved the pending files: one Atlas call per file (PA1 of r22b), so
- * each file runs on a session of its own, as it would alone, as on SQLite (S1 of r21) and on D1. No
+ * The apply itself, once comb approved the pending files: one Atlas call per file, so
+ * each file runs on a session of its own, as it would alone, as on SQLite and on D1. No
  * reading of a file proves what it leaves on its session: a trigger, a default, a DO block's EXECUTE
- * or code the target holds can each run a SET that outlives its COMMIT (r22 area E, AE1 to AE5).
+ * or code the target holds can each run a SET that outlives its COMMIT.
  */
 import { hold } from "./cleanup.ts"
 import { execOrder, type Foreign, ownHistory } from "./atlas-foreign.ts"
@@ -12,7 +12,7 @@ import { atlas, type AtlasCommand, atlasStatus } from "./atlas-status.ts"
 
 /**
  * After an Atlas call that ran no file and said nothing, once this apply ran `applied`: done once
- * another apply ran the rest, refused while any is pending (P8)
+ * another apply ran the rest, refused while any is pending
  */
 async function ranNothing(
 	options: AtlasCommand,
@@ -30,7 +30,7 @@ async function ranNothing(
 
 /**
  * What SIGINT or SIGTERM runs once it stopped this apply's Atlas call and that call ended (cleanup.ts
- * runs a child's step before this one, PA4 of r22): the history read once more, and which approved
+ * runs a child's step before this one): the history read once more, and which approved
  * files it records and which it does not, printed; no further call starts, and the process then ends
  * by the signal
  */

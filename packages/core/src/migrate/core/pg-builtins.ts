@@ -210,7 +210,7 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
  * own is what Postgres resolves `lower(x)` to. A bare call names it in any schema, as the search
  * path may hold that schema; one qualified by `schema`, the target's, names it there. Only
  * pg_catalog names a built-in: `public.lower` is a function of public's, from outside the history
- * unless a migration defined it (M90).
+ * unless a migration defined it.
  */
 function builtinFinding(
 	name: readonly string[],

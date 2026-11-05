@@ -43,7 +43,7 @@ export function legacyMigrationHash(sql: string): string {
 
 /**
  * The hash comb 0.5.0 to 0.20 recorded, whose normalizing folded every Unicode space, which SQLite
- * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it (SL5 of r22)
+ * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it
  */
 export function foldedMigrationHash(sql: string): string {
 	return createHash("sha256").update(hashedSql(sql, true)).digest("hex")
@@ -58,7 +58,7 @@ export type AcceptedHash = { hash: string; until: number }
 /**
  * Every hash `sql` may be recorded under, current first, each with the time before which a row may
  * hold it: the current and the folded one (0.5.0 to 0.20) on any row, as no date tells which comb
- * recorded it (SL5 of r22), the pre-0.5.0 one before V0_5_0
+ * recorded it, the pre-0.5.0 one before V0_5_0
  */
 export function migrationHashes(sql: string): AcceptedHash[] {
 	const accepted: AcceptedHash[] = []
@@ -96,7 +96,7 @@ export function parseMigration(sql: string, filename: string, options: ClassifyO
 	return parseRead({ ...fileRead(sql, taken.dialect ?? "sqlite"), filename }, taken)
 }
 
-/** Refuses `sql`, the file `filename`, when Atlas reads a leading `atlas:` line of it as a comment (PA3n of r22b) */
+/** Refuses `sql`, the file `filename`, when Atlas reads a leading `atlas:` line of it as a comment */
 function refuseStrayDirective(sql: string, filename: string): void {
 	const stray = strayDirective(sql)
 	if (stray === undefined) return
@@ -106,7 +106,7 @@ function refuseStrayDirective(sql: string, filename: string): void {
 }
 
 /**
- * parseMigration of a file its caller has read: on Postgres its one parse (M86), with what check's
+ * parseMigration of a file its caller has read: on Postgres its one parse, with what check's
  * replay on devUrl measured of it when it `replayed` the file
  */
 export function parseRead(

@@ -1,6 +1,6 @@
 /**
  * What an FTS sync trigger is, read once for every reader: the classifier's grammar, the schema
- * reader the engine and the rebuild guard take their exemptions from (M43). A sync trigger writes
+ * reader the engine and the rebuild guard take their exemptions from. A sync trigger writes
  * only a row's own values, or the `'delete'` command, into FTS5 tables whose text lives elsewhere;
  * any other FTS5 command, `'delete-all'` among them, makes it a trigger like any other.
  */

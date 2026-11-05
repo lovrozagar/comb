@@ -1,5 +1,5 @@
 /**
- * A `_search` column refolded with searchText (C15 of the 0.14.1 review). searchText folds in JS,
+ * A `_search` column refolded with searchText. searchText folds in JS,
  * which no SQL can express, so a backfill reads each row and writes its fold back: `select` reads
  * every row's rowid, its sources and the text it stores, and `updates` turns those rows into one
  * UPDATE per row whose fold differs from what it stores, so a second run writes nothing and a D1

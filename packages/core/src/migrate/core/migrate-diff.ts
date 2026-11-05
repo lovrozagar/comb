@@ -35,7 +35,7 @@ export type MigrateDiffOptions = {
 	run?: Run | undefined
 	/** Postgres: the database's dev database and schema Atlas diffs in */
 	target?: PgTarget | undefined
-	/** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it (P12) */
+	/** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it */
 	readyDev?: ((target: PgTarget) => Promise<void>) | undefined
 }
 
@@ -93,7 +93,7 @@ async function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): P
 				? await atlas.exec("atlas", [...args, "--dev-url", sqliteDevUrl(), ...format])
 				: await withAtlasEnv(atlas.target, { dev: true }, async (env) => {
 						const ran = await atlas.exec("atlas", [...args, ...env.args, ...format], { env: env.env })
-						/* diff gives Atlas the dev database alone: a database not clean is the dev's (P3) */
+						/* diff gives Atlas the dev database alone: a database not clean is the dev's */
 						const stderr = explainAtlasFailure(ran.stderr, env.scrub, { devOnly: true })
 						return { ...ran, stderr, stdout: env.scrub(ran.stdout) }
 					})
@@ -181,7 +181,7 @@ async function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Promise<
 		const target = separatePgObjects(options.targetSchema)
 		/* the dev database gets the sequences and extensions a table may need first, in the copy's first file and the target */
 		const prelude = devPrelude(history, target.state)
-		/* each written back so Atlas sends each statement alone, as Postgres runs it (M75) */
+		/* each written back so Atlas sends each statement alone, as Postgres runs it */
 		for (const [i, { file, head, plain: kept }] of plain.entries())
 			writeFileSync(join(copy, file), atlasFile([...(i === 0 ? pgStatements(prelude) : []), ...kept], head))
 		await hashDir(atlas.exec, copy)
@@ -208,7 +208,7 @@ export async function generateIncrementalMigration(options: MigrateDiffOptions):
 	if (dialect === "postgres" && target === undefined) {
 		throw new Error("a Postgres diff needs the database's target (devUrl and schema)")
 	}
-	/* Atlas replays the history on the dev database, inspecting the target schema there first (P12) */
+	/* Atlas replays the history on the dev database, inspecting the target schema there first */
 	if (dialect === "postgres") await (options.readyDev ?? readyDevSchema)(target as PgTarget)
 	const atlas: Atlas = { dialect, exec, notices: [], target: dialect === "postgres" ? target : undefined }
 	if (!existsSync(migrationsDir)) mkdirSync(migrationsDir, { recursive: true })

@@ -40,8 +40,8 @@ function aliasedColumns(table: SQLiteTable, name: string): { columns: Record<str
 }
 
 /**
- * A negative operator's positive, which a relation filter reads as "no related row matches it"
- * (U30): ne and nin as no related row equal to or in the value, is.null as no related row with a
+ * A negative operator's positive, which a relation filter reads as "no related row matches it":
+ * ne and nin as no related row equal to or in the value, is.null as no related row with a
  * value, is.notnull as no related row without one. undefined for an operator that is its own positive.
  */
 function positiveOf({ operator, value }: FilterCondition): Pick<FilterCondition, "operator" | "value"> | undefined {

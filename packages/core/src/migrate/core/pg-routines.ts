@@ -3,10 +3,10 @@
  * signature, a DROP takes one away (or every one of a name dropped without its arguments), and a
  * rename or a move to another schema carries a signature to its new key, as a schema renamed
  * carries every key under it. A name is defined while a signature of it is left, so a dropped
- * overload leaves its siblings (5.4b). Each signature keeps the volatility its CREATE or a later
- * ALTER FUNCTION gave it, VOLATILE unless one said otherwise, which an added column's default needs
- * (P8 of the 0.15.0 review). `Facts.defined` is the other view, every name ever defined, which
- * reading a call needs (M83).
+ * overload leaves its siblings. Each signature keeps the volatility its CREATE or a later
+ * ALTER FUNCTION gave it, VOLATILE unless one said otherwise, which an added column's default needs.
+ * `Facts.defined` is the other view, every name ever defined, which
+ * reading a call needs.
  */
 import { movedKey } from "./pg-names.ts"
 import { type Facts, flag, keyOf, names, type Node, type Routines, typeOf, type Volatility } from "./pg-nodes.ts"

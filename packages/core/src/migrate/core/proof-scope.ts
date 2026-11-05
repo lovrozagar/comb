@@ -1,5 +1,5 @@
 /**
- * What the D1 proof's copy holds of a shard's schema (8.5 of plan 21, ruled 23:35Z): the live objects pending files
+ * What the D1 proof's copy holds of a shard's schema: the live objects pending files
  * can observe, created, and the tables whose rows they can observe, seeded, so the copy refuses what the whole
  * schema would and costs what the files reach.
  *

@@ -1,6 +1,6 @@
 /**
  * A retype's findings, read against the column's type in the history as Postgres 17 decides them
- * (P12 of the 0.15.0 review, PA11 of r22b; tests/integration/postgres/lock-oracle-retype.test.ts
+ * (tests/integration/postgres/lock-oracle-retype.test.ts
  * holds each rule to the table's and its indexes' filenodes). A retype with no USING keeps every
  * value as it is, so Postgres rewrites nothing, when it changes the type only by a coercion that
  * changes no value:
@@ -13,9 +13,9 @@
  * - an array of the same element type, with no modifier or the same one, of any dimensions.
  * A domain with a CHECK or NOT NULL up its chain checks every row, so a retype to it rewrites; one
  * with none is its flattened base. A column of a domain is its base with no modifier, as Postgres
- * reads a domain column's values. Every other retype rewrites the table and may change a value (P1
- * of r18). A retype in place still rebuilds every index on the column when its collation changes (a
- * domain's when it names none; P3 of r18), when the type's default btree operator family changes
+ * reads a domain column's values. Every other retype rewrites the table and may change a value.
+ * A retype in place still rebuilds every index on the column when its collation changes (a
+ * domain's when it names none), when the type's default btree operator family changes
  * (text to bpchar, bit to varbit, int to oid), or when an array column changes its declared type.
  */
 import type { Finding } from "./classify-alter.ts"

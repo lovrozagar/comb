@@ -1,5 +1,5 @@
 /**
- * A mirror FTS table in the proof copy (M42 part 2): an external-content or contentless one, whose
+ * A mirror FTS table in the proof copy: an external-content or contentless one, whose
  * rows are its content table's, so comparing them proves nothing. The copy builds its index from
  * the seeded content table ('rebuild'), or from rows of its own for a contentless one, and a file
  * is compared by the index's row count: `<t>_docsize`, a row per document, or `<t>_idx` where the

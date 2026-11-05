@@ -28,7 +28,7 @@ const lastPart = (name: string): string => unquote(name).split(".").at(-1) as st
 
 /**
  * How names are keyed: SQLite's way, or Postgres's under the schema comb scopes every URL's
- * search_path to, where an unqualified name resolves (M72)
+ * search_path to, where an unqualified name resolves
  */
 type Naming = "sqlite" | { schema: string }
 
@@ -42,7 +42,7 @@ const dialectOf = (naming: Naming): Dialect => (naming === "sqlite" ? "sqlite" :
  * The name a table, trigger or routine is matched by, as `naming` resolves it. SQLite matches
  * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
  * unquoted name to lower case and keeps a quoted one exact, and resolves an unqualified name in its
- * schema: under `app`, `users` and `app.users` are one table, `public.users` another (M72).
+ * schema: under `app`, `users` and `app.users` are one table, `public.users` another.
  */
 function nameKey(name: string, naming: Naming): string {
 	const dialect = dialectOf(naming)
@@ -66,7 +66,7 @@ function partKey(part: string, dialect: Dialect): string {
 
 /**
  * A pragma statement as SQLite reads it: its name and schema unquoted and folded, the value or argument it gives,
- * and whether its name was written quoted, which sqld's parser refuses (S1 of r22)
+ * and whether its name was written quoted, which sqld's parser refuses
  */
 type Pragma = { name: string; quoted: boolean; schema: string | undefined; value: string | undefined }
 
@@ -77,13 +77,13 @@ const PRAGMA_HEAD = /* @__PURE__ */ new RegExp(
 )
 
 /**
- * A pragma's value as SQLite reads it: a single-quoted string is its text (S2 of r20), a quoted name its name, and
+ * A pragma's value as SQLite reads it: a single-quoted string is its text, a quoted name its name, and
  * a number's unary plus is dropped, as SQLite's grammar drops it (`+1` is `1`, `'+1'` stays `+1`)
  */
 const pragmaValue = (value: string): string =>
 	value.startsWith("'") ? value.slice(1, -1).replaceAll("''", "'") : unquotePart(value.replace(/^\+ ?(?=[\d.])/, ""))
 
-/** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
+/** The pragma `code` runs (read once, so a quoted name is the name), or undefined for any other statement */
 function pragmaOf(code: string): Pragma | undefined {
 	const [, schema, name, set, argument] = PRAGMA_HEAD.exec(code) ?? []
 	if (name === undefined) return undefined
@@ -103,7 +103,7 @@ const qualifiedKey = (name: string): string =>
 /**
  * Every name SQLite code can spell, as SQLite resolves one: each bare word and each quoted name unquoted, and each
  * word of a string, which SQLite reads as a name where one stands (`FROM 'post'`) and a module as its option's
- * (`content='post'`), folded by asciiFold; never a word of a comment (8.5 of plan 21)
+ * (`content='post'`), folded by asciiFold; never a word of a comment
  */
 function sqliteNames(sql: string): Set<string> {
 	return new Set([...joined(sql, "sqlite", true).matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")))
@@ -122,7 +122,7 @@ function stored(name: string): string {
 }
 
 /**
- * Every name Postgres text can spell (P2 of r22): an unquoted word folded, a quoted one exact, and a
+ * Every name Postgres text can spell: an unquoted word folded, a quoted one exact, and a
  * string, single or dollar-quoted, as its exact contents and as the SQL it may be, which a DO body,
  * dblink_exec or format() runs; never a comment's words
  */

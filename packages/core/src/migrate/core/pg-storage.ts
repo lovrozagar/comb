@@ -1,5 +1,5 @@
 /**
- * Where each table, materialized view and index of a Postgres history keeps its rows (PA17 of r22b),
+ * Where each table, materialized view and index of a Postgres history keeps its rows,
  * so a move to where it already is reads as the no-op Postgres 17 makes of it: ATPrepChangePersistence
  * returns before the rewrite for a SET LOGGED of a logged table or a SET UNLOGGED of an unlogged one,
  * ATPrepSetAccessMethod for the access method it has, and CheckRelationTableSpaceMove for the

@@ -1,5 +1,5 @@
 /**
- * Check lets Postgres decide what no database runs (P13 of r19). On a postgres:// devUrl it replays
+ * Check lets Postgres decide what no database runs. On a postgres:// devUrl it replays
  * the history and the pending files on its server as Atlas applies them, baseline's own replay
  * (pg-replay.ts), and a statement Postgres refuses stops check with Postgres's message: a retype of
  * a column a view, a materialized view, a rule, a policy, a trigger's WHEN, a generated column or a
@@ -11,7 +11,7 @@
  *
  * The replay uses a role the server already holds, as the history may have made it on a shared
  * server; a pending file's CREATE ROLE of one stops apply, though, so check reads the target's
- * roles for those first (P7 of r21), on a docker:// devUrl too.
+ * roles for those first, on a docker:// devUrl too.
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"

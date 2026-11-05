@@ -20,14 +20,14 @@ type AppliedFile = {
 	Name: string
 	Skipped?: number | undefined
 }
-/** Atlas writes `applied` as null when it ran no file, as when another apply ran them first (P8) */
+/** Atlas writes `applied` as null when it ran no file, as when another apply ran them first */
 type ApplyReport = { applied: AppliedFile[] | null; error: string }
 
-/** What stays of `file`, of the snapshot `copy`, which failed: a file outside a transaction keeps what it ran (P10) */
+/** What stays of `file`, of the snapshot `copy`, which failed: a file outside a transaction keeps what it ran */
 function aftermath(copy: string, file: AppliedFile): string {
 	if (!outsideTransaction(readFileSync(join(copy, file.Name), "utf8")))
 		return "It was rolled back; the files before it stay applied"
-	/* Atlas lists the statement that failed last, and counts an earlier run's as Skipped (27.5 of plan 15) */
+	/* Atlas lists the statement that failed last, and counts an earlier run's as Skipped */
 	const ran = (file.Skipped ?? 0) + file.Applied.length - (file.Error?.Stmt === undefined ? 0 : 1)
 	if (ran === 0)
 		return "It ran outside a transaction and failed at its first statement, so nothing of it stays applied; the files before it do"
@@ -36,7 +36,7 @@ function aftermath(copy: string, file: AppliedFile): string {
 
 /**
  * The files Atlas's `migrate <command>` on the snapshot `copy` ran, by name; the file and statement
- * that failed, or the error its report or else its stderr holds, thrown (P9)
+ * that failed, or the error its report or else its stderr holds, thrown
  */
 function reported(ran: Ran, command: string, copy: string): string[] {
 	const out = ran.stdout.trim()

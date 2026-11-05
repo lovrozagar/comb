@@ -1,6 +1,6 @@
 /**
  * The secrets a Postgres URL holds, masked wherever comb shows text: a URL comb names, a line comb
- * prints (maskSecrets, only the literal secrets of the URLs it was given, M79), and Atlas's own
+ * prints (maskSecrets, only the literal secrets of the URLs it was given), and Atlas's own
  * output (scrubAtlasOutput, which also masks any other URL's password or secret query value).
  */
 
@@ -23,7 +23,7 @@ function redactUrl(raw: string): string {
 	return url.href.replaceAll(encodeURIComponent(REDACTED), REDACTED)
 }
 
-/** `text` percent-decoded, or as written when an escape in it is malformed or decodes to no UTF-8 (P5) */
+/** `text` percent-decoded, or as written when an escape in it is malformed or decodes to no UTF-8 */
 function decoded(text: string): string {
 	try {
 		return decodeURIComponent(text)
@@ -38,7 +38,7 @@ const spellings = (written: string): string[] => [written, decoded(written), enc
 
 /**
  * The secret strings a URL holds, read from its text, so a URL WHATWG's URL refuses (a socket
- * target with a password, P14) or cannot decode (P5) still has each masked: the whole URL, its
+ * target with a password) or cannot decode still has each masked: the whole URL, its
  * password, and each secret-looking query value
  */
 function secretsOf(raw: string): string[] {
@@ -55,11 +55,11 @@ function secretsOf(raw: string): string[] {
 	return [raw, ...[password, ...values].flatMap(spellings)].filter((secret) => secret !== "")
 }
 
-/* a secret masked only where it stands as a token, so a password that is also part of a name leaves the name (P18) */
+/* a secret masked only where it stands as a token, so a password that is also part of a name leaves the name */
 const asToken = (secret: string): RegExp =>
 	new RegExp(`(?<![\\p{L}\\p{N}_])${secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "gu")
 
-/** `text` with every secret of `urls` masked where it stands as a token, the literal strings only: for a line comb prints (M79) */
+/** `text` with every secret of `urls` masked where it stands as a token, the literal strings only: for a line comb prints */
 function maskSecrets(text: string, urls: readonly string[]): string {
 	const secrets = [...new Set(urls.flatMap(secretsOf))].sort((a, b) => b.length - a.length)
 	let out = text
@@ -72,7 +72,7 @@ function scrubAtlasOutput(text: string, urls: readonly string[]): string {
 	return (
 		maskSecrets(text, urls)
 			.replace(/\b(postgres(?:ql)?:\/\/[^:/\s@]+:)[^@\s]+@/g, `$1${REDACTED}@`)
-			/* free text's key=value only: a JSON key such as "primary_key": is Atlas's structure, not a secret (M79) */
+			/* free text's key=value only: a JSON key such as "primary_key": is Atlas's structure, not a secret */
 			.replace(/((?:^|[?&"\s])\w*(?:pass|secret|token|key)\w*=)[^&\s"]+/gi, `$1${REDACTED}`)
 	)
 }

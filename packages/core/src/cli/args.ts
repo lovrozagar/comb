@@ -95,8 +95,8 @@ type Reading = { argv: readonly string[]; at: number; command: Command; parsed: 
 
 /**
  * The option `flag` names, for the command `reading` reads: -h or --help shows its help, and one it
- * does not take, does not know, or was given already is refused (P13, C10 of the 0.15.0 review: a
- * second -g or --env replaced the first without a word)
+ * does not take, does not know, or was given already is refused, so a
+ * second -g or --env does not replace the first without a word
  */
 function optionOf(flag: string, reading: Reading): OptionSpec {
 	if (flag === "-h" || flag === "--help") throw new ShowHelp(commandHelp(reading.command))
@@ -118,7 +118,7 @@ function readOption(reading: Reading): number {
 	const option = optionOf(flag as string, reading)
 	const name = option.long.slice(2)
 	if (option.value === undefined) {
-		/* --yes=false would read as --yes, approving what its writer meant to refuse (P17) */
+		/* --yes=false would read as --yes, approving what its writer meant to refuse */
 		if (inline !== undefined) throw new CliError(`${flag} is a flag and takes no value; give it alone, or leave it out`)
 		reading.parsed.options[name] = true
 		return 1
@@ -144,20 +144,20 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 			reading.at++
 		}
 	}
-	/* a positional the command does not read is refused, never dropped (P17 of r18, K2 of r19), and one it requires is required */
+	/* a positional the command does not read is refused, never dropped, and one it requires is required */
 	const alone = optionsOf(command).find(
 		(option) => option.alone === true && Object.hasOwn(reading.parsed.options, option.long.slice(2)),
 	)
-	/* each `<…>` part is a minimum as each `[…]` part is a maximum, so the usage line is the rule (KC2 of r22b) */
+	/* each `<…>` part is a minimum as each `[…]` part is a maximum, so the usage line is the rule */
 	const [least, most] = alone ? [0, 0] : positionalRange(command)
 	const count = reading.parsed.positionals.length
-	/* an empty positional names nothing, a database least of all (KC8 of r22b) */
+	/* an empty positional names nothing, a database least of all */
 	if (count < least || count > most || reading.parsed.positionals.includes(""))
 		throw new CliError(usageOf(command, alone))
 	return reading.parsed
 }
 
-/** Refuses a word after `usage`, a form that reads none, with that usage (K2 of r19) */
+/** Refuses a word after `usage`, a form that reads none, with that usage */
 export function refuseFurther(rest: readonly string[], usage: string): void {
 	if (rest.length > 0) throw new CliError(`Usage: comb ${usage}`)
 }
@@ -207,7 +207,7 @@ const optionsOf = (command: Command): OptionSpec[] => OPTIONS.filter((option) =>
 /** How a usage line names an option: its shortest spelling, and its value's placeholder */
 const brief = (option: OptionSpec) => `[${option.short ?? option.long}${option.value ? ` <${option.value}>` : ""}]`
 
-/** `command`'s usage line, built from what it takes, in the form `alone` makes it if given (P13 of the 0.15.0 review) */
+/** `command`'s usage line, built from what it takes, in the form `alone` makes it if given */
 export function usageOf(command: Command, alone?: OptionSpec): string {
 	const takes = alone === undefined ? POSITIONALS[command] : `${alone.long} <${alone.value}>`
 	const others = optionsOf(command).filter((option) => option !== alone && (alone === undefined || !option.alone))

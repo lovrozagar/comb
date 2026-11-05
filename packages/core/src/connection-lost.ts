@@ -1,6 +1,6 @@
 /**
  * A driver's lost, refused or timed-out connection, which carries no SQLSTATE or engine code: a
- * Postgres driver's (Q14 of r17, R2 of plan 16's review) and libsql's (Q11 of r18). The Postgres and
+ * Postgres driver's and libsql's. The Postgres and
  * SQLite handlers answer it as the 503 a retry may fix.
  */
 import type { Fallback } from "./constraint-map.ts"
@@ -14,7 +14,7 @@ export const UNAVAILABLE: Fallback = {
 	status: "service_unavailable",
 }
 
-/* the drivers' own codes for a connection refused, lost or timed out, which carry no SQLSTATE (Q14 of r17) */
+/* the drivers' own codes for a connection refused, lost or timed out, which carry no SQLSTATE */
 // lookup-table: the codes connectionLost reads
 const CONNECTION_CODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"CONNECT_TIMEOUT",
@@ -30,7 +30,7 @@ const CONNECTION_CODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"ERR_POSTGRES_IDLE_TIMEOUT",
 	"ERR_POSTGRES_LIFETIME_TIMEOUT",
 	"ETIMEDOUT",
-	/* libsql's: its WebSocket closed or failed, and an idle stream sqld expired (Q11 of r18) */
+	/* libsql's: its WebSocket closed or failed, and an idle stream sqld expired */
 	"HRANA_WEBSOCKET_ERROR",
 	"STREAM_EXPIRED",
 ])
@@ -40,7 +40,7 @@ const retryable = (status: unknown): boolean => typeof status === "number" && (s
 
 /*
  * node-postgres's and pg-pool's words for a connection lost, timed out or not to be had, which they
- * throw with no code (R2 of plan 16's review). Their words for the app's own end() or its
+ * throw with no code. Their words for the app's own end() or its
  * query_timeout are no lost connection, and stay unclassified
  */
 // lookup-table: the messages connectionLost reads

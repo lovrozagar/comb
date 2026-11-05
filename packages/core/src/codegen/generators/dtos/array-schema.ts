@@ -12,15 +12,15 @@ const RECTANGULAR =
 
 /**
  * An array column's shape: its declared dimensions, whether a written element takes null, as the
- * column's drizzle type declares it (A2-9 of r22), and the DTO it is built for
+ * column's drizzle type declares it, and the DTO it is built for
  */
 type Shape = { dimensions: number; nullable: boolean; schemaType: SchemaType }
 
 /**
  * The base of an array column of `element`s, which takes null by its own column alone, whatever its
- * elements take: a written one past one dimension is rectangular, a key finish places as any other
- * (AA3 of area A's review), and a nullable one states its element's keys on its own `items` beside
- * its anyOf, as its array member does (A2-6 of r22)
+ * elements take: a written one past one dimension is rectangular, a key finish places as any other,
+ * and a nullable one states its element's keys on its own `items` beside
+ * its anyOf, as its array member does
  */
 export function arrayBase(element: Base, shape: Shape): Base {
 	const keys = shape.dimensions > 1 && isMutative(shape.schemaType) ? { "x-comb-rectangular": true } : {}
@@ -30,8 +30,8 @@ export function arrayBase(element: Base, shape: Shape): Base {
 /**
  * An array column of `element`s: written, in exactly its declared dimensions, rectangular past one;
  * read, in any depth Postgres holds, as it keeps no declared dimensions and a read never refuses a
- * stored row (F49). A read level's items is the element or a deeper array, a union that carries the
- * element's keys, so every level's `items` states them and no anyOf member alone does (C3 of r20)
+ * stored row. A read level's items is the element or a deeper array, a union that carries the
+ * element's keys, so every level's `items` states them and no anyOf member alone does
  */
 function arrayOf(element: Base, { dimensions, nullable, schemaType }: Shape): string {
 	/* the element is nullable where its type says, a read's always, its keys on it, which publish on `items` */

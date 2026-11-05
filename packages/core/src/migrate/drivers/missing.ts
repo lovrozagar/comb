@@ -1,4 +1,3 @@
-// S3 of the r18 review
 /**
  * What a read-only connect, as `comb migrate check` and `status` make, throws for a database that is
  * not there, since it creates none; its name is `DatabaseMissing`

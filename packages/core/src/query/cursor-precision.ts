@@ -2,7 +2,7 @@
  * A sort key at the precision its cursor carries. A Postgres `timestamp` in date mode keeps
  * microseconds (precision 6 unless set) while its cursor, a JS Date, keeps milliseconds. The key is
  * ordered and sought as the column itself, so an index serves it; this truncation only guards the
- * bound read from the anchor row, which holds the exact value (cursor-ref.ts, U27).
+ * bound read from the anchor row, which holds the exact value (cursor-ref.ts).
  */
 import { type SQLWrapper, sql } from "drizzle-orm"
 

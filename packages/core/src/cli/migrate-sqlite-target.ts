@@ -3,10 +3,10 @@
  * read-only for check and status, which refuse a missing database. An apply or baseline checks on a
  * read-only connection too, a missing database read as the empty one it is, and opens the writable
  * connection only to write, so a refused run creates no file and no Turso database, and mints no
- * full-access token (S6 of the 0.15.0 review, S3 of r18). On a local file each file applies on a
- * connection of its own, so its connection settings end with it (S1 of r21), a libsql file's through
- * libsql's own Database, which lets go of the file when it closes (SL1 of r22); a libsql server (sqld,
- * Turso) refuses every connection setting at check, so its files apply through the one writer (S1 of r22).
+ * full-access token. On a local file each file applies on a
+ * connection of its own, so its connection settings end with it, a libsql file's through
+ * libsql's own Database, which lets go of the file when it closes; a libsql server (sqld,
+ * Turso) refuses every connection setting at check, so its files apply through the one writer.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -24,7 +24,7 @@ import { CliError, type CliContext } from "./output.ts"
 export type SqliteTarget = {
 	close(): Promise<void>
 	conn: Connection
-	/** the SQLite its files apply on, which their proof copy and a baseline's replay run on (SL3 of r22) */
+	/** the SQLite its files apply on, which their proof copy and a baseline's replay run on */
 	engine: ScratchEngine
 	/** where the files apply: a SQLite file comb opens, or a libsql server */
 	kind: Exclude<TargetKind, "d1">
@@ -61,7 +61,7 @@ async function placeOf(provider: ConnectionProviderConfig): Promise<Place> {
 	return file === ":memory:" ? { at: "memory" } : { at: "file", file }
 }
 
-/** How each file's own connection opens on a `file`: a libsql file's through libsql's Database (SL1 of r22), bun:sqlite's as its provider opens it */
+/** How each file's own connection opens on a `file`: a libsql file's through libsql's Database, bun:sqlite's as its provider opens it */
 async function fileOpener(
 	provider: ConnectionProviderConfig,
 	file: string,
@@ -82,8 +82,8 @@ export async function openSqliteTarget(
 		throw new CliError(
 			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
 		)
-	/* a libsql url or a turso apiToken left blank loads, and cannot connect (P9 of r18, S5 of r19) */
-	/* an authToken given blank would go out as a bare Bearer, refused as a 401 (D2-10 of the area D round-two review) */
+	/* a libsql url or a turso apiToken left blank loads, and cannot connect */
+	/* an authToken given blank would go out as a bare Bearer, refused as a 401 */
 	if (target.provider.type === "libsql") {
 		const { authToken, url } = target.provider
 		refuseBlank(target, authToken === undefined ? { url } : { url, authToken })
@@ -135,8 +135,8 @@ export async function openSqliteTarget(
 
 /**
  * A --file's name: its path from the migrations directory, `../lone.sql` outside it; refused in a
- * subdirectory of it, which no whole-directory run reads (M34), and refused by name when it is
- * missing or no file (KC8 of r22b)
+ * subdirectory of it, which no whole-directory run reads, and refused by name when it is
+ * missing or no file
  */
 export function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): string {
 	const file = path.resolve(cwd, single)

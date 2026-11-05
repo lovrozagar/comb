@@ -50,12 +50,12 @@ const MAX_CURSOR_LENGTH = 8192
  * the exact sort that produced it.
  */
 type CursorPayload = {
-	/* per key, whether its value is the stored text the list carried rather than the value as read; left out when none is (comb-9d's AB2 ruling) */
+	/* per key, whether its value is the stored text the list carried rather than the value as read; left out when none is */
 	c?: boolean[] | undefined
-	/* per key, the value its row read where the keyset binds another, encoded alone in an array, else null; left out when no key has one (AB3-3 of area B); a cursor minted before holds a Date's epoch milliseconds or "invalid" */
+	/* per key, the value its row read where the keyset binds another, encoded alone in an array, else null; left out when no key has one; a cursor minted before holds a Date's epoch milliseconds or "invalid" */
 	d?: Array<[unknown] | number | "invalid" | null> | undefined
 	i: CursorId
-	/* per key, whether its value is a SQLite REAL's text, which the next page binds as cast(? as real); left out when none is (AB4-7 of area B) */
+	/* per key, whether its value is a SQLite REAL's text, which the next page binds as cast(? as real); left out when none is */
 	r?: boolean[] | undefined
 	s: string
 	v: unknown[]
@@ -74,7 +74,7 @@ type DecodedCursor = {
 }
 
 /*
- * a cursor as the keyset binds it, a REAL's text as its RealText (AB4-7 of area B), and per key the
+ * a cursor as the keyset binds it, a REAL's text as its RealText, and per key the
  * value its row read where the keyset binds another, null else; none when no key has one
  */
 type OpenedCursor = Omit<DecodedCursor, "values"> & {
@@ -135,7 +135,7 @@ function decodePayload(bytes: Uint8Array): OpenedCursor | null {
 
 /**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
- * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37). A
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap. A
  * row it cannot resume after is a 500 here, on the page that reads it (refuseUncarried). `read` is
  * the row as the driver read it, whose value readCursor returns for a key `record` binds otherwise
  */
@@ -204,7 +204,7 @@ function openCursor(cursor: string, options: CursorOptions): OpenedCursor | null
 
 /** The cursor as the keyset binds it, each key's stored value, for this sort; a 400 CombError as readCursor throws */
 function readKeyset(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): OpenedCursor {
-	/* options that cannot seal are the handler's 500 whatever the cursor, a long one too (U12) */
+	/* options that cannot seal are the handler's 500 whatever the cursor, a long one too */
 	assertCursorWired(options)
 	/* longer than any cursor comb mints: refused before it is decoded */
 	const decoded = cursor.length > MAX_CURSOR_LENGTH ? null : openCursor(cursor, options)
@@ -215,7 +215,7 @@ function readKeyset(cursor: string, parsedSort: readonly SortField[], options: C
 
 /**
  * The cursor as the merge compares rows with it: readKeyset's, a REAL's text as the number typedKeys
- * parses each shard's row's text to, the same parse of the same text (AB4-7 of area B)
+ * parses each shard's row's text to, the same parse of the same text
  */
 function readCompared(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor {
 	const { read: _read, ...decoded } = readKeyset(cursor, parsedSort, options)

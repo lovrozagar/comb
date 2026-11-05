@@ -1,11 +1,11 @@
 /**
  * The domains a Postgres history leaves, read from their parse trees (pg-history.ts keeps them),
- * one record each (P10 of r19): its default, which fills a column of it added with none of its own
- * (P2 of r18), copied from its base when it has none, as CREATE DOMAIN copies it; and its
+ * one record each: its default, which fills a column of it added with none of its own,
+ * copied from its base when it has none, as CREATE DOMAIN copies it; and its
  * constraints, by the names Postgres gives them (`d_check`, `d_check1`, `d_not_null`), so ALTER
  * DOMAIN … DROP CONSTRAINT finds them. A CHECK keeps the function it runs on every column the
- * domain types (M73). A base's constraints apply to every domain over it, read through the chain as
- * Postgres does, so one altered later counts too (P3 of r19). The record follows the domain's
+ * domain types. A base's constraints apply to every domain over it, read through the chain as
+ * Postgres does, so one altered later counts too. The record follows the domain's
  * RENAME, SET SCHEMA and DROP, and a constraint's RENAME.
  */
 import { builtinFinding } from "./pg-builtins.ts"
@@ -24,7 +24,7 @@ import {
 /**
  * The first function an expression calls whose finding is unsafe, by name: code a write runs that
  * comb cannot read. A cautious call such as a default's nextval, which is what a serial does, is
- * no such code (M83).
+ * no such code.
  */
 function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" | "schema">): string | undefined {
 	for (const [type, node] of nodesOf([expression])) {
@@ -166,7 +166,7 @@ function moveDomain(facts: Facts, from: string, to: string): void {
 
 /**
  * Every domain key, base and CHECK function `move` maps, and every column's type, as a schema
- * renamed moves what is named under it (M74)
+ * renamed moves what is named under it
  */
 function moveDomains(facts: Facts, move: (key: string) => string): void {
 	for (const domain of facts.domains.values()) {

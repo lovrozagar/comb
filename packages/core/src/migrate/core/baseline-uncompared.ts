@@ -1,5 +1,5 @@
 /**
- * What neither Atlas's table diff nor comb's catalog read compares (P12 of r19), the one list the
+ * What neither Atlas's table diff nor comb's catalog read compares, the one list the
  * every-run warning is written from: a kind either has its arm in pg-live-catalog.ts, is Atlas's (a
  * table, its columns, indexes, constraints, enum values, storage parameters), or is named here
  */

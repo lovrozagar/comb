@@ -29,7 +29,6 @@ type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = {
 	handle: D
 }
 
-// K2 of r22; AD1 and AD14
 /**
  * The binding getHandle hands back for an env of type `E`: the type its `SHARD_DB_*` keys hold,
  * as `wrangler types` writes them, a key bound in only some environments among them; an env with
@@ -44,7 +43,6 @@ type ShardBindingOf<E> = string extends keyof E
 		: never
 	: Extract<NonNullable<E[Extract<keyof E, `SHARD_DB_${string}`>]>, D1DatabaseLike>
 
-// AD1; D2-5 of the area D round-two review
 /**
  * What getHandle asks of an env of type `E` beyond `E` itself: each `SHARD_DB_*` key holds a D1
  * binding, and an env whose known keys hold no such key is refused, naming the key it lacks. A key
@@ -126,7 +124,6 @@ type ShardPlacement = {
 	shardId: number
 }
 
-// R4
 /** A move: the placement, and the app's own statements on the core database to batch with it */
 type ShardMove = ShardPlacement & {
 	/** statements on the core database run in one batch after the mapping's write, landing with it or not at all */

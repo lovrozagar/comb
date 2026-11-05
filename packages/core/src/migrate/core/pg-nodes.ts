@@ -9,15 +9,15 @@ import type { IndexFact } from "./pg-index-facts.ts"
 
 type Node = Record<string, unknown>
 
-/** An event trigger the history made: the event it runs on, its `WHEN TAG IN` list, and whether it is enabled (M73) */
+/** An event trigger the history made: the event it runs on, its `WHEN TAG IN` list, and whether it is enabled */
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
 /**
- * A domain the history leaves (P3, P10 of r19): the domain it is over, if any; its default, its own
+ * A domain the history leaves: the domain it is over, if any; its default, its own
  * or, as CREATE DOMAIN copies it, its base's; and its constraints by the name Postgres gives them, a
  * CHECK with the function it calls. A base's constraints apply to it too, read through `base`.
- * `over` is the type its values have, read through each domain under it as Postgres flattens it
- * (PA11 of r22b): the innermost base's type, modifiers and dimensions, and its own collation, else
+ * `over` is the type its values have, read through each domain under it as Postgres flattens it:
+ * the innermost base's type, modifiers and dimensions, and its own collation, else
  * its base's.
  */
 type Domain = {
@@ -28,7 +28,7 @@ type Domain = {
 }
 
 /**
- * Where a table or materialized view keeps its rows, as far as the history shows it (PA17 of r22b):
+ * Where a table or materialized view keeps its rows, as far as the history shows it:
  * whether it is logged, and its access method and tablespace, each undefined where the history
  * leaves it to the target (a temporary table, one made without USING or TABLESPACE, SET ACCESS
  * METHOD DEFAULT)
@@ -38,7 +38,7 @@ type Storage = { accessMethod: string | undefined; logged: boolean | undefined; 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
 /**
  * What a view's or materialized view's query reads: the relations and functions it names, by key,
- * and the column names it reads, `all` for a `*` (P4 of r18)
+ * and the column names it reads, `all` for a `*`
  */
 type Reads = { columns: Set<string> | "all"; functions: Set<string>; relations: Set<string> }
 
@@ -124,54 +124,54 @@ type Facts = {
 	casts: Map<string, { automatic: boolean; fn: string }>
 	/** why a write to a table runs code: what it runs */
 	code: Map<string, string>
-	/** each table's columns, each with its type and the type's modifiers, as varchar(20) has [20] (P12 of the 0.15.0 review) */
+	/** each table's columns, each with its type and the type's modifiers, as varchar(20) has [20] */
 	columnTypes: Map<string, Map<string, ColumnType>>
 	/** each event trigger the history made, by name */
 	eventTriggers: Map<string, EventTrigger>
-	/** each foreign key, with its table and the table it references (gaps 1–4 of 0005 of r22b) */
+	/** each foreign key, with its table and the table it references */
 	foreignKeys: ForeignKey[]
 	/** every function, procedure and aggregate a migration defined, by each key it had */
 	defined: Set<string>
 	/** the functions and procedures the history leaves, by key, with their signatures (pg-routines.ts) */
 	routines: Routines
-	/** each domain, with its base, its default and its constraints (P2 of r18, P3 and P10 of r19) */
+	/** each domain, with its base, its default and its constraints */
 	domains: Map<string, Domain>
 	/** each operator a migration defined, with its function */
 	operators: Map<string, string>
-	/** each partitioned table's DEFAULT partition, which a new partition's bound is checked against (P12 of r18) */
+	/** each partitioned table's DEFAULT partition, which a new partition's bound is checked against */
 	defaultPartitions: Map<string, string>
-	/** each partitioned table, by key (P18 of r19) */
+	/** each partitioned table, by key */
 	partitioned: Set<string>
 	/** each table's primary key, which a REFERENCES without columns names */
 	primaryKeys: Map<string, PrimaryKey>
 	/**
 	 * each index the history leaves, under the name Postgres gives it, with its table: one on a
-	 * partitioned table has no storage of its own (P19 of r19, PA12 of r22b)
+	 * partitioned table has no storage of its own
 	 */
 	indexes: Map<string, IndexFact>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
-	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */
+	/** the schema an unqualified name resolves in, the one each key leaves out */
 	schema: string
-	/** each table the history's trees made, with its columns (M70) */
+	/** each table the history's trees made, with its columns */
 	tables: Map<string, Set<string>>
 	/**
 	 * each view, with the one table or view its query reads, undefined when it reads no single one
-	 * (a join, a set operation), and how its columns name the base's, `all` for `*` (M71)
+	 * (a join, a set operation), and how its columns name the base's, `all` for `*`
 	 */
 	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
 	/**
 	 * each table's triggers, with the writes that fire them, and `type` as Postgres's tgtype holds
-	 * when and for what it fires (row, before, instead of, each event's bit) (P13)
+	 * when and for what it fires (row, before, instead of, each event's bit)
 	 */
 	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; fn: string; name: string; type: number }>>
-	/** what each view and materialized view reads, by its key, for a CASCADE drop to follow (P4 of r18) */
+	/** what each view and materialized view reads, by its key, for a CASCADE drop to follow */
 	reads: Map<string, Reads>
-	/** where each table and materialized view keeps its rows, by its key (PA17 of r22b) */
+	/** where each table and materialized view keeps its rows, by its key */
 	storage: Map<string, Storage>
-	/** each partitioned table's one plain RANGE or LIST key column and its strategy as a bound writes it, by its key, whose bounds comb proves (PA16 of r22b) */
+	/** each partitioned table's one plain RANGE or LIST key column and its strategy as a bound writes it, by its key, whose bounds comb proves */
 	partitionKeys: Map<string, { column: string; strategy: "l" | "r" }>
-	/** what each table's constraints prove of its rows, by its key (PA16 of r22b, pg-bounds.ts) */
+	/** what each table's constraints prove of its rows, by its key (pg-bounds.ts) */
 	proofs: Map<string, Proof>
 }
 
@@ -193,7 +193,7 @@ const names = (list: unknown): string[] => (list as Array<{ String: { sval: stri
 
 /**
  * A name's key, as nameKey keys a Postgres name under `schema`, the one an unqualified name resolves
- * in: pg_catalog and `schema` left out, so `users` and `<schema>.users` are one key (M72)
+ * in: pg_catalog and `schema` left out, so `users` and `<schema>.users` are one key
  */
 const keyOf = (parts: readonly string[], schema: string): string =>
 	parts.filter((part, i) => (i < parts.length - 1 ? part !== "pg_catalog" && part !== schema : true)).join(".")

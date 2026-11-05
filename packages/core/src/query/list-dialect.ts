@@ -1,9 +1,9 @@
 /**
- * The dialect a derived list is built for (Q1 of r21): the columns its id, anchor and keys hold decide,
+ * The dialect a derived list is built for: the columns its id, anchor and keys hold decide,
  * wherever drizzle's SQL holds them (nested SQL, an aliased expression, a subquery's field), and a list
  * that holds none states it. A where's columns do not count: they are not what the cursor binds. Reads
  * only drizzle's public surface: `is()`, `Column.columnType`, `SQL.queryChunks`, `SQL.Aliased.sql`, and
- * a `Table` or `View` chunk's columns through `getTableColumns` and `getViewSelectedFields` (r22 Q3).
+ * a `Table` or `View` chunk's columns through `getTableColumns` and `getViewSelectedFields`.
  */
 import { Column, getTableColumns, getViewSelectedFields, is, SQL, type SQLWrapper, Table, View } from "drizzle-orm"
 

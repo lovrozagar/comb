@@ -1,5 +1,5 @@
 /**
- * How a built list pages what it fetched (Q6, C3, C19, C2 of the 0.14.1 review). Each builder
+ * How a built list pages what it fetched. Each builder
  * (`buildListQuery`, its `merged` list included, `buildDerivedListQuery`, `queryHelpers.listOptions`)
  * hands over a `pagination` descriptor: the page it read, whether a cursor can resume it, how a
  * long key is carried, and how many rows it asked for. `paginate` reads it, so nothing about the
@@ -17,14 +17,12 @@ import type { paginationResponseSchema } from "./schema.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 import type * as z from "zod"
 
-// Q3 of r17, Q2 of r19, Q2 of r21
 /**
  * The name of one column a builder selects for `paginate` to read, which no row it returns keeps: the
  * tiebreak, the gone-anchor flag, the count, each sort key's storage class, or its stored text
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_combTextKeys" | "_total"
 
-// Q3 of r19
 /**
  * A row as paginate and paginateMerged return it, without the `ListExtra` columns. A union row type
  * loses them from each member, so narrowing on its discriminant still reaches each variant's fields
@@ -52,7 +50,6 @@ type PaginationResponse = z.output<typeof paginationResponseSchema>
 type ListPagination = {
 	/** the cursor the request resumed from; none on a page by number */
 	cursor: string | undefined
-	// Q6, Q3
 	/** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak */
 	cursorable: boolean
 	/** the scope its cursors are sealed under, as the builder was given it */
@@ -63,7 +60,6 @@ type ListPagination = {
 	keyset: KeysetKind
 	/** the page's row count, the request's limit */
 	limit: number
-	// K8 of r17
 	/** true on a list built with `merged`, which `paginateMerged` pages and `paginate` refuses */
 	merged: boolean
 	/** "exact" where the builder was told its driver reads ±Infinity back as itself, so a null cursor value is a real NULL */
@@ -76,7 +72,6 @@ type ListPagination = {
 	parsedSort: readonly SortField[]
 	/** the most rows the built query reads: one past the page, so paginate can tell there is more, or on a merged page by number each shard's rows to the page's end and one more */
 	window: number
-	// AB4-3 of area B
 	/**
 	 * Every check the cursor for the page after `row` passes, run now, so a row no cursor holds is a 500
 	 * on the page that serves it; and what seals that cursor under the builder's options
@@ -88,12 +83,11 @@ type ListPagination = {
 
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
-	/** the sort fields whose keys the list binds as read, with no row to read a bound from (QL1 of r22b); every one on a derived list */
+	/** the sort fields whose keys the list binds as read, with no row to read a bound from; every one on a derived list */
 	asRead?: ReadonlySet<string> | undefined
 	/** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
 	byReference?: ReadonlySet<string> | undefined
 	cursorable: boolean
-	// AB4-1 of area B
 	/** the column check the builder's open runs on a cursor, which every cursor it mints passes */
 	holds?: ColumnCheck | undefined
 	/** the extras the builder selected, which every row must carry */
@@ -171,7 +165,7 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 /**
  * The cursor after `row`, checked and ready to seal: its sort keys, and the tiebreak the builder
  * selected as `_combId`. A row without one would mint a cursor that repeats or ends the list, a
- * wiring mistake mintCursor refuses (QL5 of r22b). Any id, 0 and "" included, carries the next page.
+ * wiring mistake mintCursor refuses. Any id, 0 and "" included, carries the next page.
  */
 function fitFrom(
 	row: object,
@@ -216,7 +210,7 @@ function paginate<T extends object>(
 	/* a key no cursor bound as read places is refused on the page that serves it, wherever its row lands */
 	for (const item of sliced) refuseUnheld(item as Record<string, unknown>, pagination.parsedSort)
 	/* every row served is one a cursor resumes after, checked from the fat row, under the sort the builder
-	   ordered by, so the next request's signature matches; the last one's is sealed (AB4-3 of area B) */
+	   ordered by, so the next request's signature matches; the last one's is sealed */
 	const fitted = pagination.cursorable ? sliced.map((item) => pagination.fit(item)) : []
 	const last = fitted.at(-1)
 	const meta: PaginationResponse = {
@@ -228,7 +222,7 @@ function paginate<T extends object>(
 	}
 	/* projected after the slice, so count, hasMore and the cursor still see the fat row */
 	const page = sliced.map((item) => applySelect(item as T & Record<string, unknown>, pagination.parsedFields))
-	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
+	/* the extras are stripped, so the rows are typed without them */
 	return [page as unknown as Array<ListRow<T>>, meta] as const
 }
 

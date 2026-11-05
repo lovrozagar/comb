@@ -101,7 +101,7 @@ const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(
 
 /**
  * The pragmas SQLite refuses inside the transaction comb runs each file in, on every SQLite target
- * (bun:sqlite and libsql, .tmp/grunt/p18/tx-pragma-probe.log): which forms, and why
+ * (bun:sqlite and libsql): which forms, and why
  */
 const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boolean; why: string }>> = {
 	journal_mode: {
@@ -129,7 +129,7 @@ const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boo
 /**
  * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
  * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
- * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
+ * the migration (tests/structure/pragma-scope.test.ts asks the
  * running engines). A read of one is any other pragma.
  */
 // lookup-table: the pragma names, fixed
@@ -165,12 +165,12 @@ function refuseUnrunnable(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
 		)
 	}
-	/* r18 S2, r19 S1 and r22 S1: what the transaction, D1 or sqld refuses could never apply, so no approval clears it */
+	/* What the transaction, D1 or sqld refuses could never apply, so no approval clears it */
 	const pragma = dialect === "sqlite" ? pragmaOf(code) : undefined
 	const target = dialect === "sqlite" ? targetRefusal(code, pragma, kind) : undefined
 	const refusal = target ?? (pragma === undefined ? undefined : pragmaRefusal(pragma))
 	if (refusal !== undefined) throw new Error(`${preview(stmt)}: ${refusal}`)
-	/* S1 of the 0.15.0 review: the file's own BEGIN or COMMIT ends the batch that records it, so a
+	/* The file's own BEGIN or COMMIT ends the batch that records it, so a
 	   later failure leaves what ran before it committed with no history row, to run again */
 	if (dialect === "sqlite" && SQLITE_TRANSACTION.test(code)) {
 		throw new Error(
@@ -198,17 +198,17 @@ function refuseOutOfScope(
 	}: Pick<ReadStatement, "control" | "inside" | "outside" | "refused" | "stmt">,
 	bare: boolean,
 ): void {
-	/* PA10 of r22b: what Postgres refuses on a partitioned table fails in any file */
+	/* What Postgres refuses on a partitioned table fails in any file */
 	if (refused !== undefined) throw new Error(`${preview(stmt)}: ${refused}`)
-	/* PA2 of r22b: Atlas records the file in its transaction, which the file's own control would end */
+	/* Atlas records the file in its transaction, which the file's own control would end */
 	if (control !== undefined && !bare) {
 		throw new Error(
 			`${preview(stmt)}: Atlas runs this file in one transaction and records it there, so its own ${control} ends that transaction; to commit as you go, start the file with "-- atlas:txmode none" and a blank line`,
 		)
 	}
-	/* P8 of r19: from the parse tree, so DETACH CONCURRENTLY, a bare CLUSTER and a REINDEX of a schema are caught too */
+	/* From the parse tree, so DETACH CONCURRENTLY, a bare CLUSTER and a REINDEX of a schema are caught too */
 	if (outside !== undefined && !bare) throw new Error(outsideRefusal(stmt, outside))
-	/* PA13 of r22b: Atlas sends a txmode none file's statements bare, so Postgres refuses these there */
+	/* Atlas sends a txmode none file's statements bare, so Postgres refuses these there */
 	if (inside !== undefined && bare) {
 		throw new Error(
 			`${preview(stmt)}: Postgres runs ${inside} only inside a transaction block ("${inside} can only be used in transaction blocks"), and Atlas sends a "-- atlas:txmode none" file's statements bare; put it between the file's own BEGIN and COMMIT, or in a file without the txmode line`,
@@ -227,7 +227,6 @@ function codeLine({ line = 1, stmt }: ReadStatement): number {
 	return line + skipped.split("\n").length - 1
 }
 
-// AE7 of r22
 /**
  * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
  * records the file after its last statement, in that transaction, and closing the connection rolls
@@ -251,7 +250,7 @@ function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void {
 }
 
 /**
- * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
+ * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas: apply
  * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
  */
 function refuseHeader(sql: string, dialect: Dialect): void {

@@ -11,7 +11,7 @@ const shown = (value: unknown): PropertyDescriptor => ({ configurable: true, enu
  */
 export class CombError extends Error {
 	/*
-	 * Each field is defined in the constructor, never assigned (KT5 of r22b): Bun compiles comb's
+	 * Each field is defined in the constructor, never assigned: Bun compiles comb's
 	 * source under the consumer's tsconfig, and with `useDefineForClassFields: false` an assigned
 	 * `column` landed in JavaScriptCore's own non-enumerable Error.column, out of the JSON body.
 	 */

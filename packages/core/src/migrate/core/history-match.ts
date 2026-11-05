@@ -6,12 +6,12 @@
  * row that matches no file was edited or renamed after it was applied; read over the whole
  * directory, comb refuses it. A file applied with --file from outside the directory is recorded by
  * its path from it (`../lone.sql`), and no file of the directory is expected to match it: a file
- * that has its text, a copy of it moved into the directory, is named, since it would run again
- * (M45). A file's
+ * that has its text, a copy of it moved into the directory, is named, since it would run again.
+ * A file's
  * pre-0.5.0 hash matches only a row recorded before comb stopped recording it (migrationHashes): a
  * later row was recorded under the current hash, so a match by it is an edit its normalizing hides
- * inside a literal (M44). Its folded hash (0.5.0 to 0.20) matches a row of any date, as no date tells
- * which comb recorded it (SL5).
+ * inside a literal. Its folded hash (0.5.0 to 0.20) matches a row of any date, as no date tells
+ * which comb recorded it.
  */
 import type { AcceptedHash } from "./parse.ts"
 
@@ -70,7 +70,7 @@ function matchHistory(files: readonly FileHashes[], rows: readonly HistoryRow[],
 type LegacyRow = HistoryRow & { id: number }
 
 /**
- * The names comb 0.12's named rows take in 0.13, which a rebuild records once (M35). 0.12 named a
+ * The names comb 0.12's named rows take in 0.13, which a rebuild records once. 0.12 named a
  * --file by its base name, wherever it was, so a name no file has is resolved in turn: a row whose
  * name a top-level file has keeps it; one whose hash exactly one file no other row holds has takes
  * that file's name (a file renamed under 0.12, so it is not applied again); any other is a file from

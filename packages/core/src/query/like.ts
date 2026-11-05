@@ -28,7 +28,7 @@ function escapeLike(text: string): string {
 /** A value's stars only at its ends: whether each end is open, and the text between */
 const FIXED: RegExp = /^(\**)([^*]*)(\**)$/
 
-/** The pattern SQLite matches `value` with under `operator`, or null for a fixed text, which is found with none (U21) */
+/** The pattern SQLite matches `value` with under `operator`, or null for a fixed text, which is found with none */
 const patternOf = (operator: "like" | "ilike", value: string): string | null =>
 	FIXED.test(value) ? null : operator === "like" ? globPattern(value) : likePattern(value)
 

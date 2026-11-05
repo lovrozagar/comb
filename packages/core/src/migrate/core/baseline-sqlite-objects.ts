@@ -1,7 +1,7 @@
 /**
- * What Atlas OSS does not inspect on SQLite, compared by comb before `baseline` records a history
- * (S5 of the 0.14.1 review): triggers, views, virtual tables, and libsql's vector indexes (SL3 of
- * r22), each by what it is and its name, with its definition normalized. The history replays on the
+ * What Atlas OSS does not inspect on SQLite, compared by comb before `baseline` records a history:
+ * triggers, views, virtual tables, and libsql's vector indexes,
+ * each by what it is and its name, with its definition normalized. The history replays on the
  * engine its files apply on, so a libsql target's vector index replays as it applied.
  */
 import { readFileSync } from "node:fs"
@@ -12,7 +12,7 @@ import { sqlFiles } from "./atlas-dir.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
-/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5), and libsql's vector indexes (SL3 of r22), but the engine's */
+/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included, and libsql's vector indexes, but the engine's */
 const uninspectedOf = (conn: Pick<Connection, "ownedPrefix">): string =>
 	`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (type IN ('trigger', 'view') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%') OR (type = 'index' AND sql LIKE '%libsql\\_vector\\_idx%' ESCAPE '\\'))${notEngineTables(conn)} ORDER BY rowid`
 
@@ -34,7 +34,7 @@ function uninspected(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): Ma
 	)
 }
 
-/** The triggers, views, virtual tables and vector indexes the migrations of `dir` leave, replayed on `engine` a file per connection (S1 of r21) */
+/** The triggers, views, virtual tables and vector indexes the migrations of `dir` leave, replayed on `engine` a file per connection */
 async function replayedObjects(dir: string, engine: ScratchEngine): Promise<Map<string, string>> {
 	const db = await openScratch(engine)
 	try {
@@ -59,7 +59,7 @@ async function replayedObjects(dir: string, engine: ScratchEngine): Promise<Map<
 
 /**
  * Where the database's triggers, views and virtual tables differ from the ones the migrations
- * leave, by name and normalized definition, as lines of the difference (S5 of the 0.14.1 review)
+ * leave, by name and normalized definition, as lines of the difference
  */
 async function objectDrift(conn: Connection, dir: string, engine: ScratchEngine): Promise<string[]> {
 	const live = uninspected(

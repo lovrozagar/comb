@@ -7,13 +7,13 @@ import { combErrorKeys } from "../types.ts"
 import { carried, decodeId, decodeValue } from "./cursor-codec.ts"
 import type { SortField } from "./types.ts"
 
-/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
+/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key */
 const lossy = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
 
 /**
  * Throw a 500 for a tiebreak id a JS number rounds, which cannot find its own row, so the keyset
- * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
+ * would repeat or skip it, and two unique ids may read as one
  */
 function refuseRoundedId(record: Record<string, unknown>, idField: string): void {
 	if (!lossy(record[idField])) return
@@ -54,7 +54,7 @@ function kindOf(value: unknown): string {
 }
 
 /**
- * Throw a 500 naming the field for a row a cursor cannot resume after (QL5 of r22b): one without a
+ * Throw a 500 naming the field for a row a cursor cannot resume after: one without a
  * sort field or its id (a key set to undefined is one left out), or one whose value the cursor
  * would not read back as itself, a JSON object, an array or a function, which would mint a cursor
  * the next page refused as invalid

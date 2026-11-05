@@ -1,8 +1,8 @@
 /**
  * Whether a Postgres history may make anything baseline's catalog read compares (pg-live-catalog.ts),
  * the gate a docker:// dev database is held to: Atlas's own container, which comb cannot reach, so a
- * history that may make any such object is refused naming devUrl (P5 of r19), and one that makes none
- * needs no replay. It fails closed (P3 of r20): a statement passes only when its node is one proved to
+ * history that may make any such object is refused naming devUrl, and one that makes none
+ * needs no replay. It fails closed: a statement passes only when its node is one proved to
  * make nothing the read compares, so a statement no one thought of is refused, not let through.
  */
 import { nodeOf } from "./pg-outside-transaction.ts"

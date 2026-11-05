@@ -32,7 +32,7 @@ const roleOf = (sqlColumn: string) => toCamelCase(sqlColumn.replace(/_id$/, "").
 
 /**
  * A relation's name, read from its own foreign key alone and nothing else of either table: another
- * key added later never renames it (F24). Two keys whose names would collide fail codegen (F7),
+ * key added later never renames it. Two keys whose names would collide fail codegen,
  * since any rule that picked one of them to rename would rename an existing relation for the other.
  */
 type Named = { name: string; place: string }
@@ -43,7 +43,7 @@ type Named = { name: string; place: string }
  */
 function oneName(sqlColumn: string, refTable: string): string {
 	const whole = roleOf(sqlColumn)
-	/* the role is camelCase, so it meets the target's export name camelCased: blog_post as blogPost (F62) */
+	/* the role is camelCase, so it meets the target's export name camelCased: blog_post as blogPost */
 	const target = toCamelCase(refTable)
 	const ref = capitalized(target)
 	/* invitedByUser toward user: the prefix names the role */
@@ -53,13 +53,13 @@ function oneName(sqlColumn: string, refTable: string): string {
 /**
  * The name of the relation back from a key's target to its source: `posts` when the key is the
  * target's plain `<target>_id`, and `postsBy<Role>`, the role the one side is named by, for every other key. A unique key's way back
- * holds one row, so it is singular (F23).
+ * holds one row, so it is singular.
  */
 function backName(source: TableMeta, { plain, role }: { plain: boolean; role: string }, unique: boolean): string {
 	const name = toCamelCase(source.varName)
 	const count = unique ? pluralize.singular(name) : pluralize(name)
 	if (plain) return count
-	/* the role the one side is named by, so the two halves of one key agree (F23) */
+	/* the role the one side is named by, so the two halves of one key agree */
 	return `${count}By${capitalized(role)}`
 }
 
@@ -101,7 +101,7 @@ function settle(table: string, named: Array<Named & { target: { name: string } }
 	for (const each of named) {
 		const name = each.name
 		/* a relation and a column of one name collide in drizzle; renaming either would change a name
-		 * code already uses when the other is added, so the person picks (F22) */
+		 * code already uses when the other is added, so the person picks */
 		if (columns.has(name))
 			throw new Error(
 				`${table}: the relation ${name} of ${each.place} takes the name of the column ${table}.${name}; rename the column, or give the key { relation: "…" }`,
@@ -123,7 +123,7 @@ function buildGraph(tables: TableMeta[]): Graph {
 	for (const table of tables) {
 		for (const field of table.fields) {
 			const fk = field.foreignKey
-			/* a composite key is one relation, on its first column, joining every column pair (F46) */
+			/* a composite key is one relation, on its first column, joining every column pair */
 			if (!fk || (fk.key !== undefined && fk.key.columns[0] !== fk.column)) continue
 			const columns = fk.key?.columns ?? [fk.column]
 			const refColumns = fk.key?.refColumns ?? [fk.refColumn]
@@ -131,7 +131,7 @@ function buildGraph(tables: TableMeta[]): Graph {
 			/* no one column names a composite key's role: it is named for its table, as <table>_id is */
 			const sqlColumn = fk.key === undefined ? field.sqlName : `${fk.refTable}_id`
 			const one = { columns, name: "", refColumns, refTable: fk.refTable }
-			/* a key that names its relation takes that name on both sides; else its column's role (F57) */
+			/* a key that names its relation takes that name on both sides; else its column's role */
 			const relation = field.constraints.relation ?? null
 			const role = relation ?? oneName(sqlColumn, fk.refTable)
 			push(graph.ones, table.varName, one)

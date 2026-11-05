@@ -24,7 +24,7 @@ async function hashDir(exec: Run, dir: string): Promise<void> {
 
 /**
  * The lines of the atlas.sum at `path`, split on LF or CRLF: Atlas validates a sum git's autocrlf
- * checked out with CRLF line ends, so comb reads its entries, not its bytes (PA19 of r22b)
+ * checked out with CRLF line ends, so comb reads its entries, not its bytes
  */
 const sumLines = (path: string): string[] => readFileSync(path, "utf8").split(/\r?\n/)
 
@@ -42,7 +42,7 @@ function sumHashes(dir: string): Map<string, string> {
 
 /** Refuse a directory whose atlas.sum does not match its files: comb hashes an untouched copy and compares */
 async function verifySum(exec: Run, dir: string, shown: string = dir): Promise<void> {
-	/* a directory with no migration and no sum, as `comb migrate init` makes it, is an empty history (S9, K3) */
+	/* a directory with no migration and no sum, as `comb migrate init` makes it, is an empty history */
 	if (!existsSync(join(dir, "atlas.sum"))) {
 		if (sqlFiles(dir).length === 0) return
 		throw new Error(

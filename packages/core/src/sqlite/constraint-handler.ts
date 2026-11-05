@@ -29,8 +29,8 @@ const failedIndex = (message: string): string | undefined => /constraint failed:
 
 /**
  * A `table.column` pair as SQLite writes it, unquoted: split after the statement's own table when the
- * pair starts with it, as a dot may sit in either name (U13); else after a table a map knows, so a
- * private column with a dot in its name is found under its table (Q19 of r17); else on its last dot
+ * pair starts with it, as a dot may sit in either name; else after a table a map knows, so a
+ * private column with a dot in its name is found under its table; else on its last dot
  */
 function splitPair(
 	pair: string,
@@ -49,7 +49,7 @@ function splitPair(
 /**
  * `UNIQUE constraint failed: member.first, member.last` → member, [first, last]. A table name may
  * hold any character, a dot or ", " included: with `query`'s table known, each pair starts at
- * ", <table>." (U44) and splits at that table (splitPair); else at each ", ".
+ * ", <table>." and splits at that table (splitPair); else at each ", ".
  */
 function failedColumns(
 	message: string,
@@ -81,7 +81,7 @@ function uniqueIndex(v: Violation, index: string): CombError {
 	const entry = lookup(v.maps, table, (t) => own(t.unique, index))
 	if (entry !== undefined) return toError(v, { entry, fallback, table })
 	const found = findNamed(v.maps, "unique", index)
-	/* unmapped, the index is still the statement's table's, as Postgres names it (R11) */
+	/* unmapped, the index is still the statement's table's, as Postgres names it */
 	return toError(v, { entry: found?.entry, fallback, table: found?.table ?? table })
 }
 
@@ -149,7 +149,7 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
 /**
  * Whether `query` is an INSERT that leaves `column`, the lone key a map lists, unset: SQLite's message
  * names no key, so a key the INSERT's list doesn't name, a map key naming no column among them, may
- * stand for one the map leaves out (AB4 of area B). An INSERT with no list sets every column it has,
+ * stand for one the map leaves out. An INSERT with no list sets every column it has,
  * which the handler cannot tell a map key from, so it leaves each one unset.
  */
 function insertLeaves(query: string | undefined, column: string | undefined): boolean {
@@ -162,7 +162,7 @@ function insertLeaves(query: string | undefined, column: string | undefined): bo
  * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
  * fail on the other side, a row that references the deleted one, so no key of its own is blamed.
  * An UPDATE whose SET list assigns none of the foreign key columns the table's maps list blames no
- * key of its own either (U6), and says neither side: a map need not list every key (U23). */
+ * key of its own either, and says neither side: a map need not list every key. */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query, "sqlite")?.table
 	let column: string | undefined
@@ -176,12 +176,12 @@ function foreignKey(v: Violation): CombError {
 	})
 	const assigned = updatedColumns(v.read.query)
 	/* an UPDATE that sets none of the keys a map lists may still have broken one the map leaves out,
-	   a composite key's later column among them: which side failed is unknown (U23) */
+	   a composite key's later column among them: which side failed is unknown */
 	const folded = new Set(keys?.map(asciiFolded))
 	const unlisted = assigned !== undefined && !assigned.some((name) => folded.has(asciiFolded(name)))
 	const unset = insertLeaves(v.read.query, column)
 	/* a statement that changes a key other tables reference may have failed on a row that references
-	   the old value, its own key valid: which side failed is unknown (U43) */
+	   the old value, its own key valid: which side failed is unknown */
 	const referenced = new Set(v.maps.flatMap((map) => entryOf(map, table)?.referenced ?? []).map(asciiFolded))
 	const changesReferenced = (assigned ?? upsertColumns(v.read.query) ?? []).some((name) =>
 		referenced.has(asciiFolded(name)),
@@ -212,8 +212,8 @@ function foreignKey(v: Violation): CombError {
  * A rule a trigger enforces with RAISE(ABORT | FAIL | ROLLBACK, message): a 400 whose cause is the
  * message the app wrote for it, which every driver reports under SQLITE_CONSTRAINT_TRIGGER. A bare
  * SQLITE_CONSTRAINT whose wording names no kind is a 400 too, with the generic cause: its words
- * may be the engine's, a column's name among them (Q8 of r18), as is a RAISE with no message to
- * show, when D1's exec() quoted the statement before it (Q8 of r17).
+ * may be the engine's, a column's name among them, as is a RAISE with no message to
+ * show, when D1's exec() quoted the statement before it.
  */
 const raised = (v: Violation): CombError =>
 	new CombError({
@@ -224,7 +224,7 @@ const raised = (v: Violation): CombError =>
 		status: "bad_request",
 	})
 
-/** `name` with its ASCII letters lowercased: SQLite reads a column name in any ASCII case, and folds no other letter (U42) */
+/** `name` with its ASCII letters lowercased: SQLite reads a column name in any ASCII case, and folds no other letter */
 const asciiFolded = (name: string): string => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
 
 const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
@@ -233,7 +233,7 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	SQLITE_CONSTRAINT_FOREIGNKEY: foreignKey,
 	SQLITE_CONSTRAINT_NOTNULL: notNull,
 	SQLITE_CONSTRAINT_PRIMARYKEY: primaryKey,
-	/* a duplicate rowid, a table's own key (Q11 of r17) */
+	/* a duplicate rowid, a table's own key */
 	SQLITE_CONSTRAINT_ROWID: primaryKey,
 	SQLITE_CONSTRAINT_TRIGGER: raised,
 	SQLITE_CONSTRAINT_UNIQUE: unique,
@@ -277,7 +277,7 @@ function handleConstraintViolation(error: unknown, maps: readonly ConstraintMap[
  * or a lost connection, as on D1 and Postgres; undefined for any other. It throws nothing, so a
  * caller can ask what an error is.
  */
-// classifies as D1 and Postgres do (Q11 of r18)
+// classifies as D1 and Postgres do
 function classifySqliteError(error: unknown, maps: readonly ConstraintMap[]): CombError | undefined {
 	const constraint = constraintError(error, maps)
 	if (constraint !== null) return constraint

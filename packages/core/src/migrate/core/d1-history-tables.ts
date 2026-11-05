@@ -1,5 +1,5 @@
 /**
- * The tables a D1 database's migration history lives in (M2 of the 0.13.0 consumers review): a tool
+ * The tables a D1 database's migration history lives in: a tool
  * that empties a database keeps them, rows and all, or every applied file loses what comb knows of
  * it. wrangler's own table records each applied file by name; comb's records the hash each was
  * applied under, which refuses a file applied, then edited, and the hash each pending file is about
@@ -15,7 +15,7 @@ export const D1_HASH_TABLE = "_comb_migration_hashes"
 
 /**
  * comb's record of the hash each pending D1 file is about to be applied under, written before
- * wrangler runs it and moved into D1_HASH_TABLE once wrangler's table names it (S1 of r20)
+ * wrangler runs it and moved into D1_HASH_TABLE once wrangler's table names it
  */
 export const D1_HASH_INTENT_TABLE = "_comb_migration_hash_intents"
 

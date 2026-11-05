@@ -1,24 +1,24 @@
 /**
  * The stored values a SQLite list selects apart from its keys' reads (`_combTextKeys`), where a key's
- * mode reads a class it holds as another (AB4-2 of area B), and the mark of a REAL SQLite prints no
- * text of that reads back as it (AB4-7 of area B)
+ * mode reads a class it holds as another, and the mark of a REAL SQLite prints no
+ * text of that reads back as it
  */
 import type { SortField } from "./types.ts"
 
-/* what a SQLite number key carries before its printf text where SQLite prints no text of it that reads back as it (AB4-7 of area B) */
+/* what a SQLite number key carries before its printf text where SQLite prints no text of it that reads back as it */
 const UNPRINTED_MARK = "!n"
 type Unprinted = `${typeof UNPRINTED_MARK}${string}`
 
 /** Whether `key` is a carried or held key SQLite printed no text of that reads back (UNPRINTED_MARK) */
 const isUnprinted = (key: unknown): key is Unprinted => typeof key === "string" && key.startsWith(UNPRINTED_MARK)
 
-/** An unprinted key's number, as its printf text reads, which the merge orders it by (AB4-7 of area B) */
+/** An unprinted key's number, as its printf text reads, which the merge orders it by */
 const unprintedNumber = (key: Unprinted): number => Number(key.slice(UNPRINTED_MARK.length))
 
 /** A key's stored value `_combTextKeys` carries where its mode reads another: its storage class and text, or a REAL's Unprinted */
 type HeldKey = readonly [StoredClass, string] | Unprinted | null
 type StoredClass = "blob" | "integer" | "real" | "text"
-// lookup-table: the storage classes a SQLite key's stored value carries, in _combTextKeys and as `!` and the class in _combKeyTexts (AB4-2 of area B)
+// lookup-table: the storage classes a SQLite key's stored value carries, in _combTextKeys and as `!` and the class in _combKeyTexts
 const STORED_CLASSES: ReadonlySet<unknown> = /* @__PURE__ */ new Set(["blob", "integer", "real", "text"])
 
 /** Whether `key` is one key's value in `_combTextKeys`: null, or a storage class and its text */

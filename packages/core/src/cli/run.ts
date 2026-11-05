@@ -58,12 +58,12 @@ async function dispatch(argv: readonly string[], io: CliContext): Promise<void> 
 	}
 }
 
-/** Whether `argv` asks for the one JSON object, in either spelling the parser reads as --json (K5 of r19) */
+/** Whether `argv` asks for the one JSON object, in either spelling the parser reads as --json */
 const asksJson = (argv: readonly string[]): boolean => argv.some((arg) => arg === "--json" || arg.startsWith("--json="))
 
 /**
- * Runs the comb CLI on `argv` with `deps` in place of comb's own seams, for comb's tests (KT7 of
- * r22b). Of `io` it reads the documented fields alone, so a seam an io carries is never read.
+ * Runs the comb CLI on `argv` with `deps` in place of comb's own seams, for comb's tests.
+ * Of `io` it reads the documented fields alone, so a seam an io carries is never read.
  */
 export async function runCliWith(argv: readonly string[], io: CliIo, deps: CliDeps): Promise<number> {
 	const context: CliContext = {

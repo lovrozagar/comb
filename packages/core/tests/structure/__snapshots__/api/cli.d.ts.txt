@@ -23,22 +23,22 @@ export type CliIo = {
     confirm?: ((question: string) => Promise<boolean>) | undefined;
 };
 /**
- * What a command reads besides its io, comb's own unless its tests fake one (KT7 of r22b): typed by
+ * What a command reads besides its io, comb's own unless its tests fake one: typed by
  * comb's internals, so they stay off the public CliIo and reach the CLI through runCliWith alone.
  */
 export type CliDeps = {
-    /** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it (5.4b) */
+    /** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it */
     readPgObjects?: LiveRead | undefined;
-    /** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it (P5 of r19) */
+    /** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it */
     replayPgHistory?: typeof replayCatalog | undefined;
-    /** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
+    /** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it */
     readyPgDev?: ((target: {
         devUrl: string;
         schema: string;
     }) => Promise<void>) | undefined;
-    /** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
+    /** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it */
     locatePeer?: ((peer: string) => string) | undefined;
-    /** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
+    /** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it */
     readAtlasVersion?: (() => Promise<RunResult>) | undefined;
 };
 /** The io a command runs on, with the seams runCliWith was given */
@@ -57,7 +57,7 @@ export declare class CliError extends Error {
     /** A failure `runCli` prints as `message` on `err`, with no stack, and returns `exitCode` for; `options.cause` keeps the error it wraps */
     constructor(message: string, exitCode?: number, options?: ErrorOptions);
 }
-/** A failure a command already reported as its --json object: printed on stderr, never as a second object (K10 of r18) */
+/** A failure a command already reported as its --json object: printed on stderr, never as a second object */
 export declare class Reported extends CliError {
     constructor(error: unknown);
 }
@@ -90,8 +90,8 @@ import { type CliDeps, type CliIo } from "./output.ts";
 /** The help, from the declarations the commands parse with */
 export declare const help: () => string;
 /**
- * Runs the comb CLI on `argv` with `deps` in place of comb's own seams, for comb's tests (KT7 of
- * r22b). Of `io` it reads the documented fields alone, so a seam an io carries is never read.
+ * Runs the comb CLI on `argv` with `deps` in place of comb's own seams, for comb's tests.
+ * Of `io` it reads the documented fields alone, so a seam an io carries is never read.
  */
 export declare function runCliWith(argv: readonly string[], io: CliIo, deps: CliDeps): Promise<number>;
 /** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
@@ -121,7 +121,7 @@ export type RunResult = {
 };
 /**
  * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
- * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * I/O and refuses outside it: the floor is the oldest release comb's integration suite
  * passes on, and the next major may change what comb reads from Atlas
  */
 export declare const ATLAS_RANGE = ">=1.2.0 <2";
@@ -166,7 +166,7 @@ export type Run = (cmd: string, args: readonly string[], options?: RunOptions) =
 export declare const run: Run;
 /**
  * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
- * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ * holds, the one comb checked, never a name looked up on PATH
  */
 export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 
@@ -175,41 +175,41 @@ export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly st
 /**
  * What a database holds of what Atlas OSS will not compare: each routine by name, its kind and each
  * overload's signature (its input argument types); each table's triggers by name, with when and for
- * what they fire (tgtype) and whether they do (P13); its views, materialized views, sequences and
+ * what they fire (tgtype) and whether they do; its views, materialized views, sequences and
  * policies by name
  */
 export type LiveObjects = {
-    /** each extension, by name, but plpgsql (P10 of r18) */
+    /** each extension, by name, but plpgsql */
     extensions: Set<string>;
-    /** each domain, composite and range type and collation, by name, with what it is (P10 of r18) */
+    /** each domain, composite and range type and collation, by name, with what it is */
     kinds: Map<string, "collation" | "composite type" | "domain" | "range type">;
     /**
-     * what the read names by one label each, in the target schema (P12 of r19): `aggregate f(int4)`,
+     * what the read names by one label each, in the target schema: `aggregate f(int4)`,
      * `function f(int4) security definer`, `operator @@(none, int4)`, `cast (pair as int4)`, `view v
      * (security_invoker=true)`, `index i on m`, `replica identity on t (full)`
      */
     others: Set<string>;
-    /** what the read names database-wide, which a platform may hold of its own: `event trigger e`, `publication p` (P12 of r19) */
+    /** what the read names database-wide, which a platform may hold of its own: `event trigger e`, `publication p` */
     platform: Set<string>;
-    /** each table's policies, by name, with their command, roles and kind: `for all, to public, permissive` (P9, P10) */
+    /** each table's policies, by name, with their command, roles and kind: `for all, to public, permissive` */
     policies: Map<string, Map<string, string>>;
-    /** each view, materialized view and sequence no column owns, by name, with what it is (P9) */
+    /** each view, materialized view and sequence no column owns, by name, with what it is */
     relations: Map<string, "materialized view" | "sequence" | "view">;
-    /** each table's row level security where it is on: `enabled, not forced` (P10 of r18) */
+    /** each table's row level security where it is on: `enabled, not forced` */
     rls: Map<string, string>;
     routines: Map<string, {
         kind: "function" | "procedure";
         signatures: Set<string>;
     }>;
-    /** each table's rules, by name, but a view's own (P10 of r18) */
+    /** each table's rules, by name, but a view's own */
     rules: Map<string, Set<string>>;
-    /** each sequence's settings: `start 1, increment 1, min 1, max …, no cycle` (P10 of r18) */
+    /** each sequence's settings: `start 1, increment 1, min 1, max …, no cycle` */
     sequences: Map<string, string>;
     triggers: Map<string, Map<string, {
         enabled: boolean;
         type: number;
     }>>;
-    /** the role the read connects as: the one the migrations ran as, which CURRENT_USER names in a policy (R2 of plan 17) */
+    /** the role the read connects as: the one the migrations ran as, which CURRENT_USER names in a policy */
     user: string;
 };
 /** The database a read reaches, and the schema it reads */
@@ -271,9 +271,9 @@ type PgTarget = {
 type AtlasNeeds = {
     dev?: boolean | undefined;
     dir?: string | undefined;
-    /** the target unscoped, for the one call that lists the database's schemas (M78) */
+    /** the target unscoped, for the one call that lists the database's schemas */
     allSchemas?: boolean | undefined;
-    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
     revisions?: string | undefined;
     url?: boolean | undefined;
 };
@@ -305,7 +305,7 @@ declare const atlasUrls: (target: PgTarget) => {
 };
 /** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
 declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
-/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database (P2 of r19) */
+/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database */
 declare function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
@@ -314,7 +314,7 @@ declare function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void;
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
 /**
  * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
- * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ * OSS may say it left part of a schema out of what it compared
  */
 declare const atlasNotices: (stderr: string) => string[];
 export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, refuseUrlProblems, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
@@ -338,10 +338,9 @@ type FailedAt = {
 };
 /**
  * What a postgres.js failure on `at.field` says: its message, or, for the AggregateError it throws
- * with none when every address refuses, each address's answer joined (P15 of the 0.15.0 review), each
- * secret of `at.urls` masked; for a server sslrootcert=system cannot verify, where comb's CAs came from
- * (R1 of 5.3). comb's own words follow the mask, so a password that is one of them stays out of them
- * (P5 of r20)
+ * with none when every address refuses, each address's answer joined, each
+ * secret of `at.urls` masked; for a server sslrootcert=system cannot verify, where comb's CAs came from.
+ * comb's own words follow the mask, so a password that is one of them stays out of them
  */
 declare function failureOf(error: unknown, at: FailedAt): string;
 /**
@@ -354,14 +353,14 @@ declare function pastStops(connect: Connect): Connect;
 declare function loadPostgres(why: string): Promise<Connect>;
 /**
  * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
- * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
+ * query: the target's read and the dev replay's are this one function, so the two sides
  * cannot be read two ways
  */
 declare function readCatalog(sql: Pick<Sql, "unsafe">, schema: string): Promise<LiveObjects>;
 /** What the target schema of `target`'s database holds of what Atlas OSS does not compare; it writes nothing */
 declare function readLiveObjects(target: LiveTarget, load?: () => Promise<Connect>): Promise<LiveObjects>;
 /**
- * What the database and the history disagree on, both read by readCatalog (P5 of r19), the history's
+ * What the database and the history disagree on, both read by readCatalog, the history's
  * from its replay on dev: each object only one of them has, by name and signature or how a trigger
  * fires, and how many of each kind they share, whose bodies neither read
  */
@@ -385,7 +384,7 @@ declare const codeOf: (error: unknown) => unknown;
 declare const literal: (text: string) => string;
 /**
  * The backend `admin` runs on, as a replay's database name and role tag carry it, `<pid>_<start>`,
- * and the settings a replay connection takes (P4 of r22): that owner as its application_name, by
+ * and the settings a replay connection takes: that owner as its application_name, by
  * which the sweep finds a killed replay's backends, and on Postgres 14 and later a check every
  * second that its client is there, by which Postgres ends their statement itself; `admin` takes them
  * too. Its server's version comes with them
@@ -410,7 +409,7 @@ type Leftovers = {
 /**
  * What replays over at `now` left on `sql`'s server, which a sweep takes: the replay databases of
  * any role, or only those `sql`'s role may drop (`droppable`), but one with a session in it other
- * than the backends its own replay left (P4 of r22), and the tagged roles
+ * than the backends its own replay left, and the tagged roles
  */
 declare function leftovers(sql: Sql, now: number, droppable: boolean): Promise<Leftovers>;
 /** devUrl's options for one replay connection, notices unread; with `at`, the replay's own to its database, with its settings */
@@ -430,14 +429,14 @@ declare function makeDatabase(admin: Sql, owner: string, { denied, locale, unmad
 }): Promise<string>;
 /**
  * The extensions the history `texts` create with a plain CREATE EXTENSION, the one statement that
- * needs its extension absent, which the replay leaves them to make (P5 of r21); one a file creates IF
- * NOT EXISTS is copied, as a platform installs it on the target (PR1 of r22b)
+ * needs its extension absent, which the replay leaves them to make; one a file creates IF
+ * NOT EXISTS is copied, as a platform installs it on the target
  */
 declare const extensionsOf: (texts: readonly string[]) => Set<string>;
 /**
  * Every extension `from` holds made in `to`, in its schema at its version, but those the history
  * `makes`; one `to` cannot make is `refused`. One that requires an extension the history makes waits
- * for it (PR1 of r22b): what is returned makes, in a later session, each waiting extension whose every
+ * for it: what is returned makes, in a later session, each waiting extension whose every
  * requirement that session's database now holds, so the replay calls it after each CREATE EXTENSION
  */
 declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
@@ -472,7 +471,7 @@ type Replay = {
 };
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed;
-/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes (PR1 of r22b) */
+/** A replay's run of each file: the refusal it words, and the extensions waiting on one a file makes */
 type Replaying = Replay & {
     refused: Refuse;
     waits: (sql: Sql) => Promise<void>;
@@ -492,22 +491,22 @@ export { type Refuse, type Replay, type Replaying, runStatement };
 /**
  * The one catalog read a Postgres baseline makes (pg-live-objects.ts), in one round trip, of what
  * Atlas OSS leaves out of its comparison. Each row says `what` it is; `how` spells its settings as
- * the history's are spelled (P10 of r18), so the two compare as text.
+ * the history's are spelled, so the two compare as text.
  *
  * - The target schema's functions and procedures, but an extension's (a member of it through
  *   pg_depend, deptype e) and one another object makes (deptype i: a range type's constructors),
  *   each with its input argument types as the parser spells them (the catalog's type name, an array
  *   as its element's and [], the schema left out for pg_catalog and the target's).
  * - Its tables' triggers, but the internal ones a constraint makes, with tgtype and whether they
- *   fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and DISABLE (P13);
+ *   fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and DISABLE;
  *   a partition's clone of its parent's trigger is Postgres's, so it is left out (tgparentid).
  * - Its views, materialized views and sequences, but an extension's and a sequence a column owns (a
  *   serial's or an identity's, deptype a or i), a sequence with its settings; each table's policies,
- *   with their command, roles and whether they are permissive (P9 of the 0.15.0 review).
+ *   with their command, roles and whether they are permissive.
  * - Its domains, composite and range types and collations, but an extension's; each table's rules but
  *   a view's own; each table's row level security where it is on; every extension but plpgsql.
- * - The role the read connects as, which a policy's CURRENT_USER names (R2 of plan 17).
- * - P12 of r19, as `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
+ * - The role the read connects as, which a policy's CURRENT_USER names.
+ * - As `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
  *   its operators; each cast over one of its types or functions; each view's and materialized view's
  *   options (security_invoker, security_barrier, check_option); each materialized view's indexes; each
  *   table's replica identity where it is not the default. As `platform` labels, database-wide, which a
@@ -551,7 +550,7 @@ type Run = {
     seen: Snapshot;
     sql: Sql;
     strays: Strays;
-    /** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead (PR5 of r22b) */
+    /** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead */
     tablespaces: Set<string>;
     superuser: boolean;
 };
@@ -577,7 +576,7 @@ declare function bareRole(node: Record<string, unknown>, made: readonly string[]
  * other made by `sent` and tagged with its `owner`, and either held by a grant on `database`;
  * whether the role is a replay's, which the replay then drops, so whichever of two replays using
  * one role ends last drops it. It runs in a transaction, as every statement a transaction allows
- * does (P1 of r21), and each try is a savepoint, so a role another replay made or dropped since the
+ * does, and each try is a savepoint, so a role another replay made or dropped since the
  * read is read again
  */
 declare function createRole(sql: Sql, { database, owner, role, sent }: {
@@ -594,11 +593,11 @@ declare function ownRole(run: Run, node: Record<string, unknown>): Promise<boole
 /**
  * `roles` of the replay's, changed in its open transaction, made bare again before it commits: no
  * login, no password, and none of the attributes BARE denies, each said only where the role has it,
- * as a role that is not a superuser may not name one it lacks (PR6 of r22b)
+ * as a role that is not a superuser may not name one it lacks
  */
 declare function bareAgain(run: Run, roles: readonly string[]): Promise<void>;
 /**
- * `roles` the open transaction added, adopted as the replay's own before it commits (P5 of r22):
+ * `roles` the open transaction added, adopted as the replay's own before it commits:
  * tagged with its owner, held by a grant on its database, and dropped with the roles it made
  */
 declare function adopt(run: Run, roles: readonly string[]): Promise<void>;
@@ -615,7 +614,7 @@ export { ReplayFailed };
 
 // migrate/core/pg-server-writes.d.ts
 /**
- * What a replayed transaction wrote past its database (P1 of r21), read from Postgres, never from the
+ * What a replayed transaction wrote past its database, read from Postgres, never from the
  * file's text: a DO block, a function, EXECUTE and CALL hide a role's or a database's change from the
  * parse tree. `pg_stat_xact_sys_tables` counts this backend's own writes to each shared catalog in the
  * open transaction, for any role and before COMMIT, so another session's work never trips it;
@@ -623,8 +622,8 @@ export { ReplayFailed };
  * read then name the change: the open transaction sees it, a second connection sees the server as it
  * was. A role cannot read pg_authid unless it is a superuser, so a role is read from pg_roles, and a
  * write it does not show, such as a password, is named as one; a superuser reads pg_authid, a
- * password as its hash, so a password's change is named by its role (PR6 of r22b). Probed on Postgres 17 as a superuser
- * and as a CREATEDB CREATEROLE role (.tmp/grunt/r21-premise/p1-xact-stats.log, p1-snapshot.log).
+ * password as its hash, so a password's change is named by its role. Probed on Postgres 17 as a superuser
+ * and as a CREATEDB CREATEROLE role (p1-snapshot.log).
  */
 import type { Sql } from "./pg-replay-database.ts";
 /** Writes by shared catalog: how many rows the open transaction inserted, updated or deleted in each */
@@ -693,13 +692,13 @@ export { addWrites, CATALOGS, type Catalog, catalogsOf, type Change, changedFiel
 
 // migrate/core/pg-server-snapshot.d.ts
 /**
- * The server's shared catalogs read as committed, in one query (P1 and P2 of r22): what a bare
+ * The server's shared catalogs read as committed, in one query: what a bare
  * statement changed, which no transaction counts, and what a second connection committed, which this
  * backend's counts never see (pg-server-writes.ts). The read is the server's, another session's work
  * in it too, so each row carries the names of the objects it is about, and a change is a file's only
  * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out, but
  * for the fields of its own database's row that keep the cleanup from dropping it, which only that
- * replay changes. Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog
+ * replay changes. Beside the catalogs, the server's replication slots, which no catalog
  * holds.
  */
 import type { Sql } from "./pg-replay-database.ts";
@@ -724,7 +723,7 @@ declare function prepareSnapshot(admin: Sql, { database, superuser }: {
 declare function snapshot(admin: Sql): Promise<Snapshot>;
 /**
  * What changed from `before` to `after`, one change per subject, in order: of a subject about a
- * name in `names`, the names a file spells (P2 of r22), when given
+ * name in `names`, the names a file spells, when given
  */
 declare function snapshotChanges(before: Snapshot, after: Snapshot, names?: ReadonlySet<string>): string[];
 /** What the cleanup drops, by the noun its subject starts with */

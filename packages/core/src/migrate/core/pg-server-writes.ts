@@ -1,5 +1,5 @@
 /**
- * What a replayed transaction wrote past its database (P1 of r21), read from Postgres, never from the
+ * What a replayed transaction wrote past its database, read from Postgres, never from the
  * file's text: a DO block, a function, EXECUTE and CALL hide a role's or a database's change from the
  * parse tree. `pg_stat_xact_sys_tables` counts this backend's own writes to each shared catalog in the
  * open transaction, for any role and before COMMIT, so another session's work never trips it;
@@ -7,8 +7,8 @@
  * read then name the change: the open transaction sees it, a second connection sees the server as it
  * was. A role cannot read pg_authid unless it is a superuser, so a role is read from pg_roles, and a
  * write it does not show, such as a password, is named as one; a superuser reads pg_authid, a
- * password as its hash, so a password's change is named by its role (PR6 of r22b). Probed on Postgres 17 as a superuser
- * and as a CREATEDB CREATEROLE role (.tmp/grunt/r21-premise/p1-xact-stats.log, p1-snapshot.log).
+ * password as its hash, so a password's change is named by its role. Probed on Postgres 17 as a superuser
+ * and as a CREATEDB CREATEROLE role (p1-snapshot.log).
  */
 import type { Sql } from "./pg-replay-database.ts"
 import { ReplayFailed } from "./replay-failed.ts"

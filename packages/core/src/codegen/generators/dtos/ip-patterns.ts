@@ -1,6 +1,6 @@
 /*
- * The IPv6 address and network a plain inet or cidr column's DTO takes, as Postgres reads one (AA12 of
- * r22): RFC 3986's IPv6address, its last 32 bits two groups or an IPv4 tail, whose octets are decimal
+ * The IPv6 address and network a plain inet or cidr column's DTO takes, as Postgres reads one:
+ * RFC 3986's IPv6address, its last 32 bits two groups or an IPv4 tail, whose octets are decimal
  * with no leading zero and which Postgres also takes in two or three parts, padding zeros, and a `::`
  * standing for at least one group; a network that, a `/` and a prefix length of 0 to 128 with no
  * leading zero. zod's z.ipv6 and z.cidrv6 publish a pattern of hex groups alone and check with the URL
@@ -32,7 +32,7 @@ function address(): string {
 }
 
 /*
- * Each branch publishes its pattern and no format (A2-2 of r22, AA10's class): a format-checking
+ * Each branch publishes its pattern and no format: a format-checking
  * reader's ipv6 refuses the short IPv4 tails the pattern takes, and none knows cidrv4 or cidrv6, which
  * Ajv's strict mode refuses to compile. The issue keeps zod's format name; the pattern states the rule
  */

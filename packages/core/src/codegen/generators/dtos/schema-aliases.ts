@@ -1,5 +1,5 @@
 /**
- * The local names an entity file imports its c.json schemas under (F1, F2 of the 0.14.1 review). A
+ * The local names an entity file imports its c.json schemas under. A
  * schema is its module's export, so two modules' `profile` are two imports: an export name more than
  * one module gives, or one a generated file declares itself, is imported under an alias that names
  * its module, `profileFromWorkSchemas`, numbered on if that is taken too. Which names keep their own
@@ -13,7 +13,7 @@ import { snakeToCamel, snakeToPascal } from "../../utils/case.ts"
 import { SUFFIX } from "./entity-file.ts"
 
 /* the names a generated entity or shared file declares or imports itself, whatever the tables: comb's
-   predicates live under `comb`, and the globals it calls are named through `globalThis` (C2 of r17) */
+   predicates live under `comb`, and the globals it calls are named through `globalThis` */
 const GENERATED = /^(?:z|comb|combMeta|globalThis|timestampSchema|cidrSchema|jsonValueSchema|_.*|timestamps.*)$/
 
 /** A module as the project names it: a package by its specifier, a project file by its path from `root` */

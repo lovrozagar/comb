@@ -1,5 +1,5 @@
 /**
- * The locale the replay's database is made at (PR4 of r22b): the target database's encoding, locale
+ * The locale the replay's database is made at: the target database's encoding, locale
  * provider, collation and character type, and its ICU or builtin locale and ICU rules. They decide a
  * text range partition's bounds, a CHECK on text order or bytes, a unique index on text and which
  * characters a seed may hold, so a replay at template0's, the server's default, could check a file

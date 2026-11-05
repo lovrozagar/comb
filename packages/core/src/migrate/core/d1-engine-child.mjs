@@ -1,5 +1,5 @@
 /**
- * The D1 proof's child (SD1 of r22): what runs each pending file on a scratch local D1 the checked
+ * The D1 proof's child: what runs each pending file on a scratch local D1 the checked
  * wrangler's own Miniflare opens (`getPlatformProxy({ persist: false })`). d1-engine.ts starts it on
  * the runtime wrangler runs on (node), through process.ts, whatever runtime comb itself runs on, so
  * Miniflare runs where wrangler's apply runs it. Plain JavaScript: node does not strip a TypeScript

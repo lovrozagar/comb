@@ -29,7 +29,7 @@ function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid" {
 
 /**
  * `partialUniqueIndexes` arrived in 0.15, after `uniqueIndexes`: absent, it reads as []; each needs
- * its predicate, without which it would read as the uniqueness it is not (C7)
+ * its predicate, without which it would read as the uniqueness it is not
  */
 function readPartialUniqueIndexes(raw: unknown): PartialUniqueIndexMeta[] | "invalid" {
 	if (raw === undefined) return []

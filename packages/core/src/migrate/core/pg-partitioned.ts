@@ -1,5 +1,5 @@
 /**
- * The partitioned tables a Postgres history leaves, which rating reads (P18 and P19 of r19), each
+ * The partitioned tables a Postgres history leaves, which rating reads, each
  * followed through its RENAME, SET SCHEMA and DROP, and the statements Postgres refuses on one, with
  * comb's route around each: Postgres refuses a NOT VALID foreign key on a partitioned table, and
  * CREATE INDEX CONCURRENTLY, ADD … USING INDEX and DROP INDEX CONCURRENTLY of a partitioned index.
@@ -37,14 +37,12 @@ const indexRoute = (table: string): string =>
  * How a primary key or unique constraint reaches partitioned `table` without building its index
  * under the ADD's lock, as pg_dump writes one: ADD on ONLY the table builds nothing and locks no
  * partition, and each partition's key, built concurrently, attaches to it under ACCESS SHARE
- * (.tmp/grunt/p21/areas/pa/pa10/probe2.log)
  */
 const keyRoute = (table: string): string =>
 	`add it to ONLY ${table}, which builds nothing and locks no partition, then build each partition's unique index with CREATE UNIQUE INDEX CONCURRENTLY in its own -- atlas:txmode none file, add each partition's constraint USING INDEX, then ALTER INDEX … ATTACH PARTITION each to ${table}'s`
 
 /**
  * The recipe for an index on partitioned `table`, which CREATE INDEX CONCURRENTLY refuses there
- * (PA10 of r22b, .tmp/grunt/r22b/migrate-pg-atlas/lock/partitioned-index-recipe.log)
  */
 const partitionedRecipe = (table: string): string =>
 	`${table} is partitioned, which CREATE INDEX CONCURRENTLY refuses: ${indexRoute(table)}`
@@ -72,7 +70,7 @@ function dropRefusal(node: Node, facts: Facts): string | undefined {
 
 /**
  * Why Postgres refuses a statement on a table or index `facts` hold partitioned, in a transaction
- * or out of one, with comb's route (PA10 of r22b, .tmp/grunt/p21/areas/pa/pa10/probe.log); undefined
+ * or out of one, with comb's route; undefined
  * for one it runs
  */
 function partitionedRefusal(type: string, node: Node, facts: Facts): string | undefined {

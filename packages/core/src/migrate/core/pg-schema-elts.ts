@@ -1,5 +1,5 @@
 /**
- * Names inside `CREATE SCHEMA s …` elements as Postgres resolves them (M74). CreateSchemaCommand
+ * Names inside `CREATE SCHEMA s …` elements as Postgres resolves them. CreateSchemaCommand
  * puts s first on the search path, and s is new, so an unqualified name in an element resolves to
  * s only when an element of the statement creates it; any other resolves as it would outside the
  * statement. The parse tree is qualified so on parsing, before anything reads or keeps it.

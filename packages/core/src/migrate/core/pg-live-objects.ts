@@ -1,8 +1,8 @@
 /**
  * What a Postgres baseline compares itself, which Atlas OSS leaves out of its comparison without a
- * word (plan 14's 5.4b, probe 4): the functions, triggers, views, sequences, policies, types, rules,
+ * word: the functions, triggers, views, sequences, policies, types, rules,
  * collations, extensions and row level security of the target schema, read from the catalog by one
- * query, readCatalog, on the target and on the history's replay on dev (pg-replay.ts, P5 of r19), and
+ * query, readCatalog, on the target and on the history's replay on dev (pg-replay.ts), and
  * set against each other. Their bodies are compared by neither: Atlas OSS cannot load them, and comb
  * does not read them.
  *
@@ -41,10 +41,9 @@ type FailedAt = { field: "devUrl" | "url"; url: string; urls: readonly string[] 
 
 /**
  * What a postgres.js failure on `at.field` says: its message, or, for the AggregateError it throws
- * with none when every address refuses, each address's answer joined (P15 of the 0.15.0 review), each
- * secret of `at.urls` masked; for a server sslrootcert=system cannot verify, where comb's CAs came from
- * (R1 of 5.3). comb's own words follow the mask, so a password that is one of them stays out of them
- * (P5 of r20)
+ * with none when every address refuses, each address's answer joined, each
+ * secret of `at.urls` masked; for a server sslrootcert=system cannot verify, where comb's CAs came from.
+ * comb's own words follow the mask, so a password that is one of them stays out of them
  */
 function failureOf(error: unknown, at: FailedAt): string {
 	const { code, errors, message } = error as { code?: unknown; errors?: unknown; message?: unknown }
@@ -57,7 +56,7 @@ function failureOf(error: unknown, at: FailedAt): string {
 	const said = maskSecrets(raw, at.urls)
 	if (UNVERIFIED.has(code) && queryParams(at.url).get("sslrootcert") === "system")
 		return `${said}; comb verified the server against ${systemCas().source}`
-	/* P19 of r18: a server without TLS ends the handshake comb's require starts */
+	/* A server without TLS ends the handshake comb's require starts */
 	if (!raw.includes("before secure TLS connection was established")) return said
 	return `${said}: the server takes no TLS, which comb and Atlas require where ${at.field} names no sslmode; set sslmode=disable on ${at.field} for a server without TLS`
 }
@@ -123,7 +122,7 @@ function readRow(row: Record<string, unknown>, live: LiveObjects): void {
 
 /**
  * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
- * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
+ * query: the target's read and the dev replay's are this one function, so the two sides
  * cannot be read two ways
  */
 async function readCatalog(sql: Pick<Sql, "unsafe">, schema: string): Promise<LiveObjects> {
@@ -211,7 +210,7 @@ const onlyIn = (database: ReadonlySet<string>, migrations: ReadonlySet<string>):
 ]
 
 /**
- * What the database and the history disagree on, both read by readCatalog (P5 of r19), the history's
+ * What the database and the history disagree on, both read by readCatalog, the history's
  * from its replay on dev: each object only one of them has, by name and signature or how a trigger
  * fires, and how many of each kind they share, whose bodies neither read
  */

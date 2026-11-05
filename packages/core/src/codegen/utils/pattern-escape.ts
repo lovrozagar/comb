@@ -18,7 +18,7 @@ const WRITTEN_OUT: Readonly<Record<string, string>> = {
 export const UNREAD =
 	"which Go's RE2 and Rust's regex do not compile, so a validator in either refuses the whole document: write the rule without it"
 
-/* ECMAScript's . refuses \n, \r, U+2028 and U+2029; RE2's and Rust's refuse \n alone (A2-7 of r22) */
+/* ECMAScript's. refuses \n, \r, U+2028 and U+2029; RE2's and Rust's refuse \n alone */
 export const DOT =
 	"., which ECMAScript reads as any character but a line terminator and Go's RE2 and Rust's regex as any but \\n: write [^\\n\\r], or the class meant"
 
@@ -32,7 +32,7 @@ export const LOOKAROUND: RegExp = /^\(\?<?[!=]/
 /* the escapes past a letter or \0 every engine reads as ECMAScript does: syntax characters, - in a class, and \t \n \r \f \v */
 const SAME_ESCAPES = "^$\\.*+?()[]{}|/tnrfv"
 
-/* the General_Category values Go's RE2 names, which Rust's regex reads alike: Cs, a surrogate, Rust refuses (A3-2 of r23) */
+/* the General_Category values Go's RE2 names, which Rust's regex reads alike: Cs, a surrogate, Rust refuses */
 // lookup-table: a \p{…} every engine compiles
 export const CATEGORIES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"C",
@@ -110,7 +110,7 @@ export function escapeAt(source: string, at: number): { end: number; refused: st
 		return one(
 			`\\${escaped}, which ECMAScript, Go's RE2 and Rust's regex read as other sets: write ${WRITTEN_OUT[escaped]}`,
 		)
-	/* Rust's regex refuses an octal escape, \0 among them, in a class or out (A2-7 of r22) */
+	/* Rust's regex refuses an octal escape, \0 among them, in a class or out */
 	if (escaped === "0") return one(`\\0, ${OCTAL}`)
 	/* under u a class holds no backreference, a source that compiled none there */
 	if (/[1-9k]/.test(escaped)) return one(`\\${escaped}, a backreference, ${UNREAD}`)

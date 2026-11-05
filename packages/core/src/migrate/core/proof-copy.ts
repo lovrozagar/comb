@@ -2,7 +2,7 @@
  * The copy of a SQLite-family target the proof runs on (proof-run.ts): the target's live schema, read
  * in one SELECT, created in a scratch database with seed rows that show any change (proof-seed.ts),
  * tables and indexes first, then the seed, then triggers and views, as the database has them. The
- * same copy, as statements, is what a D1 file is proven on in D1's own engine (d1-engine.ts, SD1 of r22).
+ * same copy, as statements, is what a D1 file is proven on in D1's own engine (d1-engine.ts).
  */
 import { isMirror, seedMirrors } from "./proof-mirror.ts"
 import { type LocalDb, openScratch, type ScratchDb, type ScratchEngine } from "../drivers/local-db.ts"
@@ -32,7 +32,7 @@ async function liveObjects(conn: Connection, engine: string): Promise<LiveObject
 /**
  * The objects the copy creates: every one but those another one makes itself, a virtual table's
  * module's shadow tables, and a vector index's shadow table, its index and libsql's table of vector
- * indexes (SL3 of r22)
+ * indexes
  */
 function creatable(objects: readonly LiveObject[]): LiveObject[] {
 	const shadows = new Set(objects.filter(isVirtual).flatMap(shadowsOf))
@@ -69,7 +69,7 @@ type Seed =
 	| {
 			json: ReadonlySet<string>
 			variant: number
-			/** the tables the seed holds rows in, by folded name, when not every table (proof-scope.ts, 8.5) */
+			/** the tables the seed holds rows in, by folded name, when not every table (proof-scope.ts) */
 			rows?: ReadonlySet<string> | undefined
 	  }
 	| undefined
@@ -147,9 +147,9 @@ function insertsOf(db: LocalDb, name: string): string[] {
 
 /**
  * The copy of `objects` seeded as `seed`, as statements another engine can run: its tables and indexes, the
- * seed's rows of each table but a virtual one, then its triggers and views (SD1 of r22). An object the copy could
+ * seed's rows of each table but a virtual one, then its triggers and views. An object the copy could
  * not create is left out, as the proof leaves it out. Rows go parents first, under defer_foreign_keys for a cycle of
- * keys: the seed meets every key, as D1 holds them all (8.4).
+ * keys: the seed meets every key, as D1 holds them all.
  */
 async function scriptOf(objects: readonly LiveObject[], seed: NonNullable<Seed>): Promise<string[]> {
 	const copy = await copyOf(objects, seed)
@@ -177,8 +177,7 @@ async function scriptOf(objects: readonly LiveObject[], seed: NonNullable<Seed>)
 
 /**
  * The copy the D1 proof runs pending `files` on, as statements: of the live schema `objects` and the binding's
- * history table `history`, what the files can observe, seeded where they can observe rows (proof-scope.ts, 8.5 of
- * plan 21)
+ * history table `history`, what the files can observe, seeded where they can observe rows (proof-scope.ts)
  */
 async function copyScript(
 	objects: readonly LiveObject[],

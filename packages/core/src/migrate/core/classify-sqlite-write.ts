@@ -5,7 +5,7 @@
  * a backfill of only the columns the file added (cautious, once), and an insert no history trigger
  * watches that replaces nothing. A table whose definition replaces on conflict (`ON CONFLICT
  * REPLACE`, in the history or made in the file) is never cleared: a plain insert into it deletes
- * the row it meets. A REPLACE on a table that was there before the file is unsafe outright (M41). Every other write, and any it cannot read, is unsafe, pending the
+ * the row it meets. A REPLACE on a table that was there before the file is unsafe outright. Every other write, and any it cannot read, is unsafe, pending the
  * proof run's read: planApply's proof replaces those entries with the engine's own findings.
  */
 import type { ExtractedSchema } from "../migration-types.ts"
@@ -21,12 +21,12 @@ const PENDING: Pending = { level: "unsafe", note: "pending the proof run's read 
 /*
  * A REPLACE on a table that was there before the file: unsafe whatever the proof run reads, as the
  * rows it meets are deleted in a way the engine cannot always tell from an update's own rewrite of a
- * row (a conflict on a rowid table with indexes is an IdxDelete and an Insert over it, M41)
+ * row (a conflict on a rowid table with indexes is an IdxDelete and an Insert over it)
  */
 const REPLACES: Finding = { level: "unsafe", note: "replaces the rows it conflicts with, deleting them" }
 
 const CTE = "^(?:WITH\\b.*?\\b)?"
-/* every spelling of an insert, up to its table: any CTE, any conflict clause, and REPLACE (M42) */
+/* every spelling of an insert, up to its table: any CTE, any conflict clause, and REPLACE */
 const INSERT_INTO: string = `${CTE}(?:INSERT(?: OR (\\w+))?|REPLACE) INTO `
 // per-process-constant: a write's verb, after any CTE
 const VERB = /* @__PURE__ */ new RegExp(`${CTE}(INSERT|REPLACE|UPDATE|DELETE)\\b`, "i")

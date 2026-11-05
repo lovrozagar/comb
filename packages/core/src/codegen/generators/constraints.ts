@@ -37,7 +37,7 @@ const CHECK_FAILED = { cause: "Check constraint violated", statusKey: "bad_reque
 /**
  * The one answer of each kind a table's constraints on a private column share: a key and cause from
  * neither the column nor the constraint's name, which a default name (`doc_token_key`) spells and
- * an explicit one often does (F66). One object per kind, so the F20 check knows a repeat as its own
+ * an explicit one often does. One object per kind, so the repeat check knows a repeat as its own
  */
 type Hidden = Record<"check" | "duplicate" | "reference" | "value", Constraint>
 
@@ -85,7 +85,7 @@ function uniqueOf(table: TableMeta, hidden: Hidden): Record<string, Constraint> 
 				: `A record with this ${columns.join(" and ")} combination already exists`
 		unique[sqlNames.join(",")] = conflict(cause, `${errorKeyPrefix(table)}_${columns.join("_")}_duplicate`)
 	}
-	/* an index on an expression is reported by its name, which the handlers look up under unique (F14) */
+	/* an index on an expression is reported by its name, which the handlers look up under unique */
 	for (const { expression, name } of table.expressionIndexes)
 		unique[name] = touchesPrivate(table, expression)
 			? hidden.duplicate
@@ -96,7 +96,7 @@ function uniqueOf(table: TableMeta, hidden: Hidden): Record<string, Constraint> 
 /**
  * The cause and status a CHECK reports. Only the two conventions comb itself writes are read from
  * a name, `_enum` and `_size`; any other word in a name says nothing reliable (a seats check named
- * `…_within_valid_range` is no date), so every other CHECK is a 400 as the handler's fallback (F27)
+ * `…_within_valid_range` is no date), so every other CHECK is a 400 as the handler's fallback
  */
 function checkVerdict(name: string, expression: string): Omit<Constraint, "errorKey"> {
 	if (name.endsWith("_enum")) return { cause: "Invalid enum value", statusKey: "bad_request" }
@@ -108,20 +108,20 @@ function checkVerdict(name: string, expression: string): Omit<Constraint, "error
 	}
 }
 
-/** A CHECK's name under its table, which a name already starting with the table carries once (F35) */
+/** A CHECK's name under its table, which a name already starting with the table carries once */
 const keyed = (table: TableMeta, name: string) =>
 	name.startsWith(`${errorKeyPrefix(table)}_`) ? name : `${errorKeyPrefix(table)}_${name}`
 
 /**
  * The SQL the reader renders comb's enum CHECK of a column to, once a table applies it: the column
- * by its SQL name, and each value a literal (F47)
+ * by its SQL name, and each value a literal
  */
 const enumCheckExpression = (sqlName: string, values: readonly string[]): string =>
 	`"${sqlName}" IN (${values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ")})`
 
 /**
  * The declared CHECKs of a table that are not comb's own enum CHECK, applied: one under comb's
- * name for an enum column is comb's when it checks what comb writes, and refused otherwise (F47)
+ * name for an enum column is comb's when it checks what comb writes, and refused otherwise
  */
 function declaredChecks(table: TableMeta, enums: readonly FieldMeta[]): TableMeta["checkConstraints"] {
 	return table.checkConstraints.filter((chk) => {
@@ -136,13 +136,13 @@ function declaredChecks(table: TableMeta, enums: readonly FieldMeta[]): TableMet
 
 /**
  * Each CHECK of a table by the name the engine reports: the declared ones and comb's own enum
- * CHECKs (F28), cut to what Postgres keeps of a name (F21). Two of one name, or that cut to one,
+ * CHECKs, cut to what Postgres keeps of a name. Two of one name, or that cut to one,
  * fail codegen.
  */
 function checksOf(table: TableMeta, dialect: Dialect, hidden: Hidden): Record<string, Constraint> | undefined {
 	const key = (name: string) => (dialect === "postgres" ? pgIdentifier(name) : name)
 	const enums = table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)
-	/* an enum CHECK the table does not apply never fires, so it has no entry (C11) */
+	/* an enum CHECK the table does not apply never fires, so it has no entry */
 	const applied = new Set(table.checkConstraints.map((chk) => chk.name))
 	const entries: Array<[string, string, Constraint]> = declaredChecks(table, enums).map((chk) => [
 		chk.name,
@@ -198,7 +198,7 @@ function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 	if (unique) entry.unique = unique
 	const check = checksOf(table, dialect, hidden)
 	if (check) entry.check = check
-	/* the columns the handlers name in no error (F67), sorted by code unit */
+	/* the columns the handlers name in no error, sorted by code unit */
 	const hiddenColumns = table.fields.filter((f) => f.constraints.private).map((f) => f.sqlName)
 	if (hiddenColumns.length > 0) entry.private = hiddenColumns.sort()
 	return entry
@@ -206,7 +206,7 @@ function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 
 /**
  * Each table's columns some foreign key points at, by SQL name, sorted and once each: a composite
- * key's column by column, and a table's reference to itself among them (U43)
+ * key's column by column, and a table's reference to itself among them
  */
 function referencedColumns(tables: readonly TableMeta[]): Map<string, string[]> {
 	const out = new Map<string, Set<string>>()
@@ -224,9 +224,9 @@ function referencedColumns(tables: readonly TableMeta[]): Map<string, string[]> 
 /**
  * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
  * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
- * the one translation would name the wrong column for one (F20). Renaming the keys would break
+ * the one translation would name the wrong column for one. Renaming the keys would break
  * every consumer's translations, so a repeat is refused instead. The one answer a table's private
- * constraints share is no repeat: to a client that never sees the column, they mean one thing (F66).
+ * constraints share is no repeat: to a client that never sees the column, they mean one thing.
  */
 export function buildConstraintMap(
 	tables: readonly TableMeta[],

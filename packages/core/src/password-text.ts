@@ -1,5 +1,5 @@
 /**
- * The plaintext a password column's hash is made from (C1, C4 of r21), after NIST SP 800-63B rev 4
+ * The plaintext a password column's hash is made from, after NIST SP 800-63B rev 4
  * §3.1.1.2: any storable text, normalized to NFC and then counted by code point, never trimmed,
  * with no composition rule. `passwordText()` sets a password, at least 15 characters (a password
  * used only with a second factor may take `min: 8`); `passwordText.typed()` reads one typed to
@@ -43,7 +43,7 @@ function refuseBound(name: "max" | "min", bound: number, floor: number): void {
  * length by code point and runs the NFC overwrite before its checks, so its own min and max bind the
  * NFC form, give the too_small and too_big issues every comb length gives, and publish themselves;
  * the rewrite is published as the `nfc` transform, and bcrypt's bytes as `x-comb-maxUtf8Bytes`, the
- * string's own bytes, never `x-comb-maxBytes`, which bounds a value's JSON text (C1, C2, C3 of r22)
+ * string's own bytes, never `x-comb-maxBytes`, which bounds a value's JSON text
  */
 function password(min: number, max: number, hash: PasswordHash | undefined): z.ZodString {
 	const bcrypt = hash === "bcrypt"
@@ -82,7 +82,7 @@ function set({ hash, max = 128, min = 15 }: PasswordTextOptions = {}): z.ZodStri
 	refuseBound("min", min, 0)
 	refuseBound("max", max, 1)
 	if (min > max) throw new TypeError(`passwordText's min ${min} is past its max ${max}`)
-	/* every code point is a byte at least, so past bcrypt's bytes no password is one it reads (CD10 of r22b) */
+	/* every code point is a byte at least, so past bcrypt's bytes no password is one it reads */
 	if (hash === "bcrypt" && min > BCRYPT_BYTES)
 		throw new TypeError(`passwordText's min ${min} leaves no password bcrypt reads: bcrypt reads ${BCRYPT_BYTES} bytes`)
 	return password(min, max, hash)

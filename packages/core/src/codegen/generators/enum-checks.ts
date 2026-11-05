@@ -93,7 +93,7 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 	}
 
 	const lines: string[] = []
-	/* the return type annotated, so a consumer's isolatedDeclarations compiles the file (K17 of r17) */
+	/* the return type annotated, so a consumer's isolatedDeclarations compiles the file */
 	lines.push(
 		`import { check, type CheckBuilder } from "drizzle-orm/${ctx.dialect === "postgres" ? "pg" : "sqlite"}-core"`,
 	)

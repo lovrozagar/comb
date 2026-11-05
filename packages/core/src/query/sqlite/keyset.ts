@@ -56,7 +56,7 @@ function integerText(value: bigint | number): string {
 	return BigInt(value).toString()
 }
 
-/** An integer, a JS number's or a bigint's, as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
+/** An integer, a JS number's or a bigint's, as a SQL literal, where a bound parameter would cost the D1 budget one */
 const integerLiteral = (value: bigint | number): SQL => sql.raw(integerText(value))
 
 /**
@@ -155,7 +155,6 @@ function afterFrom(position: KeysetPosition, start: number): SQL {
 const unsafeBounds = (values: readonly unknown[]): SQL[] =>
 	values.flatMap((value) => (value instanceof AnchorBound && value.ends ? [isNull(value.value)] : []))
 
-// U26
 /**
  * The WHERE clause of the rows after `position` in the list's order: every key, then the tiebreak,
  * each in its own direction and null placement, so it agrees with `orderSQL` and the page after
@@ -169,7 +168,7 @@ function keysetSQL(position: KeysetPosition): SQL {
 
 /**
  * 1 where a bound with no safe fallback is NULL, its anchor row gone or renamed, else 0; undefined
- * when no bound can be. It reads the anchor row alone, so Postgres plans it once a query (U26).
+ * when no bound can be. It reads the anchor row alone, so Postgres plans it once a query.
  */
 function anchorGone(values: readonly unknown[]): SQL | undefined {
 	const unsafe = unsafeBounds(values)

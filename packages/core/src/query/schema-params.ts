@@ -32,7 +32,7 @@ const baseListQueryShape: {
 	cursor: z.ZodOptional<z.ZodString>
 } = {
 	/* any string: readCursor answers every one it cannot use, past MAX_CURSOR_LENGTH included, with
-	   invalid_cursor, so a client restarts on one key (C5); the bound is published all the same */
+	   invalid_cursor, so a client restarts on one key; the bound is published all the same */
 	cursor: /* @__PURE__ */ z.string().optional().meta({
 		description: CURSOR_DESCRIPTION,
 		maxLength: MAX_CURSOR_LENGTH,
@@ -73,14 +73,14 @@ const sortDirectionEnum: z.ZodEnum<{ asc: "asc"; desc: "desc" }> = /* @__PURE__ 
 /** A count param as a schema takes it: a number, or the string of one in decimal digits */
 type CountParam = z.ZodPreprocess<z.ZodNumber, unknown>
 
-/* a count in a query string: decimal digits, with no sign, space, fraction, exponent or 0x, 0b or 0o prefix (U36) */
+/* a count in a query string: decimal digits, with no sign, space, fraction, exponent or 0x, 0b or 0o prefix */
 const DECIMAL_DIGITS = /^\d+$/
 
 /**
  * `raw` as a number: as given, or read from decimal digits, at most `max`'s unless the first is no
  * zero; NaN for any other string, which a number schema refuses. Digits past `max`'s that start with
  * no zero hold a number past it, which its bound refuses; leading zeros past them hold none, so the
- * query string comb accepts stays within maxQueryBytes (AB4-9 of area B)
+ * query string comb accepts stays within maxQueryBytes
  */
 function fromDigits(raw: unknown, max: number): unknown {
 	if (typeof raw !== "string") return raw
@@ -88,7 +88,7 @@ function fromDigits(raw: unknown, max: number): unknown {
 	return DECIMAL_DIGITS.test(raw) && !padded ? Number(raw) : Number.NaN
 }
 
-/** `raw` as a page, a whole number from 1; anything else is invalid_page, as the builders answer it (U36) */
+/** `raw` as a page, a whole number from 1; anything else is invalid_page, as the builders answer it */
 function pageFrom(raw: unknown, maxPage: number): unknown {
 	const page = fromDigits(raw, maxPage)
 	if (typeof page !== "number" || !Number.isInteger(page) || page < 1) throw invalidPage(raw)
@@ -117,7 +117,7 @@ const paginationError = (message: string) => new TypeError(`createListQuerySchem
 
 /**
  * Throw a TypeError naming the key unless maxLimit is a whole number from 1 and defaultLimit one
- * from 1 to maxLimit (QL6 of r22b): zod's `.default()` skips the inner check, so a default past the
+ * from 1 to maxLimit: zod's `.default()` skips the inner check, so a default past the
  * maximum would answer every request without a `limit` with a 400. A maxLimit given alone below
  * the default limit is told to set defaultLimit too, rather than clamped silently
  */
@@ -147,8 +147,8 @@ function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<
 /**
  * The `page` param: decimal digits or a number, a whole number from 1. Neither bound is a field
  * error, which would give one condition two contracts: a page that is no whole number from 1 is
- * `invalid_page` (U36), and maxPage, published but not checked here, is the list schema's
- * `page_too_deep` (L2), each as an unbounded list answers it
+ * `invalid_page`, and maxPage, published but not checked here, is the list schema's
+ * `page_too_deep`, each as an unbounded list answers it
  */
 function pageSchema(maxPage: number): z.ZodOptional<CountParam> {
 	const page = z

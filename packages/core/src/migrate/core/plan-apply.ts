@@ -4,7 +4,7 @@
  * pending file is classified against the schema the files before it leave, proven on a seeded
  * in-memory copy of the database's own schema (proof-run.ts), and approved as the stricter of the
  * two needs (approval.ts); a target with an engine of its own (D1) then runs them there, and what it refuses
- * is refused (SD1 of r22). A target with no tables of its own and no applied history holds nothing
+ * is refused. A target with no tables of its own and no applied history holds nothing
  * a file could lose, so its files skip the approval, and the output says "empty target". It reads
  * the database, and applies nothing to it.
  */
@@ -42,13 +42,13 @@ type PlanOptions = {
 	whole?: boolean | undefined
 	/** the database, whose own foreign keys and triggers a guarded rebuild is checked against */
 	conn?: Connection | undefined
-	/** where the files apply, whose own rule of what it runs check holds them to (S1 of r19, S1 of r22); local unnamed */
+	/** where the files apply, whose own rule of what it runs check holds them to; local unnamed */
 	kind?: TargetKind | undefined
 	/** the tables the target's migration history lives in, which an empty target may hold (default: comb's and wrangler's) */
 	historyTables?: readonly string[] | undefined
 	/**
 	 * the target's own engine, run after the proof: it runs the pending files as the target would, throws what it
-	 * refuses (D1, SD1 of r22), and answers each file it could not prove and why, which leaves that file cautious
+	 * refuses (D1), and answers each file it could not prove and why, which leaves that file cautious
 	 */
 	engine?:
 		| ((
@@ -56,7 +56,7 @@ type PlanOptions = {
 				live: readonly LiveObject[],
 		  ) => Promise<ReadonlyArray<{ name: string; why: string }>>)
 		| undefined
-	/** the SQLite the proof copy runs on: libsql's for a libsql or Turso target, which applies its files there (SL3 of r22); default the runtime's */
+	/** the SQLite the proof copy runs on: libsql's for a libsql or Turso target, which applies its files there; default the runtime's */
 	proofEngine?: ScratchEngine | undefined
 }
 
@@ -89,7 +89,7 @@ function refuseOutOfOrder(files: readonly string[], applied: ReadonlySet<string>
 /**
  * Refuses applying `file` of the migrations directory on its own while a file that sorts before it,
  * one of `before`, is pending: the directory would then hold a pending file before an applied one,
- * which every whole-directory run refuses (S3 of the 0.15.0 review)
+ * which every whole-directory run refuses
  */
 function refuseSkipping(file: string, before: readonly string[], applied: ReadonlySet<string>): void {
 	const waiting = before.find((name) => !applied.has(name))
@@ -208,7 +208,7 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const applied = new Set(files.filter((name, i) => options.applied(name, texts[i] as string)))
 	if (options.whole !== false) refuseOutOfOrder(files, applied)
 	const classified = classifyPending(files, texts, { applied, kind: options.kind ?? "local" })
-	/* the live guard refuses outright and names the cause, so it runs before the proof and approval (M17) */
+	/* the live guard refuses outright and names the cause, so it runs before the proof and approval */
 	if (conn !== undefined) await refuseUnseenReach(conn, classified)
 	const proofs =
 		conn === undefined || classified.length === 0

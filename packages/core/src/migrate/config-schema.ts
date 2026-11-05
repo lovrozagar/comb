@@ -18,12 +18,12 @@ const NEON_IS_POSTGRES =
 	"Neon and Supabase are postgres URLs: use the postgres provider type with the direct connection URL"
 
 /* a connection string's content is checked when a command resolves its environment, so one unset in
-   this shell blocks no other (P5 of r17, P9 of r18) */
+   this shell blocks no other */
 /* the Turso provider, apart so the union stays short to read */
 const tursoProviderSchema = () =>
 	z.strictObject({
 		apiToken: z.string(),
-		/* the provider names its database, as D1's does; an environment's name is a label (K2 of r18) */
+		/* the provider names its database, as D1's does; an environment's name is a label */
 		databaseName: nonBlank(
 			undefined,
 			"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
@@ -48,7 +48,7 @@ const providerInputSchema = () =>
 		}),
 		z.strictObject({
 			devUrl: z.string().optional(),
-			/* a literal of the config, so its grammar is held at load, as Postgres reads lock_timeout (K4 of r18) */
+			/* a literal of the config, so its grammar is held at load, as Postgres reads lock_timeout */
 			lockTimeout: z
 				.string()
 				.superRefine((text, ctx) => {
@@ -58,7 +58,7 @@ const providerInputSchema = () =>
 				.optional(),
 			schema: nonBlank().optional(),
 			type: z.literal("postgres"),
-			/* checked when a command resolves its environment, so one unset in this shell blocks no other (P5) */
+			/* checked when a command resolves its environment, so one unset in this shell blocks no other */
 			url: z.string(),
 		}),
 		/* there is no neon type: a Neon or Supabase database is a postgres URL */
@@ -95,7 +95,7 @@ type DatabaseInput = {
 	provider?: unknown
 }
 
-/** Why a database is of neither shape, each at its path: one target's name and provider, or environments that each resolve a provider (K13) */
+/** Why a database is of neither shape, each at its path: one target's name and provider, or environments that each resolve a provider */
 function shapeIssues(db: DatabaseInput): Array<{ message: string; path: string[] }> {
 	if (db.environments === undefined) {
 		return [

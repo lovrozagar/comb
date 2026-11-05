@@ -5,7 +5,7 @@
  * its own key, then deletes the mapping's. While the tombstone lives, a mapping counts only when
  * it was tagged with that nonce, which a fill does when it saw the tombstone and so read the
  * primary, after the remap committed; any other is a miss, and the reader reads the primary and
- * puts the mapping tagged. No clock is compared (Q7, C1 of the 0.14.1 review). Mapping and
+ * puts the mapping tagged. No clock is compared. Mapping and
  * tombstone have separate keys, so a router before 0.14 sharing the KV in a rolling deploy finds a
  * plain miss where an org was invalidated; a tombstone 0.14.0 left in the mapping's key is a miss.
  *
@@ -16,9 +16,9 @@
  * the outer bound, not a case handled.
  *
  * KV is a cache, so a KV call that fails is logged (`shard-router.kv.error`) and is a skipped
- * write, never a failed request, nor a failed move after its D1 write committed (U34). A read that
+ * write, never a failed request, nor a failed move after its D1 write committed. A read that
  * fails is its own state, never a miss: an unread tombstone may be shadowing the mapping, so the
- * reader trusts nothing KV holds, reads the primary, and leaves KV as it is (Q6 of r17).
+ * reader trusts nothing KV holds, reads the primary, and leaves KV as it is.
  */
 import type { LogFn, ShardKv, ShardMapping } from "./types.ts"
 

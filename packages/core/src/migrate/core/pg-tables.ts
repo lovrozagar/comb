@@ -66,7 +66,7 @@ const RLS_COMMANDS: Readonly<Record<string, Partial<Pick<Rls, "enabled" | "force
 
 /**
  * Whether a statement changes row level security, which comb owns, following each table's flags: read
- * from its parse tree, so any number of the commands, among others, set them (P14 of r19). It is
+ * from its parse tree, so any number of the commands, among others, set them. It is
  * comb's whole, out of Atlas's history, only when every command is one; a statement that does more
  * stays in it, where Atlas runs it and leaves the flags to comb
  */

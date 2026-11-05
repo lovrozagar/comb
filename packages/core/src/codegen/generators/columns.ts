@@ -73,7 +73,7 @@ export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): v
 			.filter((f) => !f.constraints.private)
 			.map((f) => f.name)
 			.sort(),
-		/* auth.users for a pgSchema's table, which a bare users would send raw SQL to another (F51) */
+		/* auth.users for a pgSchema's table, which a bare users would send raw SQL to another */
 		sqlName: qualifiedName(t),
 		varName: t.varName,
 	}))
@@ -114,7 +114,7 @@ function generateSqlColsFile(table: TableEntry, relativeTablesPath: string): str
 		`import { ${table.varName} } from "${relativeTablesPath}"`,
 		"",
 		"/** Drizzle column refs — for .returning() and raw SQL */",
-		/* typed as the table's own columns, so a consumer's isolatedDeclarations compiles the file (K17 of r17) */
+		/* typed as the table's own columns, so a consumer's isolatedDeclarations compiles the file */
 		`export const ${camelName}SqlCols: Pick<typeof ${table.varName}, ${table.fields.map((field) => stringLiteral(field)).join(" | ") || "never"}> = {`,
 	]
 
@@ -176,7 +176,7 @@ function updatePackageJson(
 
 	/* Add rqb-cols and sql-cols per entity */
 	for (const table of tables) {
-		/* one kebab-case name for every generated subpath, the DTOs' too (C20) */
+		/* one kebab-case name for every generated subpath, the DTOs' too */
 		const segment = subpathName(table.varName)
 		const colFileName = genFileName(filePrefix, segment)
 		newExports[exportKey(namespace, `./rqb-cols/${segment}`)] =

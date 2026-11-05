@@ -83,7 +83,7 @@ type SortField<T extends string = string> = {
 	nulls?: SortNulls | undefined
 }
 
-// K10 of r17: the builders read its arrays only
+// The builders read its arrays only
 /**
  * What every list builder takes (buildListQuery, buildDerivedListQuery, queryHelpers.listOptions):
  * the list schema's output, or a query the app builds itself. The builders never change its arrays
@@ -101,7 +101,6 @@ type ListQueryInput<TSortField extends string = string> = {
 	page?: number | null | undefined
 	/** the deepest page this query may read; absent, the default maxPage. A deeper page is a 400 */
 	pageBound?: number | undefined
-	// Q16 of r18
 	/** the largest limit this query may take; absent, the default maxLimit. A larger limit is a 400 */
 	limitBound?: number | undefined
 	/** the column the list schema breaks ties on; a derived list's idColumn must name it */

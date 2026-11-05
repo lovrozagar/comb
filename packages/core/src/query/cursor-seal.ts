@@ -22,7 +22,6 @@ type CursorOptions = {
 	cursorScope: string
 	/** the app's secret, at least `MIN_CURSOR_SECRET_BYTES` bytes of UTF-8, the same on every worker; a shorter one is a 500 */
 	cursorSecret: string
-	// U24
 	/**
 	 * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
 	 * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
@@ -93,7 +92,7 @@ const sealedLength = (length: number): number =>
 
 /**
  * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
- * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
+ * bytes first: AEAD hides the bytes, not their count, and a cursor carries a hidden column's
  * value too. openSealed strips them: what seal takes ends in no space of its own.
  */
 function seal(plaintext: Uint8Array, options: CursorOptions): string {

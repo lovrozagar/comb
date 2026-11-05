@@ -57,7 +57,7 @@ class ShardRouter {
 		const { kvTtlSeconds, maxOrgsPerShard, totalShards } = routerSettings(config)
 		this.totalShards = totalShards
 		this.pick = config.pick ?? headroomPick(maxOrgsPerShard)
-		/* by default a failure the router absorbs still reaches the console (K15 of r17); pass a log to route or mute it */
+		/* by default a failure the router absorbs still reaches the console; pass a log to route or mute it */
 		this.log = config.log ?? warnOnError
 		this.cache = new ShardCache(config, { kvTtlSeconds, log: this.log })
 	}
@@ -80,12 +80,12 @@ class ShardRouter {
 	 * missTtlMs, so a run of requests for an unknown id cannot load the primary.
 	 */
 	async resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined> {
-		/* an id the column cannot hold is no org's: a miss before KV, whose keys stop at 512 bytes (U41) */
+		/* an id the column cannot hold is no org's: a miss before KV, whose keys stop at 512 bytes */
 		if (orgId.length > ORG_ID_MAX_LENGTH) {
 			this.log("shard-router.miss", { orgId })
 			return undefined
 		}
-		/* L1: per-isolate LRU with SWR */
+		/* Per-isolate LRU with SWR */
 		const lruResult = this.cache.lru.getWithMeta(orgId)
 		if (lruResult) {
 			this.log("shard-router.hit", { orgId, stale: lruResult.stale, tier: "lru" })
@@ -93,7 +93,7 @@ class ShardRouter {
 			return lruResult.value
 		}
 
-		/* L2: KV, trusted as its tombstone, if any, says */
+		/* KV, trusted as its tombstone, if any, says */
 		const generation = this.cache.generationOf(orgId)
 		const lookup = await this.cache.readKv(orgId, deps.kv)
 		if (lookup.mapping) {
@@ -102,7 +102,7 @@ class ShardRouter {
 			return lookup.mapping
 		}
 
-		/* L3: Core D1, the primary's when a tombstone fences it or KV failed, unless the primary missed it just now */
+		/* Core D1, the primary's when a tombstone fences it or KV failed, unless the primary missed it just now */
 		const mapping = this.cache.misses.get(orgId) ? undefined : await ShardCache.readCore(deps.coreDb, orgId, lookup)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
@@ -114,7 +114,6 @@ class ShardRouter {
 		return mapping
 	}
 
-	// Q13 and Q7 of r17
 	/**
 	 * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
 	 * named: a mapping cached here can predate a `move` in another isolate, since invalidate
@@ -168,7 +167,6 @@ class ShardRouter {
 		return this.placeFirst(placement, deps, executionCtx)
 	}
 
-	// R4
 	/**
 	 * Move an org to `shardId` and invalidate it here. Moving its rows is the app's; its writes on
 	 * the core database for the move (`with`) batch with the mapping's, landing together or not at
@@ -191,7 +189,6 @@ class ShardRouter {
 		await this.invalidate(orgId, deps.kv)
 	}
 
-	// K2 of r22
 	/**
 	 * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
 	 * binding, in the type the env holds its shard bindings as. An env typed by a string index
@@ -199,7 +196,6 @@ class ShardRouter {
 	 * `SHARD_DB_*` is refused. Throws when the env holds no binding under that key at run time.
 	 */
 	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>
-	// D2-1 and D2-2 of the area D round-two review; D3-1 of the round-three review
 	/**
 	 * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
 	 * parameter bounded by an env interface whose `SHARD_DB_0` is required: the binding type that key
@@ -243,19 +239,19 @@ class ShardRouter {
 		deps: ShardResolverDeps,
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
-		/* read before the write, so a tombstone that came after its read never tags its row (Q6 of r18) */
+		/* read before the write, so a tombstone that came after its read never tags its row */
 		const generation = this.cache.generationOf(orgId)
 		const tag = this.cache.tombstoneOf(orgId)
 		const { how, row } = await insertFirst(d1Drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
-		/* written after this isolate's live tombstone, if it holds one, so tagged with it: other isolates trust it (Q17 of r17) */
+		/* written after this isolate's live tombstone, if it holds one, so tagged with it: other isolates trust it */
 		return this.settle(row, how, { executionCtx, generation, kv: deps.kv, tag })
 	}
 
 	/**
 	 * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
-	 * its mapping; logs the placement only when the write placed it, so the events count rows (U40).
+	 * its mapping; logs the placement only when the write placed it, so the events count rows.
 	 * Cached only while no invalidate here came after `generation`, which was taken before the
-	 * write read the row: one that did, a move's among them, may have remapped it (Q6 of r18)
+	 * write read the row: one that did, a move's among them, may have remapped it
 	 */
 	private settle(
 		row: ShardRow,

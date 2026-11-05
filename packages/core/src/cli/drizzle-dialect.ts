@@ -1,5 +1,5 @@
 /**
- * The dialect a drizzle config states, held to the database's (KC1 of r22b): drizzle-kit exports
+ * The dialect a drizzle config states, held to the database's: drizzle-kit exports
  * none of the other dialect's tables, so a diff with a config of the other dialect would write a
  * DROP TABLE for each.
  */
@@ -28,7 +28,7 @@ export async function statedDialect(file: string): Promise<unknown> {
  * none that way; for `migrate init`, which runs before drizzle-kit, which a config imports, is installed
  */
 export function literalDialect(source: string): string | undefined {
-	/* each string kept and each comment dropped, so a dialect commented out is not read and a URL's // ends no line (KC1n) */
+	/* each string kept and each comment dropped, so a dialect commented out is not read and a URL's // ends no line */
 	const code = source.replace(STRING_OR_COMMENT, (_match, string: string | undefined) => string ?? " ")
 	return /\bdialect\s*:\s*["'`]([\w-]+)["'`]/.exec(code)?.[1]
 }

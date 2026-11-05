@@ -49,7 +49,6 @@ export type DatabaseCodegen = {
 	 * names, which live in its schema. Postgres reports a violation on the partition, and the map
 	 * reads it as the parent's; a violation on a partition not listed names no column
 	 */
-	// Q7 of r18
 	partitions?: Record<string, readonly string[]> | undefined
 	/** The tables file, relative to comb.config.ts */
 	tables: string

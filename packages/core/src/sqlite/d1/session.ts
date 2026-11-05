@@ -1,6 +1,6 @@
 import type { D1DatabaseLike, SessionOf } from "./d1-types.ts"
 
-// each in the caller's own type (K3 of r21)
+// each in the caller's own type
 /** A session opened on `D`, or `D` itself where there is none: each in the caller's own type */
 type SessionHandle<D extends D1DatabaseLike = D1DatabaseLike> =
 	| {

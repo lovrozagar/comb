@@ -2,7 +2,7 @@
  * Atlas's statement scanner as atlas 1.3.0 runs it on a Postgres directory: sql/migrate/lex.go's
  * Scanner with sql/postgres's ScanStmts options (BEGIN … END and BEGIN ATOMIC … END blocks,
  * dollar quotes). It yields the chunks Atlas sends Postgres one at a time, each of which Postgres
- * may run as several statements (M75). A file whose first line is `-- atlas:delimiter X` ends its
+ * may run as several statements. A file whose first line is `-- atlas:delimiter X` ends its
  * chunks at X instead of `;`, as a `DELIMITER X` line opening a chunk does from there on.
  *
  * Ported case for case, Atlas's quirks kept, since they decide what runs:

@@ -1,14 +1,14 @@
 /**
  * comb's optional peers, each with the range packages/core/package.json states for it
  * (tests/structure/peers.test.ts holds the two equal), and the one refusal comb gives when a
- * command needs a peer the project does not have (K7 of r20): the package, its range, why comb
+ * command needs a peer the project does not have: the package, its range, why comb
  * needs it here, and an install that lands in range. A peer outside its range is refused as one
- * missing, naming the version found (K2 of r21). What each migrate command needs on each provider
- * (peer-needs.ts) the CLI resolves here before any connect, fetch, spawn or Atlas call (K1, P8, S2
- * of r21). A peer comb spawns is resolved from the
- * project, cwd up, and that one package is checked, read and run (K1 and K3 of r22): PATH never counts.
- * Atlas, which no package ships, is a row of the same table, its version read from `atlas version`
- * (PA5, KC6 and PA22 of r22), as is ts-morph for a SQLite diff whose comb.config.ts declares FTS (KC3).
+ * missing, naming the version found. What each migrate command needs on each provider
+ * (peer-needs.ts) the CLI resolves here before any connect, fetch, spawn or Atlas call.
+ * A peer comb spawns is resolved from the
+ * project, cwd up, and that one package is checked, read and run: PATH never counts.
+ * Atlas, which no package ships, is a row of the same table, its version read from `atlas version`,
+ * as is ts-morph for a SQLite diff whose comb.config.ts declares FTS.
  */
 import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -37,9 +37,9 @@ type Peer = OptionalPeer | "atlas"
 // lookup-table: each peer and its range, Atlas's among them
 const RANGES: Readonly<Record<Peer, string>> = { ...OPTIONAL_PEER_RANGES, atlas: ATLAS_RANGE }
 
-/* the peers comb spawns rather than imports, each on the runtime 0.20.1 ran it on (the ruling of r22): wrangler's
+/* the peers comb spawns rather than imports, each on the runtime 0.20.1 ran it on: wrangler's
    bin is a Node program that starts workerd, which comb under bun must not move onto bun; 0.20.1's `bun drizzle-kit`
-   followed the bin's node shebang, so drizzle-kit runs on whatever runs comb, needing no other (AD5 of the area D review) */
+   followed the bin's node shebang, so drizzle-kit runs on whatever runs comb, needing no other */
 // lookup-table: each optional peer comb spawns, and the runtime that runs its bin: node, or comb's own
 const BIN_PEERS: Readonly<Record<BinPeer, "comb" | "node">> = { "drizzle-kit": "comb", wrangler: "node" }
 
@@ -144,8 +144,7 @@ function resolvePeer(need: Need, resolve: () => string): string {
  * The problem with the Atlas `read` finds, which reads `atlas version`: missing from PATH, saying
  * no version, or one outside ATLAS_RANGE; undefined when it is in range. An official build and a
  * community one say the version alike, after "version v". One that exits otherwise, as a version
- * manager's shim with no version set does, keeps its code and the first line it said on stderr
- * (AD11 of the area D review).
+ * manager's shim with no version set does, keeps its code and the first line it said on stderr.
  */
 async function atlasProblem(read: () => Promise<RunResult>): Promise<Problem | undefined> {
 	const said = await read()

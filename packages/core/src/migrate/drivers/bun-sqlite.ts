@@ -43,7 +43,7 @@ function bunSqliteConnection(db: BunDatabase): Connection {
 	return {
 		/* async, so a failing statement rejects the promise instead of throwing past it */
 		async batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void> {
-			/* one transaction: every statement applies, or none does; it takes the write lock as it begins (SL4 of r22) */
+			/* one transaction: every statement applies, or none does; it takes the write lock as it begins */
 			db.transaction(() => {
 				for (const { params, sql } of statements) db.run(sql, (params ?? []) as SqliteParam[])
 			}).immediate()

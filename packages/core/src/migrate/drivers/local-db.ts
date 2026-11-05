@@ -2,7 +2,7 @@
  * A private SQLite database for comb's own reads and runs, bun:sqlite under Bun and node:sqlite
  * under Node; nothing in it reaches a target database. In memory for a read alone (absent.ts), and
  * a scratch file where migration files run (the proof copy, baseline's replay), so each file runs
- * on a fresh connection, as each one applies, and its connection settings end with it (S1 of r21).
+ * on a fresh connection, as each one applies, and its connection settings end with it.
  */
 import { randomUUID } from "node:crypto"
 import path from "node:path"
@@ -32,7 +32,7 @@ export type ScratchDb = LocalDb & {
 
 type NodeStatement = { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown; sourceSQL: string }
 
-/** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on (SL3 of r22) */
+/** The SQLite a scratch runs on: the runtime's own, or libsql's, which a libsql or Turso target applies its files on */
 export type ScratchEngine = "libsql" | "runtime"
 
 /** How a database file, or `:memory:`, opens on an engine; with `create` false, only a file that is there, read-write */
@@ -115,8 +115,8 @@ function filePlace(): Place {
  * A database in memory that every connection of this process opening its name shares (SQLite's memdb
  * VFS), held by a connection of its own until release. libsql keeps a connection a statement was
  * prepared on open until that statement is collected, so on a file each connection a proof reopens
- * kept a descriptor, and 300 pending files ran a process out (SL3 of r22,
- * .tmp/grunt/p21/areas/sqlite/5.7-fd-red.log); in memory a held connection takes none.
+ * kept a descriptor, and 300 pending files ran a process out;
+ * in memory a held connection takes none.
  */
 function memoryPlace(open: Open): Place {
 	const name = `file:/${SCRATCH}${randomUUID()}?vfs=memdb`
@@ -128,7 +128,7 @@ function memoryPlace(open: Open): Place {
  * A new scratch database on `engine`, that only this process can reach: on the runtime's, a file in a
  * directory of its own that only this user can open (0700), removed with it on close; on libsql's, a
  * database in memory. SIGINT and SIGTERM remove the directory too, and a process killed past both
- * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
+ * leaves it only until the next process's first scratch, which sweeps it.
  */
 export async function openScratch(engine: ScratchEngine = "runtime"): Promise<ScratchDb> {
 	/* a scratch made past a stop would outlive the cleanup that removes its directory */

@@ -22,7 +22,6 @@ type FieldConstraintsMeta = {
 	min: number | null
 	/** a name: letters, marks, numbers, spaces and punctuation */
 	name: boolean
-	// F25
 	/** a foreign key the generated update DTO takes, so a row can move to another parent; every other reference is set once, at creation */
 	mutable: boolean
 	/** set at creation and never changed: the generated update DTO leaves it out */
@@ -33,7 +32,6 @@ type FieldConstraintsMeta = {
 	pattern: string | null
 	/** never read back: the generated read DTOs and the meta stamp leave it out and the manifest flags it `private: true`; also set for a field whose name starts with `_` */
 	private: boolean
-	// F57
 	/** the name the generated relation of this foreign key takes, where the column's role would collide with another; null or absent for the role's own name */
 	relation?: string | null | undefined
 	/** the column that scopes the table's rows to a tenant, set once at creation; declared, never inferred, and at most one per table */
@@ -80,10 +78,8 @@ type ForeignKeyRef = {
 	refColumn: string
 	/** the referenced table's export name in the tables file */
 	refTable: string
-	// F10
 	/** whether the referenced column is a c.id key, so the reference takes the id rule, 1 to 48 characters and no blank; its prefix is not checked */
 	toId?: boolean | undefined
-	// F46
 	/** a composite foreign key's columns; absent for a single-column key */
 	key?:
 		| {
@@ -131,13 +127,10 @@ type FieldMeta = {
 	jsonSchemaName: string | null
 	/** the names the field's generated schema uses and must import (a c.json schema) */
 	schemaImports: ImportRef[]
-	// F49
 	/** a Postgres array's declared dimensions; 0 or absent for a column of one value */
 	dimensions?: number | undefined
-	// A2-9 of r22
 	/** whether a Postgres array's elements may be null, as its drizzle type declares; false or absent otherwise */
 	nullElements?: boolean | undefined
-	// F65
 	/** the length the column itself declares (a varchar(n), a SQLite text({ length })); null when none. A `c` helper's declared max is in `constraints` */
 	length: number | null
 	/** Field name as defined in the table schema object */
@@ -162,7 +155,6 @@ type UniqueIndexMeta = {
 	name: string
 }
 
-// C7
 /** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches */
 type PartialUniqueIndexMeta = UniqueIndexMeta & {
 	/** the predicate, as the index's SQL holds it */
@@ -224,7 +216,6 @@ type TableMeta = {
 	sqlName: string
 	/** Detected timestamp fields and style */
 	timestamps: TimestampsMeta
-	// C7
 	/** Partial (`.where()`) unique indexes on plain columns: the constraint map names their violations, and they are listed apart from the table's unique indexes */
 	partialUniqueIndexes: PartialUniqueIndexMeta[]
 	/** Unique indexes from table options */

@@ -23,9 +23,9 @@ const VALUE_ERRORS: Record<string, ValueRule> = {
 	"22021": "invalid",
 	"22P02": "invalid",
 	"22P05": "invalid",
-	/* a time zone offset past what Postgres holds, 15:59 either way (F4 of the 0.14.1 review) */
+	/* a time zone offset past what Postgres holds, 15:59 either way */
 	"22009": "invalid",
-	/* an interval field past what Postgres holds (A2-3 of r22) */
+	/* an interval field past what Postgres holds */
 	"22015": "invalid",
 	/* a value too large for a btree index row */
 	"54000": "too_large",
@@ -33,7 +33,7 @@ const VALUE_ERRORS: Record<string, ValueRule> = {
 	SQLITE_CONSTRAINT_DATATYPE: "invalid",
 	SQLITE_MISMATCH: "invalid",
 	/* a string or blob past the engine's limit (D1's is 2 MB); SQLITE_TOOBIG is also a statement past
-	 * its length limit, which the server built, since comb binds every value (C6) */
+	 * its length limit, which the server built, since comb binds every value */
 	SQLITE_TOOBIG: { message: /\bstring or blob too big\b/i, problem: "too_large" },
 }
 

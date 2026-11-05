@@ -1,8 +1,7 @@
 /**
  * The ALTER TABLE commands on a whole table, rated by what they do to its rows and to who sees them:
  * cautious, a rewrite, nothing, or unsafe for one comb does not list, named in the SQL's own words.
- * A trigger re-enabled is cautious, as its DISABLE is: its function runs on later writes again
- * (P10 of the 0.15.0 review).
+ * A trigger re-enabled is cautious, as its DISABLE is: its function runs on later writes again.
  */
 import type { Finding } from "./classify-alter.ts"
 import { REWRITES } from "./pg-column-add.ts"
@@ -60,7 +59,7 @@ const ENABLES: Readonly<Record<string, "every" | "one">> = {
 	AT_EnableTrigUser: "every",
 }
 
-// lookup-table: the commands that turn a rule on or off, a rule change default-deny rates by its family's rule (P14 of r18)
+// lookup-table: the commands that turn a rule on or off, a rule change default-deny rates by its family's rule
 const RULE_COMMANDS = /* @__PURE__ */ new Set([
 	"AT_DisableRule",
 	"AT_EnableAlwaysRule",

@@ -12,7 +12,7 @@ import type { Run } from "./process.ts"
 type Inspected = { schemas?: Array<{ name?: string | undefined; tables?: unknown[] | undefined }> | undefined }
 
 /**
- * Atlas's inspect JSON `stdout`, parsed as Atlas wrote it and never scrubbed (M79): its names are
+ * Atlas's inspect JSON `stdout`, parsed as Atlas wrote it and never scrubbed: its names are
  * the database's, used as they are, and a caller masks a value only where it prints it, since a
  * secret that spells a name or a key would otherwise change what comb reads
  */

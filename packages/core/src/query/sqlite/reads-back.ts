@@ -1,6 +1,6 @@
 /**
  * Whether a list's key reads its bound back from the anchor row, by the tables drizzle tells apart: the
- * rule a reference is minted and read by (27.7 of plan 15), and a key bound as read where it fails.
+ * rule a reference is minted and read by, and a key bound as read where it fails.
  */
 import { Column, is, SQL, type SQLWrapper, Table } from "drizzle-orm"
 
@@ -30,7 +30,7 @@ const tableKey = (table: Table): unknown[] => {
 /**
  * Whether `a` and `b` are one table as a query reads it: one object, or two of drizzle's for the same
  * name, original table and schema. An alias's columns carry a table of their own, which is no alias
- * object, so identity alone refused an anchor that is an alias (27.19 of plan 15); another alias of
+ * object, so identity alone refused an anchor that is an alias; another alias of
  * the same table has another name, and stays apart.
  */
 function sameTable(a: unknown, b: unknown): boolean {
@@ -43,10 +43,10 @@ function sameTable(a: unknown, b: unknown): boolean {
 /**
  * Whether the anchor row `table` supplies the key `column`, so the keyset may read a bound from that
  * row: a column of that table does, and so does an SQL expression over that table's own columns
- * alone, which the read evaluates on that row (27.7 of plan 15). A joined table's column, or an
+ * alone, which the read evaluates on that row. A joined table's column, or an
  * expression over one, reads the anchor's own value back through a subquery that correlates to each
- * candidate row, which skipped and looped rows for every bound read from the row (QL1 of r22b; 27.14
- * guarded only text), so such a key binds as an anchorless list binds it. With no anchor in reach, as
+ * candidate row, which skipped and looped rows for every bound read from the row (an
+ * earlier guard covered only text), so such a key binds as an anchorless list binds it. With no anchor in reach, as
  * on the relational path, a column reads back: there every key is the queried table's own column, as
  * keysOn (query/drizzle.ts:57-68) takes each sort field as an own property of that table and refuses
  * any other, so no relation column through `with`, nor an extras SQL, becomes a key.

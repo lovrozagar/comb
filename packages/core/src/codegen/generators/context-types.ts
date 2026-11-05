@@ -8,7 +8,6 @@ export type GeneratorContext = {
 	analysis: AnalysisResult
 	/** the directory relative output paths resolve against */
 	cwd: string
-	// F53
 	/** how generated files write a relative import, as the consumer's compiler takes it; `bare`, with no extension, when unset */
 	importStyle?: ImportStyle | undefined
 	/** the database's engine: what a column type holds, and which drizzle core a file imports from */

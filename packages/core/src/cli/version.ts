@@ -1,8 +1,8 @@
 /**
  * comb's version for `comb --version`, read from its package.json beside `moduleUrl` (comb's own)
  * by a path: no global URL, which a project with Workers' types and Node's but no DOM gives
- * Workers' type of (K1 of r18). A Bun single-file executable embeds no package.json, so the read is
- * refused there with why (D5-5 of the area D round-five review); a JSON import would embed it, but
+ * Workers' type of. A Bun single-file executable embeds no package.json, so the read is
+ * refused there with why; a JSON import would embed it, but
  * needs resolveJsonModule in every consumer that compiles comb's source.
  */
 import { readFileSync } from "node:fs"

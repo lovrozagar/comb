@@ -23,7 +23,7 @@ export type TableConstraints = {
 
 export type ConstraintMap = Record<string, TableConstraints>
 
-/** Entries in the order of their keys, by code unit (F40) */
+/** Entries in the order of their keys, by code unit */
 const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number => byCodeUnit(a, b)
 
 const GROUP_LABELS: Record<string, string> = {
@@ -77,13 +77,13 @@ function groupLines(type: string, group: Constraint | Record<string, Constraint>
 export function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
 	const tables = Object.entries(map).sort(byKey)
 	const blocks = tables.map(([tableName, constraints]) => {
-		/* a group set to undefined is one left out (KT8 of r22b) */
+		/* a group set to undefined is one left out */
 		const groups = Object.entries(constraints)
 			.filter(
 				(entry): entry is [string, NonNullable<TableConstraints[keyof TableConstraints]>] => entry[1] !== undefined,
 			)
 			.sort(byKey)
-		/* a table with no constraint is keyed still, so the handlers know it is the schema's (Q10 of r18) */
+		/* a table with no constraint is keyed still, so the handlers know it is the schema's */
 		if (groups.length === 0)
 			return [`\t/* ${commentText(tableName)} table: no constraints */`, `\t${propertyName(tableName)}: {}`]
 		return [

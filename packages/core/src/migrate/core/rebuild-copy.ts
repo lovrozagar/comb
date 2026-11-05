@@ -195,7 +195,7 @@ function readCopy(stmt: string, createOf: (table: string) => string): Copy | und
 
 /** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
 /** Each rebuilt table: the columns its copy writes, what is wrong with the copy, the copy, and the copy's CREATE TABLE */
-/** Each table's rebuilds, in the order the file makes them: a DROP pairs with the next one, by position (M5) */
+/** Each table's rebuilds, in the order the file makes them: a DROP pairs with the next one, by position */
 type Rebuilds = Map<string, Array<{ columns: string[]; definition: string; problem: string | undefined; temp: string }>>
 
 // per-process-constant: a CREATE TABLE's table, composed once

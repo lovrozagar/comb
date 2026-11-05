@@ -19,7 +19,7 @@ export type ReadColumn = Column & {
 
 /**
  * The name an unnamed `.unique()` has in the database: drizzle-kit writes it named on SQLite, and as
- * a bare UNIQUE on Postgres, which Postgres names `<table>_<column>_key` (F31)
+ * a bare UNIQUE on Postgres, which Postgres names `<table>_<column>_key`
  */
 export const unnamedUnique = (column: ReadColumn): string =>
 	is(column.table, PgTable)

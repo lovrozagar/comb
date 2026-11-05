@@ -1,6 +1,6 @@
 /**
  * What a file's transaction holds when a VALIDATE in it scans, read from Postgres as check's replay
- * runs the file (0005 and PA8 of r22b, after PR5): a DO block, a function or EXECUTE locks what no
+ * runs the file: a DO block, a function or EXECUTE locks what no
  * rating of the file's text sees, so the replay reads pg_locks before each VALIDATE of the
  * transaction, and check warns of that in place of what the text says (pg-validate.ts). A lock on an
  * index or TOAST table counts as one on the relation it belongs to, as every query of a table opens

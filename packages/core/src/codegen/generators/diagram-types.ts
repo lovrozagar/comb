@@ -14,7 +14,7 @@ export interface Column {
 	type: string
 }
 
-/** a composite foreign key, which SQL writes on its table rather than on one column (F46) */
+/** a composite foreign key, which SQL writes on its table rather than on one column */
 export interface TableKey {
 	columns: string[]
 	onDelete?: string | undefined

@@ -20,7 +20,6 @@ type BaseConstraints = {
 	 * lists it flagged `private: true`, on both dialects
 	 */
 	private?: boolean | undefined
-	// F57
 	/**
 	 * the name this foreign key's relation and its way back take, where the column's role would take a
 	 * column's own name (`currency` toward `currency.code`, a `parent` self-reference): an identifier,
@@ -108,7 +107,7 @@ export type JsonConstraints = BaseConstraints & {
  * Timestamp column constraints
  * Closed record - only these properties allowed
  */
-/* the earliest and latest instant, in epoch milliseconds, that codegen bounds the DTO by (F38) */
+/* the earliest and latest instant, in epoch milliseconds, that codegen bounds the DTO by */
 export type TimestampConstraints = BaseConstraints & NumericRangeConstraints
 
 /**
@@ -127,7 +126,6 @@ export type EnumStates<TState extends string = string> = {
 	transitions?: { readonly [K in TState]?: readonly TState[] | undefined } | undefined
 }
 
-// F9
 /** What `c.enum` takes beside its values: its state machine, and the `nomutate`, `private` and `tenant` flags every helper takes */
 export type EnumOptions<TState extends string = string> = EnumStates<TState> &
 	Pick<BaseConstraints, "nomutate" | "private" | "tenant">

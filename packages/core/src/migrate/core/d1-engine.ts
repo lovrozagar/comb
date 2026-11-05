@@ -1,5 +1,5 @@
 /**
- * Each pending D1 file proven on D1's own engine (SD1 and SD2 of r22): after the bun:sqlite proof, the
+ * Each pending D1 file proven on D1's own engine: after the bun:sqlite proof, the
  * files run in order on a scratch local D1 that the checked wrangler's own Miniflare opens, holding the
  * live schema and the proof's seed rows (proof-copy.ts). Miniflare runs on node, as wrangler's apply runs
  * it, whatever runtime comb runs on: the proof is a node child (d1-engine-child.mjs) started through
@@ -50,7 +50,7 @@ function enclosing(sql: string, at: number): string {
 }
 
 /**
- * Refuses a file whose text wrangler rewrites before a local apply runs it (SD2 of r22): its trimSqlQuery
+ * Refuses a file whose text wrangler rewrites before a local apply runs it: its trimSqlQuery
  * deletes the first `BEGIN TRANSACTION;` and `COMMIT;` wherever they are, in a literal or a comment too,
  * or refuses the file, while a remote apply sends the text as written. A real BEGIN or COMMIT is
  * refused before this, so the words are in a literal, a quoted name or a comment, or in the code of a
@@ -104,7 +104,7 @@ async function proveOnD1(
 		table,
 	}: { bin: ProjectBin; exec?: Run | undefined; moduleUrl?: string | undefined; table: string },
 ): Promise<Array<{ name: string; why: string }>> {
-	/* the child is handed d1-engine-child.mjs by comb's own URL, which `moduleUrl` is unless a test says otherwise (D4-5 of the area D round-four review) */
+	/* the child is handed d1-engine-child.mjs by comb's own URL, which `moduleUrl` is unless a test says otherwise */
 	refuseCompiled(
 		moduleUrl,
 		"check proves the pending files in a child on wrangler's runtime, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable",

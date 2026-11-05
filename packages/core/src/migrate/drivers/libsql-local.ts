@@ -1,5 +1,5 @@
 /**
- * A private database on libsql's own engine (SL3 of r22): a libsql or Turso target's proof copy and
+ * A private database on libsql's own engine: a libsql or Turso target's proof copy and
  * baseline's replay run on the SQLite its files apply on, with its grammar, its functions and its
  * vector indexes, not on the runtime's newer one, which runs syntax libsql refuses and refuses
  * libsql's own. libsql's Database is the one the @libsql/client comb resolves loads (libsql-file.ts).
@@ -46,7 +46,7 @@ async function libsqlLocal(): Promise<(file: string) => LocalDb> {
 				const statement = db.prepare(bound(sql, params))
 				const rows = statement.all() as Array<Record<string, unknown>>
 				/* libsql holds a statement `all` read active until it is collected, and an EXPLAIN of a write held
-				   so refuses the COMMIT after it (.tmp/grunt/p21/areas/sqlite/sl3/stmt-probe.log); `get` steps it
+				   so refuses the COMMIT after it; `get` steps it
 				   once and resets it, which a read, all `all` is given, allows */
 				statement.get()
 				return rows

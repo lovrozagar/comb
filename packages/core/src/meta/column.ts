@@ -45,7 +45,7 @@ function combColumnMeta(column: unknown): CombColumnMeta | undefined {
 	return config?.[COMB_COLUMN] as CombColumnMeta | undefined
 }
 
-/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state (F9) */
+/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state */
 function enumMeta(
 	values: readonly string[],
 	options: { nomutate?: boolean | undefined; private?: boolean | undefined; tenant?: boolean | undefined } = {},
@@ -53,7 +53,7 @@ function enumMeta(
 	const { nomutate, private: hidden, tenant, ...given } = options
 	const flags = { nomutate, private: hidden, tenant }
 	const flagged = Object.values(flags).some((flag) => flag !== undefined)
-	/* a state set to undefined is one left out (KT8 of r22b) */
+	/* a state set to undefined is one left out */
 	const states = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined))
 	const whole = !flagged && Object.keys(states).length === Object.keys(options).length
 	return {

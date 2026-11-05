@@ -58,7 +58,7 @@ const emptyPgObjects = (): PgObjects => ({ objects: new Map(), rls: new Map() })
 /**
  * A file split: the comb-owned objects it makes, the statements Atlas may see (`plain`), and what Atlas
  * replays on the dev database (`replay`): the plain statements, with each view's create and drop in
- * place, handed over in a DO block (P4 of r19)
+ * place, handed over in a DO block
  */
 type Separated = { objects: PgObject[]; plain: string[]; replay: string[]; state: PgObjects }
 
@@ -182,7 +182,7 @@ function separatePgObjects(sql: string, state: PgObjects = emptyPgObjects(), sou
 	const objects: PgObject[] = []
 	const plain: string[] = []
 	const replay: string[] = []
-	/* the statements Postgres runs, read over the whole file, its delimiter directive in place (M75) */
+	/* the statements Postgres runs, read over the whole file, its delimiter directive in place */
 	for (const text of pgStatements(sql)) {
 		const code = codeOf(text, "postgres")
 		const made = defined(code, text)

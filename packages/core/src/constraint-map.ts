@@ -34,12 +34,12 @@ export const own = <T>(record: Record<string, T> | undefined, key: string | unde
 /**
  * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
  * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
- * no generated map can name (R5 of plan 17). A key with a `*` anywhere else matches nothing
+ * no generated map can name. A key with a `*` anywhere else matches nothing
  */
 export function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined {
 	let pattern: string | undefined
 	for (const key of Object.keys(map)) {
-		/* a malformed key matches nothing: defineConstraintMaps refuses it at load, and checkedOnce reports it (Q4 of r19) */
+		/* a malformed key matches nothing: defineConstraintMaps refuses it at load, and checkedOnce reports it */
 		if (!key.endsWith("*") || malformed(key)) continue
 		if (table?.startsWith(key.slice(0, -1)) === true && key.length > (pattern?.length ?? 0)) pattern = key
 	}
@@ -54,13 +54,12 @@ const malformed = (key: string): boolean => key.includes("*") && key.indexOf("*"
 const ruleOf = (key: string): string =>
 	`constraint map key "${key}": a "*" may only end a key, as a prefix pattern such as "ut_*"`
 
-// lookup-table: the maps defineConstraintMaps checked, or whose malformed keys were reported once: each map, not its array, which an app may build per call (Q5 of r20)
+// lookup-table: the maps defineConstraintMaps checked, or whose malformed keys were reported once: each map, not its array, which an app may build per call
 const CHECKED: WeakSet<ConstraintMap> = /* @__PURE__ */ new WeakSet()
 
-// lookup-table: each malformed key reported, by its text, as a map spread per call is a new map each time (Q4 of r21); keys are the app's source text, so it stays that small
+// lookup-table: each malformed key reported, by its text, as a map spread per call is a new map each time; keys are the app's source text, so it stays that small
 const WARNED: Set<string> = /* @__PURE__ */ new Set()
 
-// Q4 of r19
 /**
  * The maps an app passes its error handlers, every key checked where it builds them, at module load:
  * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation.
@@ -76,7 +75,7 @@ export function defineConstraintMaps(...maps: ConstraintMap[]): readonly Constra
 /**
  * `maps`, a handler's first look at each map reporting its malformed keys to the operator, through the
  * warn sink, each key once per process however many arrays or maps carry it: the violation is still classified with the well-formed
- * keys, as the client's answer must not change, nor say anything of the app's configuration (Q4 of r19)
+ * keys, as the client's answer must not change, nor say anything of the app's configuration
  */
 export function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[] {
 	for (const map of maps) {
@@ -100,14 +99,14 @@ const listsPrivate = (maps: readonly ConstraintMap[], table: string | undefined,
 /**
  * Whether the maps can say which of `table`'s columns are private: no map is given, which hides
  * none, or one keys the table. Maps that key it nowhere cannot, as for a table a trigger writes
- * outside the schema, so its columns are hidden on every dialect (Q9 of r17, Q10 of r18)
+ * outside the schema, so its columns are hidden on every dialect
  */
 const knows = (maps: readonly ConstraintMap[], table: string | undefined) =>
 	maps.length === 0 || table === undefined || maps.some((map) => entryOf(map, table) !== undefined)
 
 /**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
- * one as the table's private column, since naming the rest would point at it (F67), or when the
+ * one as the table's private column, since naming the rest would point at it, or when the
  * maps given key no such table (fail closed)
  */
 export function shown(
@@ -119,7 +118,7 @@ export function shown(
 	return columns.some((column) => listsPrivate(maps, table, column)) ? [] : columns
 }
 
-/** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
+/** `column`, or undefined when a map lists it among `table`'s private columns, or shown hides the table's */
 export const shownColumn = (
 	maps: readonly ConstraintMap[],
 	table: string | undefined,

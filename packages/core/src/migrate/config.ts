@@ -123,7 +123,6 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    DEFINE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// K4 of r21; P11, K12 of the 0.15.0 review
 /**
  * `input`, typed: comb.migrate.config.ts's default export, or what a function export returns, as in
  * `export default async () => defineConfig({…})`, so TypeScript holds an object written inline to its
@@ -133,7 +132,6 @@ export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
 	return input
 }
 
-// K8 of r19
 /**
  * What a config module exports, held to the config schema: an object, or a function that returns one
  * or a promise of one. A typo, a database of neither shape, or a function a function returned rejects
@@ -141,7 +139,7 @@ export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
  */
 export async function parseConfig(input: unknown): Promise<MigrationConfig> {
 	const exported: unknown = typeof input === "function" ? await (input as () => unknown)() : input
-	/* 0.19's `defineConfig(async () => …)` inside a function export; an untyped config gets the advice tsc gives (K4 of r21) */
+	/* 0.19's `defineConfig(async () => …)` inside a function export; an untyped config gets the advice tsc gives */
 	if (typeof exported === "function")
 		throw new z.ZodError([
 			{
@@ -161,7 +159,7 @@ export async function parseConfig(input: unknown): Promise<MigrationConfig> {
 
 const CONFIG_FILE_NAMES = ["comb.migrate.config.ts", "comb.migrate.config.js"]
 
-/* names comb read before 0.19, which other migration tools use too: refused, never run (K6 of r20) */
+/* names comb read before 0.19, which other migration tools use too: refused, never run */
 const RETIRED_FILE_NAMES = [
 	"db-migration.config.ts",
 	"db-migration.config.js",
@@ -206,7 +204,7 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 		const module = (await import(pathToFileURL(resolvedPath).href)) as { default?: unknown }
 		return { config: await parseConfig(module.default ?? module), configDir: dirname(resolvedPath) }
 	} catch (error) {
-		/* a syntax error, or what a config function threw, names the file it came from (KC7 of r22b) */
+		/* a syntax error, or what a config function threw, names the file it came from */
 		if (!(error instanceof z.ZodError))
 			throw new Error(`${resolvedPath} failed to load: ${error instanceof Error ? error.message : String(error)}`, {
 				cause: error,

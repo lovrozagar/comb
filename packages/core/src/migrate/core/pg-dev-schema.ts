@@ -1,5 +1,5 @@
 /**
- * The target schema on the dev database (P12 of the 0.14.1 review). Atlas scopes the dev URL to
+ * The target schema on the dev database. Atlas scopes the dev URL to
  * the target schema and inspects it before it replays anything, so a dev database without it
  * fails every diff, replay and adoption proof, and nothing a migration holds can create it: comb
  * creates it there first. devUrl is Atlas's scratch, which Atlas requires empty and cleans, so
@@ -20,7 +20,7 @@ const CREATES = "create a non-public schema on devUrl"
 
 /**
  * Create `target`'s schema on its dev database, unless it is public or the dev is Atlas's docker
- * container; a devUrl comb refuses is refused first, whatever the schema, so nothing reaches it (P2 of r19)
+ * container; a devUrl comb refuses is refused first, whatever the schema, so nothing reaches it
  */
 async function readyDevSchema(
 	target: PgTarget,

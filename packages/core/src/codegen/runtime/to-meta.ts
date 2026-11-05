@@ -55,7 +55,7 @@ function detectTimestamps(fields: FieldMeta[]): TimestampsMeta {
 	const declared = Object.values(names).filter((name) => name !== null)
 	const snake = declared.filter((name) => name.includes("_")).length
 	const style = snake === 0 ? "camelCase" : snake === declared.length ? "snake_case" : "mixed"
-	/* the shared spread takes a column only when its own read schema is the spread's (F10): comb's
+	/* the shared spread takes a column only when its own read schema is the spread's: comb's
 	 * helper of that name, read back, NOT NULL but for deletedAt; any other is its own field */
 	const spread = (key: keyof TimestampsMeta["names"]) => {
 		const field = fields.find((each) => each.name === names[key])
@@ -78,7 +78,7 @@ function importOf(at: ModuleExport): ImportRef {
 
 type Build = { file: string; table: SnapshotTable; tables: readonly SnapshotTable[] }
 
-/** A column's key into another table as FieldMeta names it, marked when it points at a c.id key (F10) */
+/** A column's key into another table as FieldMeta names it, marked when it points at a c.id key */
 function foreignKeyOf(column: SnapshotColumn, tables: readonly SnapshotTable[]): FieldMeta["foreignKey"] {
 	const fk = column.foreignKey
 	if (fk === null) return null
@@ -101,7 +101,7 @@ const isFilled = (column: SnapshotColumn, kind: string | null) =>
 
 /*
  * The data types drizzle gives a column that comb types with no c helper, each by its own rule: text,
- * numbers, a boolean and JSON on both dialects, and each Postgres type with one (F50). Any other is
+ * numbers, a boolean and JSON on both dialects, and each Postgres type with one. Any other is
  * refused rather than typed as plain text, a type drizzle adds later among them.
  */
 // lookup-table: the data types a plain drizzle column may have

@@ -31,12 +31,12 @@ function parsedSortOf<TSortField extends string>(
 	ctx: z.RefinementCtx,
 ): Array<SortField<TSortField>> {
 	const entries = orderEntries(order)
-	/* an entry empty or naming no field is refused, as the published pattern refuses it (QL7 of r22b) */
+	/* an entry empty or naming no field is refused, as the published pattern refuses it */
 	for (const malformed of new Set(entries.filter((entry) => typeof entry === "string"))) {
 		ctx.addIssue({ code: "custom", message: `Malformed sort entry: ${JSON.stringify(malformed)}`, path: ["order"] })
 	}
 	const rawSort = entries.filter((entry) => typeof entry !== "string")
-	/* a field named twice would sort by its first entry while sortOrderBy kept its last (AB9 of area B) */
+	/* a field named twice would sort by its first entry while sortOrderBy kept its last */
 	for (const field of namedTwice(rawSort)) {
 		ctx.addIssue({ code: "custom", message: `Sort field named twice: ${JSON.stringify(field)}`, path: ["order"] })
 	}

@@ -1,6 +1,6 @@
 /**
- * The query keys libpq reads itself, by what Atlas's driver, lib/pq, does with each (P15 and P6 of
- * r19, probed on Atlas v1.3.0 and Postgres 17). comb's own connections send none of them to the
+ * The query keys libpq reads itself, by what Atlas's driver, lib/pq, does with each
+ * (probed on Atlas v1.3.0 and Postgres 17). comb's own connections send none of them to the
  * server. lib/pq reads the keys marked "atlas" and sends any other to the server as a setting, which
  * Postgres refuses, so every Atlas call fails. comb strips such a key from the URLs Atlas gets when it
  * only tunes the connection, and refuses it, by name, when it asks for something Atlas cannot do.
@@ -44,7 +44,7 @@ const KEYS: Readonly<Record<string, KeyRule>> = {
 	sslkey: "atlas",
 	sslmode: "atlas",
 	sslnegotiation: "atlas",
-	/* a secret lib/pq sends the server, for a key it cannot read: refused with sslkey (5.3) */
+	/* a secret lib/pq sends the server, for a key it cannot read: refused with sslkey */
 	sslpassword: "tls",
 	sslrootcert: "atlas",
 	sslsni: "atlas",

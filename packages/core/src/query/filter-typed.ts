@@ -32,7 +32,7 @@ function parseFilterNumber(raw: string):
 	if (Math.abs(value) > Number.MAX_SAFE_INTEGER) {
 		return { error: `expects a number within ±${Number.MAX_SAFE_INTEGER}, got '${raw}'` }
 	}
-	/* nonzero digits that read as 0 or a subnormal would bind a neighbouring value (QL12 of r22b) */
+	/* nonzero digits that read as 0 or a subnormal would bind a neighbouring value */
 	const nonzero = /[1-9]/.test(raw.split(/[eE]/)[0] as string)
 	if (nonzero && Math.abs(value) < MIN_NORMAL) {
 		return { error: `expects a number of magnitude 0 or at least ${MIN_NORMAL}, got '${raw}'` }
@@ -41,8 +41,8 @@ function parseFilterNumber(raw: string):
 }
 
 /**
- * An ISO date field's value: the instant it names (Q5 of the 0.14.1 review), or why it names none.
- * One its offset moves out of the years 0000 to 9999 is refused (Q4 of r17): its text would be
+ * An ISO date field's value: the instant it names, or why it names none.
+ * One its offset moves out of the years 0000 to 9999 is refused: its text would be
  * toISOString's expanded form, which no stored ISO text sorts beside
  */
 function typedIsoDate(raw: string): Typed {

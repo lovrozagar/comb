@@ -1,12 +1,12 @@
 /**
  * An added column read from its type and inline constraints, as the matching ALTER TABLE commands
- * are (P6 of the 0.14.1 review): NOT NULL with nothing to fill it fails on a table with rows, and so
+ * are: NOT NULL with nothing to fill it fails on a table with rows, and so
  * does a primary key unless each row gets a value of its own; a volatile default, a serial, an
  * identity or a stored generated column fills every row, which rewrites the table, and an inline
  * check or reference scans it. A default is volatile when it calls a function not known to be
- * otherwise (P8 of the 0.15.0 review): Postgres takes every function as VOLATILE unless it says
+ * otherwise: Postgres takes every function as VOLATILE unless it says
  * IMMUTABLE or STABLE, so the rule names the steady ones, not the volatile: a history routine by its
- * own declarations, a built-in by Postgres 17's (pg-steady-builtins.ts, read from pg_proc; P15 of r18).
+ * own declarations, a built-in by Postgres 17's (pg-steady-builtins.ts, read from pg_proc).
  */
 import type { Finding } from "./classify-alter.ts"
 import { domainOf } from "./pg-domains.ts"
@@ -25,13 +25,13 @@ import {
 
 const REWRITES = "rewrites or scans the table under an exclusive lock"
 
-/** What a foreign key on `table` referencing `referenced` checks, as rating names it (P16 of r18) */
+/** What a foreign key on `table` referencing `referenced` checks, as rating names it */
 const foreignScan = (table: string, referenced: string): string =>
 	`scans ${table}, blocking writes to ${referenced === table ? table : `${table} and ${referenced}`}`
 
 /**
  * An added column's inline foreign key: Postgres checks it against no row while the column is NULL,
- * and scans both tables once a value fills it (P18 of r19)
+ * and scans both tables once a value fills it
  */
 function inlineKey(constraints: readonly Node[], table: string, filled: boolean): Finding[] {
 	const key = constraints.find((each) => each["contype"] === "CONSTR_FOREIGN")
@@ -72,7 +72,7 @@ function steady(parts: readonly string[], facts: Facts): boolean {
 
 /**
  * The functions `expr` calls, each by its name's parts: a function call, and the function behind an
- * operator or a cast a migration defined, which Postgres calls as it would the function (P2 of r18)
+ * operator or a cast a migration defined, which Postgres calls as it would the function
  */
 const callsIn = (expr: unknown, facts: Facts): string[][] =>
 	nodesOf(expr).flatMap(([type, node]) => {
@@ -81,7 +81,7 @@ const callsIn = (expr: unknown, facts: Facts): string[][] =>
 		return behind === undefined ? [] : [behind.fn.split(".")]
 	})
 
-/** The default expressions an added column takes: its own, or with none, its domain's `fill` (P2 of r18) */
+/** The default expressions an added column takes: its own, or with none, its domain's `fill` */
 function defaultsOf(constraints: readonly Node[], fill: unknown): unknown[] {
 	const own = constraints.filter((each) => each["contype"] === "CONSTR_DEFAULT").map((each) => each["raw_expr"])
 	return own.length > 0 || fill === undefined ? own : [fill]
@@ -93,11 +93,11 @@ function defaultsOf(constraints: readonly Node[], fill: unknown): unknown[] {
  * whether each row gets a value of its own (a sequence, an identity, a
  * volatile default); whether every row gets one; and whether its default calls code Postgres runs
  * per row, which rewrites the table. With no default of its own, a column of a domain takes the
- * domain's (P2 of r18).
+ * domain's.
  */
 function fillOf(column: Node, constraints: readonly Node[], facts: Facts) {
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	/* an array of a domain takes no default, and meets no constraint, of its element's domain (P19 of r19) */
+	/* an array of a domain takes no default, and meets no constraint, of its element's domain */
 	const domain =
 		columnTypeOf(column, facts.schema).dims === 0
 			? domainOf(typeOf(column["typeName"], facts.schema), facts)
@@ -132,7 +132,7 @@ function rewriteNote(column: Node, checksDefault: boolean, facts: Facts): string
 /**
  * An added column's findings, from the AT_AddColumn command `cmd`. A domain's NOT NULL is the
  * column's, and with any constraint of the domain's Postgres checks each row, which rewrites the
- * table, default or none (P3 of r19).
+ * table, default or none.
  */
 function addColumn(cmd: Node, table: string, { facts }: { facts: Facts }): Finding[] {
 	const constraints = inlineConstraints(cmd)

@@ -39,7 +39,7 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 }
 
 /**
- * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22), and
+ * wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec`, and
  * whether another process holds the local database's write lock now (d1-lock.ts lockedOut)
  */
 type Wrangler = { exec: Run; held: () => Promise<boolean>; wrangler: ProjectBin }
@@ -142,8 +142,8 @@ const COMMAND_BYTES = 100 * 1024
 /**
  * `statements` in order, as the fewest runs of consecutive statements that each fit one --command.
  * --command goes through D1's query API; a remote --file goes through its import API, which takes the
- * database out of service while it ingests (S8 of the 0.15.0 review), so a long batch is split, never
- * written to a file (S4 of r18). wrangler runs no --command as one transaction either.
+ * database out of service while it ingests, so a long batch is split, never
+ * written to a file. wrangler runs no --command as one transaction either.
  */
 function commands(statements: readonly string[]): string[] {
 	const out: string[] = []
@@ -199,7 +199,7 @@ function createD1Connection(databaseName: string, flags: readonly string[], spaw
 
 /**
  * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
- * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
+ * for them all: wrangler answers a result per statement, and one that fails fails the call
  */
 async function executeAll(
 	exec: Run,
@@ -219,7 +219,7 @@ export { executeAll, wranglerFlags }
 /**
  * The connection to the D1 database `config` names, through `wrangler`, the bin the command
  * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
- * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
+ * the environment's name the resolved config carries, which wrangler knows nothing of
  */
 export function connectD1(config: D1ProviderConfig, spawn: Wrangler): Connection {
 	return createD1Connection(config.databaseName, wranglerFlags(config), spawn)

@@ -1,6 +1,6 @@
 /**
  * comb.config.ts's `partitions` checked against the analyzed tables, for the constraint map: each
- * partitioned table's partitions as its entry lists them (Q7 of r18).
+ * partitioned table's partitions as its entry lists them.
  */
 import type { TableMeta } from "../analyzer-types.ts"
 import { byCodeUnit } from "../utils/order.ts"
@@ -9,7 +9,7 @@ import { qualifiedName } from "../utils/table-name.ts"
 /**
  * Each partitioned table's partitions, keyed as the map keys a table, as `mapTable` reads a reported
  * one: in the parent's schema, so written without one. A parent no table is, a partition that is a
- * table or has two parents, and any on SQLite are refused (Q7 of r18)
+ * table or has two parents, and any on SQLite are refused
  */
 export function partitionsOf(
 	tables: readonly TableMeta[],

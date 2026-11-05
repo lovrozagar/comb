@@ -46,17 +46,17 @@ type TreeContext = {
 	before?: ExtractedSchema | undefined
 	/**
 	 * whether the file so far set session_replication_role, which flips which triggers fire: from
-	 * then on every trigger counts as firing, whatever the history left its state (M73)
+	 * then on every trigger counts as firing, whatever the history left its state
 	 */
 	everyTrigger?: boolean | undefined
 	/** what the history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
 	fresh: Fresh
-	/** the locks the open transaction holds to its COMMIT, and what it made (PA8 and 0005 of r22b) */
+	/** the locks the open transaction holds to its COMMIT, and what it made */
 	held: Held
-	/** the query each PREPARE so far holds, by the name Postgres keys it under, which an EXECUTE runs (PA15 of r22b) */
+	/** the query each PREPARE so far holds, by the name Postgres keys it under, which an EXECUTE runs */
 	preparing: Map<string, Node>
-	/** the file's first statement so far that may PREPARE as it runs, named (pg-execute.ts, AE2-9 of r22) */
+	/** the file's first statement so far that may PREPARE as it runs, named (pg-execute.ts) */
 	dynamic?: string | undefined
 }
 
@@ -85,7 +85,7 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 
 /**
  * The table a write to `key` lands in, through every view it names, and how a column the write
- * names is that table's; undefined when a view reads no single table (M71)
+ * names is that table's; undefined when a view reads no single table
  */
 function baseOf(key: string, facts: Facts): { column: (name: string) => string; key: string } | undefined {
 	let at = { column: (name: string) => name, key }
@@ -173,8 +173,8 @@ const UNGUARDING: Readonly<Record<string, (table: string) => string>> = {
 }
 
 /**
- * An ALTER TABLE that turns off a table's foreign keys or durability (M40, M41): its finding; none
- * for a SET UNLOGGED of a table the history left unlogged, which Postgres skips (PA17 of r22b)
+ * An ALTER TABLE that turns off a table's foreign keys or durability: its finding; none
+ * for a SET UNLOGGED of a table the history left unlogged, which Postgres skips
  */
 function unguardingFinding(node: Node, facts: Facts): Finding | undefined {
 	const table = tableOf(node["relation"], facts.schema).key
@@ -234,9 +234,9 @@ function refusingAs<T>(stmt: string, rate: () => T): T {
 
 /** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
 /**
- * A statement's findings from its parse tree, and for the grammar its kind (P21 of r19) and whether a rule that rates a whole statement
+ * A statement's findings from its parse tree, and for the grammar its kind and whether a rule that rates a whole statement
  * (pg-maintenance.ts) rated each of its statements, a rating of none included, or it failed to parse,
- * which is unsafe: the grammar then has no shape to recognize (P13 of r18). The DDL rules add to the
+ * which is unsafe: the grammar then has no shape to recognize. The DDL rules add to the
  * grammar's rating, so theirs is not one.
  */
 function pgTreeFindings(

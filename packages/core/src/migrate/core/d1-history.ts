@@ -106,7 +106,7 @@ async function history(
 /**
  * What wrangler recorded once its apply of `names` ran, read back from the table, never from its output; a run
  * that failed may have made no table. Once wrangler has run, a read that fails is a Refused that says so: which of
- * `names` committed is then unknown, its `unknown` (S3 of r20), and status reads it
+ * `names` committed is then unknown, its `unknown`, and status reads it
  */
 async function appliedAfter(
 	target: D1Target,
@@ -127,7 +127,7 @@ async function appliedAfter(
 	}
 }
 
-/** Refuse a failed run, or one whose table gained (`added`) other than the `names` checked, naming a file never checked (SD4 of r22) */
+/** Refuse a failed run, or one whose table gained (`added`) other than the `names` checked, naming a file never checked */
 function refuseUnlike(
 	ran: { code: number; stderr: string; stdout: string },
 	{ added, locked, names, table }: { added: string[]; locked: boolean; names: string[]; table: string },
@@ -183,12 +183,12 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	})
 	const names = pending.map(({ name }) => name)
 	if (options.checkOnly === true) return names
-	/* what a lost move left is recorded now (S1 of r20), and with nothing to apply, that is all */
+	/* what a lost move left is recorded now, and with nothing to apply, that is all */
 	if (names.length === 0) {
 		if (hasIntents) await target.conn.batch(settleStatements(settle, true))
 		return names
 	}
-	/* the intents go first (S3 of r19): a lost record then fails before wrangler applies anything */
+	/* the intents go first: a lost record then fails before wrangler applies anything */
 	const hashed = pending.map(({ migration, name }) => ({ hash: migration.hash, name }))
 	await target.conn.batch([...settleStatements(settle, hasIntents), ...intentStatements(hashed)])
 	for (const name of names) options.print(`Apply: ${name}`)
@@ -239,7 +239,7 @@ async function baselineD1(
 	if (copied.length > 0) {
 		/* the hashes first, then wrangler's rows: whichever --command a split batch loses, a name is
 		   never in wrangler's table without its hash, and the rerun copies what is missing. Each copied
-		   file is vouched for now, so it is recorded under its current hash, the one D1 compares (M44) */
+		   file is vouched for now, so it is recorded under its current hash, the one D1 compares */
 		await target.conn.batch([
 			...hashStatements(copied.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name }))),
 			{ sql: historyTable(table) },
@@ -256,10 +256,10 @@ async function baselineD1(
 
 /**
  * Record the current hash of each applied file comb has none for, as applied before comb recorded
- * hashes (M1), and print each; returns them. The operator vouches that the files are what was
+ * hashes, and print each; returns them. The operator vouches that the files are what was
  * applied, having checked them against git; the history's own checks run first, so a pre-0.8
  * record to copy, an applied file edited since, or a name no file has refuses it. What a lost move
- * left is recorded with them (S1 of r20).
+ * left is recorded with them.
  */
 async function adoptHashesD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
 	const { hasIntents, settle, unhashed } = await history(read, target, { writes: true })

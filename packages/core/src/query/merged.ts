@@ -1,5 +1,5 @@
 /**
- * A list whose rows sit on several D1 shards, merged in memory (L2 of the 0.13.0 consumers review).
+ * A list whose rows sit on several D1 shards, merged in memory.
  * Each shard reads its part with the one query `buildListQuery({ ..., merged: {} })` builds: past
  * the cursor, the page's rows and one more; by page number, every row up to the page's end, as any
  * shard may hold any of them. `paginateMerged` then orders the merge as SQLite's ORDER BY does,
@@ -62,7 +62,7 @@ const isNull = (value: unknown) => value === null || value === undefined
 
 /**
  * Two rows in the list's order: each key's direction and null placement, then the id, as
- * orderByKeys orders them, each read through `typed` as SQLite stored it (Q2 of r20); the cursor's
+ * orderByKeys orders them, each read through `typed` as SQLite stored it; the cursor's
  * anchor, decoded as it was minted, is compared as it is
  */
 function compareRows(sort: readonly SortField[], idField: string, typed: ReadonlyMap<object, Record<string, unknown>>) {
@@ -107,12 +107,12 @@ function refuseUnmergeable(
 /**
  * A sort key a driver read as an integer number past ±(2^53 − 1) is already rounded: two keys on two
  * shards that round to one double compare equal here, where one database orders them by their true
- * values, so the merge refuses one, as it refuses such a tiebreak (Q2 of r18). A bigint compares exactly.
+ * values, so the merge refuses one, as it refuses such a tiebreak. A bigint compares exactly.
  */
 function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: readonly SortField[]): void {
 	for (const row of rows) {
 		for (const { field } of sort) {
-			/* the merge orders by each sort field's value: a row without one would merge by id alone (Q12 of r18) */
+			/* the merge orders by each sort field's value: a row without one would merge by id alone */
 			if (!Object.hasOwn(row, field)) {
 				throw new CombError({
 					cause: `the rows carry no ${field}: a merged list orders by each sort field's value, so select it under its name`,
@@ -127,8 +127,8 @@ function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: reado
 }
 
 /**
- * A merged list's ids must be unique across shards, or a cursor's anchor names more than one row
- * (Q10). An id a JS number rounded is refused as rounded first, as two unique ids may read as one (Q6 of r20)
+ * A merged list's ids must be unique across shards, or a cursor's anchor names more than one row.
+ * An id a JS number rounded is refused as rounded first, as two unique ids may read as one
  */
 function refuseSharedIds(rows: ReadonlyArray<Record<string, unknown>>, idField: string): void {
 	for (const row of rows) refuseRoundedId(row, idField)
@@ -150,7 +150,7 @@ function refuseSharedIds(rows: ReadonlyArray<Record<string, unknown>>, idField: 
 /**
  * The merged rows a cursor page may serve, ordered: none at or before the cursor's row, which a
  * shard that resumed early read again, and none past the earliest last row of a shard that read
- * its whole limit + 1, which may hold more before its next read (Q1). A shard that read limit + 1
+ * its whole limit + 1, which may hold more before its next read. A shard that read limit + 1
  * rows and none past the cursor could not move the list on: refused
  */
 function pastCursor<T extends Record<string, unknown>>(
@@ -181,7 +181,7 @@ function pastCursor<T extends Record<string, unknown>>(
 	return { full: end !== undefined, rows: kept }
 }
 
-/** The cursor's row as the merge compares rows: each key's value and the tiebreak; a merged list mints no reference (Q1 of r17) */
+/** The cursor's row as the merge compares rows: each key's value and the tiebreak; a merged list mints no reference */
 function anchorOf(cursor: string, pagination: ListPagination): Record<string, unknown> {
 	const { id, values } = pagination.read(cursor)
 	const keys = pagination.parsedSort.map(({ field }, i) => [field, values[i]])
@@ -238,17 +238,17 @@ function paginateMerged<T extends object>(
 	const window = rows.slice(start, start + limit + 1)
 	const hasMore = full || window.length > limit
 	const page = hasMore ? window.slice(0, limit) : window
-	/* every row served is one a cursor resumes after; the last one's is sealed (AB4-3 of area B) */
+	/* every row served is one a cursor resumes after; the last one's is sealed */
 	const last = page.map((row) => pagination.fit(row)).at(-1)
 	const meta: PaginationResponse = {
 		count: countOf(rowsPerShard, cursor),
 		hasMore,
 		limit,
-		/* a merged list is always cursorable: buildListQuery refuses one sorted by what no row carries (Q3 of r18) */
+		/* a merged list is always cursorable: buildListQuery refuses one sorted by what no row carries */
 		nextCursor: hasMore && last !== undefined ? last() : null,
 		page: cursor ? null : (pagination.page ?? 1),
 	}
-	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
+	/* the extras are stripped, so the rows are typed without them */
 	return [page.map((row) => applySelect(row, pagination.parsedFields)) as unknown as Array<ListRow<T>>, meta] as const
 }
 

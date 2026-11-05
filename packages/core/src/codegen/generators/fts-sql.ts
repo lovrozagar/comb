@@ -16,7 +16,7 @@ type FtsTableConfig = {
 }
 
 /* combining marks count as word characters (M*): unicode61's default categories split a word at each
-   one, so Devanagari, Hebrew and Arabic words were indexed as consonant fragments (U32) */
+   one, so Devanagari, Hebrew and Arabic words were indexed as consonant fragments */
 const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'"
 
 /** The field a configured FTS column names, by property or by SQL name. */

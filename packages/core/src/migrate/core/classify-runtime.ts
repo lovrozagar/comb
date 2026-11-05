@@ -24,7 +24,7 @@ const TRIGGER = /* @__PURE__ */ new RegExp(
 function pragmaFinding(code: string): Finding | undefined {
 	const pragma = pragmaOf(code)
 	/* SQLite ignores it inside a transaction, so the file's own off never turns a cascade or a check off; on is
-	   the state the transaction keeps anyway, so it carries no note (S4 of r19). SQLite reads a word it does not
+	   the state the transaction keeps anyway, so it carries no note. SQLite reads a word it does not
 	   know as off, and SQLite versions read numbers apart (256 is off on 3.53, on on 3.54), so comb keeps no copy
 	   of its parser: on, yes, true and 1 are on, and any other value gets the note, however SQLite reads it */
 	if (pragma?.name === "foreign_keys" && pragma.value !== undefined && !/^(?:on|yes|true|1)$/i.test(pragma.value)) {

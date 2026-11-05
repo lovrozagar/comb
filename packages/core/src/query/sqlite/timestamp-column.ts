@@ -2,8 +2,8 @@
  * SQLite's columns whose drizzle mode reads a value as another than SQLite stored. A non-STRICT
  * table lets any column hold any storage class: a timestamp TEXT, as a CURRENT_TIMESTAMP default or a
  * datetime() writer stores it, which drizzle reads as an invalid Date and SQLite orders after every
- * number (B2-3 of area B), a boolean any value, which drizzle reads as false but for 1 (AB3-2 of area
- * B), a `numeric()` ±Infinity or a BLOB, a buffer blob TEXT (AB4-2 of area B). Each mode has the classes
+ * number, a boolean any value, which drizzle reads as false but for 1,
+ * a `numeric()` ±Infinity or a BLOB, a buffer blob TEXT. Each mode has the classes
  * it reads back as stored (storedReads), and a list carries any other apart. A Postgres date-mode
  * time carries its text the same way, as a Date keeps milliseconds of its microseconds (carriedText).
  */
@@ -16,7 +16,7 @@ const inSeconds = (column: SQLWrapper | undefined): boolean =>
 	column.columnType === "SQLiteTimestamp" &&
 	(column as unknown as { mode?: unknown }).mode === "timestamp"
 
-/** Whether `column` is a milliseconds-mode SQLite timestamp, whose TEXT drizzle reads as a Date too (B2-3 of area B) */
+/** Whether `column` is a milliseconds-mode SQLite timestamp, whose TEXT drizzle reads as a Date too */
 const inMilliseconds = (column: SQLWrapper | undefined): boolean =>
 	is(column, SQLiteColumn) &&
 	column.columnType === "SQLiteTimestamp" &&
@@ -25,14 +25,14 @@ const inMilliseconds = (column: SQLWrapper | undefined): boolean =>
 /**
  * Whether `column` is a SQLite timestamp, which a non-STRICT table lets hold TEXT (a CURRENT_TIMESTAMP
  * default, a datetime() writer): a list that reads the key back carries a TEXT row's text, which its
- * cursor binds as itself, by reference past the cap (B2-3 of area B)
+ * cursor binds as itself, by reference past the cap
  */
 const holdsText = (column: SQLWrapper | undefined): boolean => inSeconds(column) || inMilliseconds(column)
 
 /**
  * Whether `value` is the text a list that reads `column` back carried from its row, which the cursor
  * flags (`carried`) and binds as itself, past the column's Date mapper: a Postgres date-mode time's
- * to_json text, which a Date holds to the millisecond (AB3-4 of area B); a list that binds the key as
+ * to_json text, which a Date holds to the millisecond; a list that binds the key as
  * read carries none. A SQLite column's stored value is carriedStored's
  */
 const carriedText = (
@@ -47,19 +47,19 @@ const carriedText = (
 	is(column, Column) &&
 	column.dataType === "object date"
 
-// AB4-2 of area B: what each SQLite drizzle mode reads back as stored, as the storage class typeof() names
+// What each SQLite drizzle mode reads back as stored, as the storage class typeof() names
 /**
  * The storage classes a SQLite column's mode reads back as SQLite stored them, a REAL alone when
  * finite (`finite`): a number mode's and a timestamp's integers and REALs, a ±Infinity read as itself,
- * as null with its class beside it (Q3 of r20) or as an Invalid Date a list reads back by its row or its
- * class (AB3-1 of area B); a `numeric()`'s integers and finite REALs, as drizzle reads ±Infinity as
+ * as null with its class beside it or as an Invalid Date a list reads back by its row or its
+ * class; a `numeric()`'s integers and finite REALs, as drizzle reads ±Infinity as
  * "Infinity", which binds as TEXT; a text's TEXT; a buffer or bigint
- * blob's BLOB. A boolean reads back NULL, 0 and 1 alone (AB3-2 of area B). A JSON mode holds nothing a
+ * blob's BLOB. A boolean reads back NULL, 0 and 1 alone. A JSON mode holds nothing a
  * cursor carries, and a custom column's read is its own mapper's, so neither has a set
  */
 type StoredReads = "boolean" | readonly ("blob" | "finite" | "integer" | "real" | "text")[]
 
-// lookup-table: each SQLite drizzle columnType and the storage classes it reads back as stored (AB4-2 of area B)
+// lookup-table: each SQLite drizzle columnType and the storage classes it reads back as stored
 const READS: Readonly<Record<string, StoredReads>> = {
 	SQLiteBigInt: ["blob"],
 	SQLiteBlobBuffer: ["blob"],

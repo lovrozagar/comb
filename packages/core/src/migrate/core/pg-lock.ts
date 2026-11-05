@@ -1,5 +1,5 @@
 /**
- * How a Postgres statement locks a relation (0005 of r22b, pg-held.ts holds what a file holds): ACCESS
+ * How a Postgres statement locks a relation (pg-held.ts holds what a file holds): ACCESS
  * EXCLUSIVE, which blocks reads and writes, or SHARE and the like, which block writes, on the relation
  * alone or through its descendants too, and the locks a change reaches through the foreign keys of
  * its table (pg-foreign.ts), on tables the statement does not name. A lock on an index, or on a

@@ -60,7 +60,7 @@ function movedKey(key: string, { from, to }: { from: string; to: string }, schem
 
 /**
  * A schema renamed: every table, type, operator and routine named under it moves with it, keys and
- * references alike, and a routine keeps the key it had beside its new one (M74)
+ * references alike, and a routine keeps the key it had beside its new one
  */
 function moveSchema(facts: Facts, from: string, to: string): void {
 	const move = (key: string) => movedKey(key, { from, to }, facts.schema) ?? key
@@ -130,7 +130,7 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 	}
 }
 
-// lookup-table: the relations a rename, a move or a drop follows: a table, and what Postgres writes through as one (M71)
+// lookup-table: the relations a rename, a move or a drop follows: a table, and what Postgres writes through as one
 const RELATIONS = /* @__PURE__ */ new Set([
 	"OBJECT_FOREIGN_TABLE",
 	"OBJECT_MATVIEW",

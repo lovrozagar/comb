@@ -56,7 +56,6 @@ function requireConditionSQL(condition: FilterCondition, config: FilterSQLConfig
 	})
 }
 
-// Q5 of r17
 /**
  * One condition as SQL on its mapped column, lowered as filterToSQL lowers it; null when the field
  * is unmapped or the column cannot take its operator or value. A mapping that is no
@@ -65,7 +64,7 @@ function requireConditionSQL(condition: FilterCondition, config: FilterSQLConfig
 function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
 	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
 	if (mapped === undefined) return null
-	/* a bare column name, the string form before 0.17, which JavaScript may still pass, is refused (Q5 of r18) */
+	/* a bare column name, the string form before 0.17, which JavaScript may still pass, is refused */
 	if (typeof mapped === "string")
 		throw new TypeError(
 			`buildFilterSQL: columnMap.${condition.field} is a bare column name; \`${JSON.stringify(mapped)}\` is \`{ column: ${JSON.stringify(mapped)}, kind: "as-is" }\` since 0.17`,

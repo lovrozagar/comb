@@ -35,9 +35,9 @@ type PgTarget = {
 type AtlasNeeds = {
 	dev?: boolean | undefined
 	dir?: string | undefined
-	/** the target unscoped, for the one call that lists the database's schemas (M78) */
+	/** the target unscoped, for the one call that lists the database's schemas */
 	allSchemas?: boolean | undefined
-	/** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+	/** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
 	revisions?: string | undefined
 	url?: boolean | undefined
 }
@@ -54,7 +54,7 @@ type AtlasEnv = {
 // lookup-table: hosts a password never leaves the machine for
 const LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 const PLAIN_SCHEMA = /^[a-z_][a-z0-9_$]*$/
-/* where a URL comb cannot read goes wrong, by the part (N2): the password, unless the part is another */
+/* where a URL comb cannot read goes wrong, by the part: the password, unless the part is another */
 const HINTS = {
 	address: "percent-encode a % in the host or database name as %25",
 	password: "percent-encode special characters (#, /, ?, @) in the password",
@@ -68,10 +68,10 @@ const isDocker = (raw: string): boolean => /^docker:\/\/[^#\s]+$/.test(raw)
 /**
  * The database a Postgres URL reaches, as libpq reads it (pg-url.ts): its host without case,
  * localhost for the loopback addresses and for a Unix socket, so a local socket and local TCP count
- * as one server; its port; and its database (M89)
+ * as one server; its port; and its database
  */
 function databaseOf(url: LibpqUrl): string {
-	/* a hostaddr is where libpq connects, whatever host names (P7 of the 0.15.0 review) */
+	/* a hostaddr is where libpq connects, whatever host names */
 	const named = (url.hostaddr ?? url.host).toLowerCase()
 	const host = url.socket || LOCAL_HOSTS.has(named) ? "localhost" : named
 	return `${host}:${url.port}/${url.database}`
@@ -89,12 +89,12 @@ function checkUrl(
 	const accepted = field === "devUrl" ? "a postgres:// or docker://" : "a postgres://"
 	const url = libpqUrl(raw)
 	const problem = urlProblem(raw)
-	/* libpq reads a socket in a percent-encoded host, and Atlas refuses one (N3) */
+	/* libpq reads a socket in a percent-encoded host, and Atlas refuses one */
 	if (problem === "encoded socket")
 		return {
 			error: `${field} names a Unix socket as a percent-encoded host, which Atlas refuses; give its directory as ?host=, as in postgres://app@/db?host=/run/postgresql`,
 		}
-	/* lib/pq takes a service file's host, dbname and user over the URL's, where comb reads the URL (P6 of r19) */
+	/* lib/pq takes a service file's host, dbname and user over the URL's, where comb reads the URL */
 	if (url?.params.has("service") === true)
 		return {
 			error: `${field} names a libpq service, which Atlas reads from ~/.pg_service.conf and comb does not; write its host, port, dbname and user into the URL`,
@@ -105,7 +105,7 @@ function checkUrl(
 
 /**
  * Why `schema` cannot be the target's: comb writes it unquoted, so it must be a name Postgres keeps
- * as written, never one it folds, cuts or reads as a keyword (M87)
+ * as written, never one it folds, cuts or reads as a keyword
  */
 function schemaProblem(schema: string): string | undefined {
 	if (!PLAIN_SCHEMA.test(schema)) {
@@ -138,7 +138,7 @@ const fieldErrors = (
 
 /**
  * Why `field`'s own search_path cannot stand: comb migrates `schema` alone, and Atlas keeps a URL's
- * own search_path, so both URLs must name that schema or none (M39; the devUrl's, PA7 of r22b)
+ * own search_path, so both URLs must name that schema or none (the devUrl's)
  */
 function scopeErrors(field: "devUrl" | "url", url: LibpqUrl | undefined, schema: string): string[] {
 	const scope = url?.params.get("search_path")
@@ -156,7 +156,7 @@ function pgUrlProblems(
 	const url = needs.url ? checkUrl("url", target.url) : {}
 	const dev = needs.dev ? checkUrl("devUrl", target.devUrl) : {}
 	const errors = [...fieldErrors("url", url), ...fieldErrors("devUrl", dev)]
-	/* the target guarded whenever it is configured, on a call that does not reach it too (M89) */
+	/* the target guarded whenever it is configured, on a call that does not reach it too */
 	const configured = libpqUrl(target.url)
 	if (configured !== undefined && dev.url !== undefined && databaseOf(configured) === databaseOf(dev.url)) {
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
@@ -169,11 +169,11 @@ function pgUrlProblems(
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 
-/** `raw` without the libpq keys that only tune the connection, which Atlas's driver would send the server as settings (P15 of r19) */
+/** `raw` without the libpq keys that only tune the connection, which Atlas's driver would send the server as settings */
 const forAtlas = (raw: string): string =>
 	[...queryParams(raw)].reduce((url, [key, value]) => (stripsForAtlas(key, value) ? withParam(url, key) : url), raw)
 
-/** `raw` scoped to `schema` unless it names a search_path itself; edited as text, which a socket target with a password needs (P14) */
+/** `raw` scoped to `schema` unless it names a search_path itself; edited as text, which a socket target with a password needs */
 const scoped = (raw: string, schema: string): string =>
 	queryParams(raw).has("search_path") ? forAtlas(raw) : withParam(forAtlas(raw), "search_path", schema)
 
@@ -204,7 +204,7 @@ const SHARED_REVISIONS = "atlas_schema_revisions"
  * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
  */
 function revisionsSchema(target: PgTarget): string {
-	/* a search_path either URL names is the schema itself, or pgUrlProblems refused it (M39, PA7) */
+	/* a search_path either URL names is the schema itself, or pgUrlProblems refused it */
 	const scope = target.schema
 	if (scope === "public") return SHARED_REVISIONS
 	const own = `${SHARED_REVISIONS}_${scope}`
@@ -236,7 +236,7 @@ function atlasConfig(needs: AtlasNeeds, revisions: string): string {
 	return lines.join("\n")
 }
 
-/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database (P2 of r19) */
+/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database */
 function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void {
 	const { errors } = pgUrlProblems(target, needs)
 	if (errors.length > 0) throw new Error(errors.join("; "))
@@ -272,7 +272,7 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 
 /**
  * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
- * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ * OSS may say it left part of a schema out of what it compared
  */
 const atlasNotices = (stderr: string): string[] =>
 	stderr

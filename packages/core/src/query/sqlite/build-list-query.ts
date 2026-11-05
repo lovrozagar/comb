@@ -91,7 +91,7 @@ function searchWhere(q: string | undefined, search: LikeSearchResolver | undefin
 }
 
 /**
- * Refuses a merged list paginateMerged cannot order (Q3 of r18): it merges by the values it reads from
+ * Refuses a merged list paginateMerged cannot order: it merges by the values it reads from
  * the rows, so a computed sort, which no row carries, would merge by id alone; and the id breaks ties
  * across shards, so a table without one cannot be merged at all
  */
@@ -158,7 +158,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 	}
 
 	/*
-	 * a merged list reads a null anchor as a real NULL (Q1 of the 0.14.1 review): its row is on one
+	 * a merged list reads a null anchor as a real NULL: its row is on one
 	 * shard only, so every other reads it as gone, and resuming such a shard at -Infinity would repeat
 	 * its rows. A row D1 reads back as null that holds ±Infinity comes back out of its shard's order,
 	 * which paginateMerged refuses
@@ -167,7 +167,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 	/* finish built the pagination its `merged` says: a merged list's query is paged by paginateMerged alone */
 	return finish({
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite },
-		/* its table's, whose columns the cursor binds (QL4 of r22b) */
+		/* its table's, whose columns the cursor binds */
 		dialect: listDialect(Object.values(columns), undefined),
 		keyset,
 		merged: opts.merged,
@@ -185,7 +185,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 
 /**
  * Throw where the list schema publishes a tiebreak (stableTiebreak) that `idColumn` is not: the list
- * would break ties on one column and say it breaks them on another (AB6 of area B). A query built by
+ * would break ties on one column and say it breaks them on another. A query built by
  * hand names none, and an idColumn that is an expression has no name to compare
  */
 function refuseOtherTiebreak(idColumn: SQLWrapper, tiebreak: string | undefined): void {

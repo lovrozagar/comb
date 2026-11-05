@@ -27,7 +27,7 @@ type ApprovalOptions = {
 
 /**
  * May run, with the in-file approval to report when that is what let it, and the cautious statements to print when
- * nobody was asked about them (S4 of r19); or refused, and why
+ * nobody was asked about them; or refused, and why
  */
 type Approval =
 	| { approvedBy?: string | undefined; cautions?: string[] | undefined; ok: true }

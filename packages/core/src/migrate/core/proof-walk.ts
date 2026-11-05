@@ -58,7 +58,7 @@ type Walk = {
 	trigger?: string | undefined
 }
 
-/* OPFLAG_ISUPDATE (0x04): a Delete that is an update's own rewrite of its row, not a deletion (M41) */
+/* OPFLAG_ISUPDATE (0x04): a Delete that is an update's own rewrite of its row, not a deletion */
 const IS_UPDATE = 4
 
 /* the marker a probe trigger selects: probe i selects MARK + i */

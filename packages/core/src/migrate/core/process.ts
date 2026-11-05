@@ -1,7 +1,7 @@
 /**
  * The one place comb starts a process. Everything that shells out (atlas, wrangler,
  * drizzle-kit) takes a `Run`, so tests pass a fake and the real one is tested here. A process runs
- * asynchronously under comb's one cleanup rule (cleanup.ts, PA4 of r22): SIGINT or SIGTERM to comb
+ * asynchronously under comb's one cleanup rule (cleanup.ts): SIGINT or SIGTERM to comb
  * goes on to the child, comb waits for its end, and its caller never goes on to the next step. On
  * POSIX the child leads a process group of its own, so a stop reaches what it started too, and one
  * that outlives the stop by killAfterMs is killed with SIGKILL.
@@ -30,7 +30,7 @@ export type RunResult = {
 
 /**
  * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
- * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * I/O and refuses outside it: the floor is the oldest release comb's integration suite
  * passes on, and the next major may change what comb reads from Atlas
  */
 export const ATLAS_RANGE = ">=1.2.0 <2"
@@ -113,9 +113,9 @@ function signalTree(child: ChildProcess, signal: NodeJS.Signals): void {
  * The child's environment: the parent's without any PG* variable, so libpq-style defaults a shell
  * happens to export (PGSSLMODE=disable, PGPASSWORD) never change a connection comb configured, and
  * PGPASSFILE pointed at nothing, so libpq's driver reads no ~/.pgpass the config does not name, as
- * comb's own reads read none (P6 of the 0.15.0 review, P6 of r19); then `env` over it. No
+ * comb's own reads read none; then `env` over it. No
  * PGSERVICEFILE: lib/pq in Atlas before v1.2.0 panics on any, and a service file is read only for a
- * URL naming a service, which comb refuses (PA5 of r22).
+ * URL naming a service, which comb refuses.
  */
 function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 	const out: NodeJS.ProcessEnv = { PGPASSFILE: devNull }
@@ -189,8 +189,7 @@ function stopsOf(child: ChildProcess, name: string, killAfterMs: number) {
 
 /**
  * `cmd` started, and the result of its end; the child is held so a signal to comb stops it first.
- * A stop names the peer `cmd` runs, the process the user knows, or else `cmd` (D5-4 of the area D
- * round-five review).
+ * A stop names the peer `cmd` runs, the process the user knows, or else `cmd`.
  */
 function started(cmd: string, args: readonly string[], options: RunOptions): Promise<RunResult> {
 	const name = options.peer ?? cmd
@@ -263,7 +262,7 @@ export const run: Run = async (cmd, args, options = {}) => {
 
 /**
  * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
- * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ * holds, the one comb checked, never a name looked up on PATH
  */
 export const runPeer =
 	(exec: Run, bin: ProjectBin) =>
@@ -272,8 +271,8 @@ export const runPeer =
 
 /**
  * `options` for a peer on comb's own Bun, run as bun: in a Bun single-file executable
- * `process.execPath` is the app, which runs its own entry unless `BUN_BE_BUN` is set (D2-4 of the
- * area D round-two review); plain bun and node ignore it
+ * `process.execPath` is the app, which runs its own entry unless `BUN_BE_BUN` is set;
+ * plain bun and node ignore it
  */
 function asBun(bin: ProjectBin, options: RunOptions): RunOptions {
 	if (bin.runtime !== process.execPath || process.versions["bun"] === undefined) return options

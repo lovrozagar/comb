@@ -144,7 +144,7 @@ function followAlter(node: Node, facts: Facts): void {
 			facts.tables.get(table)?.delete(String(cmd["name"]))
 			facts.columnTypes.get(table)?.delete(String(cmd["name"]))
 		} else if (cmd["subtype"] === "AT_AlterColumnType") {
-			/* a column retyped to a domain runs the domain's CHECK on every later write (M73) */
+			/* a column retyped to a domain runs the domain's CHECK on every later write */
 			followType(table, { def: { ...(def["ColumnDef"] as Node), colname: cmd["name"] } }, facts)
 		} else {
 			const runs = callIn(def, facts)
@@ -184,7 +184,7 @@ const fields = (target: Node): Node[] =>
 
 /**
  * A view, with the one table or view its query reads and how its columns name that one's: what
- * Postgres can write through, a single relation in FROM and no set operation (M71)
+ * Postgres can write through, a single relation in FROM and no set operation
  */
 function followView(node: Node, facts: Facts): void {
 	const query = (node["query"] as Node)["SelectStmt"] as Node | undefined
@@ -216,7 +216,7 @@ function followRelation(type: string, node: Node, facts: Facts): boolean {
 		facts.tables.set(tableOf(into["rel"], facts.schema).key, new Set())
 	} else if (type === "ViewStmt") followView(node, facts)
 	else if (type === "CreatePolicyStmt" || type === "AlterPolicyStmt") {
-		/* a policy's predicate runs for every role it applies to, forced or not: app roles rarely own the table (M73) */
+		/* a policy's predicate runs for every role it applies to, forced or not: app roles rarely own the table */
 		const table = tableOf(node["table"], facts.schema).key
 		const runs = callIn([node["qual"], node["with_check"]], facts)
 		if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
@@ -253,7 +253,7 @@ function historyTree(statement: string): unknown {
 	try {
 		return parsePostgres(statement).stmts
 	} catch (error) {
-		/* what it defined or attached is unknown, so the facts after it are too (M75) */
+		/* what it defined or attached is unknown, so the facts after it are too */
 		throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
 			cause: error,
 		})

@@ -79,7 +79,7 @@ class LruCache<K, V> {
 			return undefined
 		}
 
-		/* hard first: no read serves an entry past it (QE3 of r22b) */
+		/* hard first: no read serves an entry past it */
 		const now = Date.now()
 		if (now > entry.hardExpiry) {
 			this.cache.delete(key)
@@ -131,7 +131,7 @@ class LruCache<K, V> {
 	 * @param ttlMs - Optional per-key soft TTL override
 	 */
 	set(key: K, value: V, ttlMs?: number): void {
-		/* refuse before touching an entry, so a refused set leaves the cache as it was (QE6 of r22b) */
+		/* refuse before touching an entry, so a refused set leaves the cache as it was */
 		if (!isPositive(ttlMs)) throw new RangeError(`LruCache ttlMs must be positive, got ${ttlMs}`)
 		/* remove if exists (to update position) */
 		this.cache.delete(key)
@@ -143,7 +143,7 @@ class LruCache<K, V> {
 		}
 
 		/* a soft TTL past the hard one, or none beside it, would let get serve what getWithMeta has
-		   already evicted: with a hard TTL, no soft one means fresh until the hard expiry (QE3 of r22b) */
+		   already evicted: with a hard TTL, no soft one means fresh until the hard expiry */
 		const requested = ttlMs ?? this.ttlMs
 		const effectiveSoftTtl =
 			this.hardTtlMs === undefined ? requested : Math.min(requested ?? this.hardTtlMs, this.hardTtlMs)

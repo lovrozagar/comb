@@ -1,5 +1,5 @@
 /**
- * The functions that act on the server or past the replay's database (PR2 of r22b): called where a
+ * The functions that act on the server or past the replay's database: called where a
  * statement runs them, they reach as far as the statements in BEYOND (pg-outside-transaction.ts) do,
  * so the dev replay leaves the statement out and apply alone runs it. The list holds every pg_catalog
  * function Postgres 17 revokes from PUBLIC that does more than read, which a test holds it to

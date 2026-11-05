@@ -9,7 +9,7 @@ export type SharedName = "cidrSchema" | "jsonValueSchema" | "timestampSchema"
 export type FieldInfo = {
 	key: string
 	type: SchemaType
-	/** The shared schemas the field's code names, as its builder says (C4 of r20) */
+	/** The shared schemas the field's code names, as its builder says */
 	uses: readonly SharedName[]
 	zodType: string
 }

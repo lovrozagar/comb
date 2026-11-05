@@ -91,7 +91,7 @@ function refuseUnmatched(matched: Matched, { dir, io, mode }: { dir: string; io:
 		throw new CliError(
 			`${edited} was applied, then edited: its hash is not the one recorded; restore the file, or put the change in a new one`,
 		)
-	/* a copy of a --file is what baseline records, so only check and apply refuse it (M45) */
+	/* a copy of a --file is what baseline records, so only check and apply refuse it */
 	const copies = matched.copies.map(
 		({ file, row }) =>
 			`${file} has the text of ${row}, applied with --file; run comb migrate baseline to record it, or remove it`,
@@ -171,9 +171,9 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const files = hashed(dir, relative === undefined ? sqlFiles(dir) : [relative])
 	const matched = matchHistory(files, rows, single === undefined)
 	refuseUnmatched(matched, { dir, io, mode })
-	/* comb's history is written only once nothing refuses the run: its table, and each name a row lacks
-	   (S7); only when a file applies or the history awaits its rebuild or names, so a Turso database
-	   with nothing to change is never opened for writing (S6 of the 0.15.0 review) */
+	/* comb's history is written only once nothing refuses the run: its table, and each name a row lacks;
+	   only when a file applies or the history awaits its rebuild or names, so a Turso database
+	   with nothing to change is never opened for writing */
 	const record = async (applying: boolean) => {
 		if (!applying && !legacy && matched.named.length === 0) return
 		const conn = await target.write()
@@ -224,7 +224,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 /** `mode`'s argv read: its database and options; refused by usage without one database */
 function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: string } {
 	const args = parseArgs(argv, `migrate ${mode}`)
-	/* parseArgs refuses a command that names no database (KC2 of r22b) */
+	/* parseArgs refuses a command that names no database */
 	return { args, db: args.positionals[0] as string }
 }
 
@@ -248,7 +248,7 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliC
 
 /**
  * Every peer `command` on `provider` needs, Atlas's version read through `io` among them, refused
- * before the command connects, fetches, spawns or asks Atlas anything (K1 of r21, PA5 of r22)
+ * before the command connects, fetches, spawns or asks Atlas anything
  */
 export async function needPeers(
 	io: CliContext,
@@ -269,7 +269,7 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 		env: option(args, "env"),
 		mode: "apply",
 	})
-	/* every peer the command needs, before it connects, fetches, spawns or asks Atlas anything (K1 of r21); a
+	/* every peer the command needs, before it connects, fetches, spawns or asks Atlas anything; a
 	   project without comb.migrate.config.ts names a D1 binding */
 	const peers = await needPeers(io, mode, { provider: resolved?.provider.type ?? "d1" })
 	if (resolved?.provider.type === "postgres") {

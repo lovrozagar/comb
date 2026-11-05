@@ -46,7 +46,7 @@ export {
 	getTursoCredentials,
 	introspectSqliteSchema,
 } from "./drivers/index.ts"
-/* what a read-only connect throws for a database that is not there, so a caller can tell it apart (K3 of r18) */
+/* what a read-only connect throws for a database that is not there, so a caller can tell it apart */
 export { DatabaseMissing } from "./drivers/missing.ts"
 export { TursoMissing } from "./drivers/sqlite.ts"
 export type {

@@ -1,8 +1,8 @@
 /**
  * What each migrate command needs on each provider, before its first I/O: the npm peers and Atlas,
  * which optional-peer.ts's requirePeers checks in one refusal, and which the README's peer table
- * states (K5 of r21). Atlas is a row like any peer (PA5, KC6 and PA22 of r22), and a SQLite diff
- * whose comb.config.ts declares FTS needs ts-morph as well (KC3).
+ * states. Atlas is a row like any peer, and a SQLite diff
+ * whose comb.config.ts declares FTS needs ts-morph as well.
  */
 import type { ProviderConfig } from "../types.ts"
 import type { OptionalPeer } from "./optional-peer.ts"

@@ -31,7 +31,7 @@ import type { FieldType } from "./types.ts"
 
 type AdvertisedConfig = Pick<ListQueryConfig, "fields" | "filter" | "lang" | "search" | "sort">
 
-// KT8 of r22b: Partial, not `?:`, as a zod shape's key is absent or a schema, never undefined
+// Partial, not `?:`, as a zod shape's key is absent or a schema, never undefined
 /** The params beside cursor, page and limit; each but `order` is present only where the config declares it */
 type OptionalShape = {
 	/** the sort, `field[.asc|.desc][.nullsfirst|.nullslast]` keys joined by commas */
@@ -127,11 +127,11 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 			.array(),
 		q: z.string().optional(),
 		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
-		/* set on every parse; optional, as ListQueryOutput types it, so a handler's input takes a hand-built object (U29) */
+		/* set on every parse; optional, as ListQueryOutput types it, so a handler's input takes a hand-built object */
 		pageBound: z.number().optional(),
-		/* the limit's bound, as the page's: the schema's own maxLimit (Q16 of r18) */
+		/* the limit's bound, as the page's: the schema's own maxLimit */
 		limitBound: z.number().optional(),
-		/* the tiebreak the schema publishes, which a derived list's idColumn must name (AB6 of area B) */
+		/* the tiebreak the schema publishes, which a derived list's idColumn must name */
 		tiebreak: z.string().optional(),
 		validated: z.literal(true),
 		...extendFields,
@@ -140,7 +140,7 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 
 /**
  * The schema's limits over the defaults, each a whole number from 0, and maxSortKeys from 1: no
- * order could meet a cap of 0 sort keys, while the published pattern admits one (QL7 of r22b)
+ * order could meet a cap of 0 sort keys, while the published pattern admits one
  */
 function listLimitsOf(given: ListQueryConfig["limits"]): ListQueryLimits {
 	const limits = limitsOver("createListQuerySchema", LIST_QUERY_LIMITS, given)
@@ -162,7 +162,7 @@ function createListQuerySchema<
 	type TSortField = TSortFields[number]
 	type ExtendedOutput = ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
-	/* a whole number from 0 each (C3 of r17): the query stamp publishes them, and its reader refuses any other */
+	/* a whole number from 0 each: the query stamp publishes them, and its reader refuses any other */
 	const limits = listLimitsOf(config.limits)
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
 	assertNotReserved("createListQuerySchema", extensions, RESERVED_LIST_KEYS)

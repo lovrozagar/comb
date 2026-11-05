@@ -1,5 +1,5 @@
 /*
- * The grammar a pattern may hold, as an allowlist (AA4-1 of r24): literals, the escapes and classes
+ * The grammar a pattern may hold, as an allowlist: literals, the escapes and classes
  * pattern-escape.ts takes, anchors, groups (, (?: and (?<name>, alternation, and counts written
  * without a leading zero. A source past it, or past an engine's size limits, is refused.
  */

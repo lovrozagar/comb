@@ -1,9 +1,9 @@
 /**
- * M78: public keeps the shared atlas_schema_revisions as its own history, where comb 0.12 also
+ * Public keeps the shared atlas_schema_revisions as its own history, where comb 0.12 also
  * recorded every other schema's files. A revision there that names no file of public's is another
- * schema's when the same version and hash sit in that schema's own history (M77 adopts them):
- * public ignores it, saying so, and keeps its own order. Every other revision with no file is
- * refused as gone (M76). The shared rows are never deleted.
+ * schema's when the same version and hash sit in that schema's own history (apply and baseline
+ * adopt them): public ignores it, saying so, and keeps its own order. Every other revision with no
+ * file is refused as gone. The shared rows are never deleted.
  *
  * Atlas counts such a row as public's position and calls a file of public's older than it out of
  * order, so then the dry run and apply pass `--exec-order non-linear`, and checkHistory's late
@@ -28,7 +28,7 @@ const OWN = "atlas_schema_revisions_"
 /**
  * What public's history holds of other schemas: each ignored version with its schema, or why they
  * could not be read; `elsewhere` when the database holds a schema but public, so a row no own
- * history matches may be one comb 0.12 recorded for it, not yet adopted (G1-b)
+ * history matches may be one comb 0.12 recorded for it, not yet adopted
  */
 type Foreign = { elsewhere: boolean; ignored: Map<string, string>; unread: string | undefined }
 
@@ -54,7 +54,7 @@ async function schemasOf(options: AtlasCommand): Promise<string[]> {
 			throw new Error(
 				`atlas schema inspect: ${explainAtlasFailure(result.stderr, env.scrub).trim() || `exit ${result.code}`}`,
 			)
-		/* the names as the database has them; only a printed line is masked (M79) */
+		/* the names as the database has them; only a printed line is masked */
 		return readInspect(result.stdout)
 	})
 	return (ran.schemas ?? []).flatMap((schema) => (schema.name === undefined ? [] : [schema.name]))
@@ -101,7 +101,7 @@ function ownHistory(status: AtlasStatus, { ignored }: Foreign, copy: string): At
 	return { ...status, applied, available, current, error, pending }
 }
 
-/** What public says of each row it ignores, the target's secrets masked where a schema's name holds one (M79) */
+/** What public says of each row it ignores, the target's secrets masked where a schema's name holds one */
 const ignoredLines = ({ ignored }: Foreign, target: PgTarget): string[] =>
 	[...ignored].map(([version, schema]) => {
 		/* only the schema's name, a value the database holds, is masked: comb's words stay as written */

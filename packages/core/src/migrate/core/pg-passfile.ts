@@ -1,8 +1,8 @@
 /**
- * The password a Postgres URL's `passfile` gives, read as libpq reads its password file (P7 of r18):
+ * The password a Postgres URL's `passfile` gives, read as libpq reads its password file:
  * lines of `host:port:database:user:password`, `#` comments and blank lines skipped, `\` escaping
  * the next character, a field of `*` alone matching anything, the first line that matches winning.
- * The host field is read as Atlas's driver, lib/pq, reads it where libpq differs (P11 of r19), so
+ * The host field is read as Atlas's driver, lib/pq, reads it where libpq differs, so
  * comb and Atlas take one password from one file: the host given, else `localhost` whatever the
  * hostaddr, and a socket's directory or `localhost`. A missing file gives none, as libpq's does; one others can
  * read is refused, as libpq ignores it. comb never reads ~/.pgpass or PGPASSFILE: the URL is the
@@ -32,7 +32,7 @@ function fieldsOf(line: string): Array<{ any: boolean; text: string }> {
 }
 
 /**
- * Why libpq ignores the passfile `file`: not a plain file (P24 of r19), or readable by others; none
+ * Why libpq ignores the passfile `file`: not a plain file, or readable by others; none
  * for one it cannot stat, which libpq and Atlas's driver read as no file, silently
  */
 function passfileProblem(file: string): string | undefined {
@@ -48,7 +48,7 @@ function passfileProblem(file: string): string | undefined {
 	return undefined
 }
 
-/** Why libpq ignores the passfile `url` reads, by field, before Atlas runs (P24 of r19) */
+/** Why libpq ignores the passfile `url` reads, by field, before Atlas runs */
 export function passfileErrors(field: "devUrl" | "url", url: LibpqUrl): string[] {
 	/* libpq reads it only for a URL without a password */
 	const file = url.password === undefined ? url.params.get("passfile") : undefined

@@ -2,7 +2,7 @@
  * Statements about an object comb owns on Postgres (pg-objects.ts): a comment, a grant, an
  * `ALTER POLICY`, an `ALTER VIEW … SET`, an index on a materialized view, a trigger on a view, a
  * role granted to another. A statement is about the object it names, whatever its keyword: an
- * `ALTER TABLE` naming a view is read as the `ALTER VIEW` it is (P5 of r18). Atlas replays the history without comb's objects, so it would run such a statement
+ * `ALTER TABLE` naming a view is read as the `ALTER VIEW` it is. Atlas replays the history without comb's objects, so it would run such a statement
  * against an object that is not there; comb takes each out of what Atlas sees, keeps it with its
  * object, and writes it again after the object is created again. Any other statement that names
  * an object comb owns is refused, since comb could not keep it.

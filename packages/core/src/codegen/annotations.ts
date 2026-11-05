@@ -46,7 +46,7 @@ export const TEXT_KEYS = [
 type Keys = typeof NUMBER_KEYS
 type None = readonly []
 
-/** The constraint keys each c helper takes, its constraint type's; a state machine is c.enum's own (CD9 of r22b) */
+/** The constraint keys each c helper takes, its constraint type's; a state machine is c.enum's own */
 export type ConstraintKeys = {
 	readonly boolean: None
 	readonly createdAt: Keys
@@ -83,7 +83,7 @@ export const CONSTRAINT_KEYS: ConstraintKeys = {
 /* every key any helper takes, so a key none takes is named as one comb does not read */
 const KNOWN: readonly string[] = [...TEXT_KEYS, "maxBytes"]
 
-/** Refuses a key the helper's constraint type does not take, naming the helper: its rule would be dropped without a word (CD9 of r22b) */
+/** Refuses a key the helper's constraint type does not take, naming the helper: its rule would be dropped without a word */
 function refuseForeignKeys(
 	constraints: Readonly<Record<string, ConstantValue>>,
 	{ helper, place }: { helper: CombColumnKind | null; place: string },
@@ -97,15 +97,15 @@ function refuseForeignKeys(
 	throw new Error(`${place}: ${helper === null ? "a drizzle column" : `c.${helper}`} takes no ${key}`)
 }
 
-/* the keys no field takes together, and why: either would win without a word (C8 of r18 for the
-   casing); a tenant column moving on update would move the row to another tenant (CD1 of r22b) */
+/* the keys no field takes together, and why: either would win without a word; a
+   tenant column moving on update would move the row to another tenant */
 const CONTRADICTIONS: ReadonlyArray<readonly [string, string, string]> = [
 	["mutable", "nomutate", "declare one"],
 	["lowercase", "uppercase", "declare one"],
 	["tenant", "mutable", "a tenant column is set once; a row does not move between tenants"],
 ]
 
-/* a text's kinds: one rule each, so a second would drop the first's without a word (C6 of r19) */
+/* a text's kinds: one rule each, so a second would drop the first's without a word */
 const KINDS = ["email", "imageUri", "name", "password", "url"] as const
 
 // lookup-table: the keys a kind would drop without a word, and what it does instead; any other it holds
@@ -125,7 +125,7 @@ function refuseKinds(constraints: Readonly<Record<string, ConstantValue>>, place
 }
 
 /**
- * Refuses declared bounds that hold no value (C1, C4 of r17): a min past its max, on any column; a
+ * Refuses declared bounds that hold no value: a min past its max, on any column; a
  * length bound, `measure` "length" (a text column's), that is no whole number from 0; a maxBytes
  * that is no whole number from 1. Each would publish a schema no value passes, or one zod cannot
  * build, so the generated module would throw on import
@@ -152,7 +152,7 @@ function refuseEmptyBounds(
 /**
  * A field's constraints from the record its column helper was given, every key one the column
  * types allow, a pattern one comb can emit and bounds that hold a value; an error at `place`
- * otherwise. `filled` says what fills the column, never its name (F13): comb's own timestamp
+ * otherwise. `filled` says what fills the column, never its name: comb's own timestamp
  * helpers, or a timestamp's default or update hook; a column named createdAt that nothing fills is
  * the caller's to give. `measure` says whether min and max bound a length (text) or a value
  */
@@ -161,7 +161,7 @@ function refuseMalformed(
 	constraints: Readonly<Record<string, ConstantValue>>,
 	{ helper, measure, place }: { helper: CombColumnKind | null; measure: "length" | "value"; place: string },
 ): void {
-	/* a JavaScript caller's measure reaches here unchecked by tsc (K7 of r18) */
+	/* a JavaScript caller's measure reaches here unchecked by tsc */
 	if (measure !== "length" && measure !== "value") throw new Error(`${place}: measure must be "length" or "value"`)
 	refuseForeignKeys(constraints, { helper, place })
 	const contradiction = CONTRADICTIONS.find(([a, b]) => constraints[a] === true && constraints[b] === true)
@@ -171,7 +171,7 @@ function refuseMalformed(
 	}
 	refuseKinds(constraints, place)
 	const relation = constraints["relation"]
-	/* a relation's name is a property of the generated relations, so it is an identifier (F57) */
+	/* a relation's name is a property of the generated relations, so it is an identifier */
 	if (relation !== undefined && (typeof relation !== "string" || !/^[A-Za-z_$][\w$]*$/.test(relation)))
 		throw new Error(`${place}: relation ${JSON.stringify(relation)} is no name a relation can take`)
 	refuseEmptyBounds(constraints, { measure, place })

@@ -44,13 +44,12 @@ const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent"
  * The database's DDL as Atlas OSS reads it: its tables and indexes, not its engine's, the shadow
  * tables of `fts` or the migration histories. Atlas OSS refuses a trigger or a view, so those stay
  * out, and a virtual table is left to `separate` and UNINSPECTED_DDL: objectDrift compares them all
- * (N-S5 of plan 15's rerun)
  */
 async function liveDdl(conn: Connection): Promise<string> {
 	const { rows } = await conn.execute(
 		`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index')${notEngineTables(conn, HISTORY_TABLES)} ORDER BY rowid`,
 	)
-	/* a vector index and what libsql makes for it: no SQLite but libsql's reads them, so objectDrift compares the index (SL3 of r22) */
+	/* a vector index and what libsql makes for it: no SQLite but libsql's reads them, so objectDrift compares the index */
 	const vectors = rows
 		.filter(([type, , sql]) => type === "index" && isVectorIndexSql(String(sql)))
 		.map((row) => String(row[1]))
@@ -65,7 +64,7 @@ const UNINSPECTED_DDL =
 /**
  * The difference between the database's schema and the one the migrations of `dir` leave, as the
  * SQL that would bring the database there; "" when they agree. The history replays on `engine`, the
- * SQLite its files apply on (SL3 of r22).
+ * SQLite its files apply on.
  */
 async function sqliteDrift(
 	conn: Connection,
@@ -89,7 +88,7 @@ async function sqliteDrift(
 		}
 		await hashDir(exec, copy)
 		const live = separate(await liveDdl(conn), groups)
-		/* every virtual table's shadows, the database's own included: Atlas would read them as tables (N-S5) */
+		/* every virtual table's shadows, the database's own included: Atlas would read them as tables */
 		const virtual = await conn.execute(
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'",
 		)
@@ -134,11 +133,11 @@ function writeReplayable(plain: string, copy: string): void {
 	const state = emptyPgObjects()
 	for (const name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, name), "utf8")
-		/* the statements Postgres runs, written back so Atlas sends each alone (M75) */
+		/* the statements Postgres runs, written back so Atlas sends each alone */
 		const kept = new Set(separatePgObjects(sql, state, name).plain)
-		/* a view and an extension replay in place, inside DO blocks, so what depends on them replays too (P4 of r19) */
+		/* a view and an extension replay in place, inside DO blocks, so what depends on them replays too */
 		const replayed = pgRead(sql).statements.flatMap(({ text: stmt, tree }) => {
-			/* Atlas commits what it replays on devUrl's server: nothing past the database it replays in (P1 of r20) */
+			/* Atlas commits what it replays on devUrl's server: nothing past the database it replays in */
 			if (tree !== undefined && beyondDatabase(...nodeOf(tree)) !== undefined) return []
 			const code = codeOf(stmt, "postgres")
 			if (kept.has(stmt) || /^(?:CREATE|ALTER|DROP) SEQUENCE\b/i.test(code)) return [stmt]
@@ -164,7 +163,7 @@ async function refuseDrift(
 		const ran = await withAtlasEnv(options.target, { dev: true, url: true }, async (env) => {
 			const args = ["schema", "diff", "--from", "env://url", "--to", `file://${plain.dir}`, ...env.args]
 			const result = await options.exec("atlas", args, { env: env.env })
-			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
+			/* compared as Atlas wrote it; scrubbed only in what comb prints */
 			if (result.code !== 0) {
 				const said = `${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`
 				throw new ReplayFailed(`atlas schema diff: ${said.trim()}`)
@@ -192,7 +191,7 @@ type ObjectsCompare = {
 	readLive?: LiveRead | undefined
 	/** how the history's replay on dev is read: comb's own (pg-replay.ts) unless a test says otherwise */
 	readReplay?: typeof replayCatalog | undefined
-	/** how the dev database gets the target schema before a replay: comb's own unless a test says otherwise (P12) */
+	/** how the dev database gets the target schema before a replay: comb's own unless a test says otherwise */
 	readyDev?: ReadyDev | undefined
 	target: PgTarget
 }
@@ -200,13 +199,13 @@ type ObjectsCompare = {
 /**
  * Refuses a database whose functions, procedures or triggers are not, by name, the ones the
  * migrations of `copy` leave in the target schema, which Atlas OSS leaves out of refuseDrift's
- * comparison without a word (plan 14's 5.4b). It replays and reads before Atlas runs on dev, and
+ * comparison without a word. It replays and reads before Atlas runs on dev, and
  * returns its verdict for after Atlas's comparison, so a table's difference is still named first:
  * the warnings to print (the bodies of those that match were not compared), or the refusal
  */
 /**
- * What the history `files` leave of what the catalog read compares, read from their replay on dev
- * (P5 of r19). A docker:// dev is Atlas's own container, which comb cannot reach: a history that
+ * What the history `files` leave of what the catalog read compares, read from their replay on dev.
+ * A docker:// dev is Atlas's own container, which comb cannot reach: a history that
  * makes nothing compared leaves nothing, and any other is refused naming devUrl
  */
 async function historyCatalog(
@@ -259,7 +258,7 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 		...(matched.triggers === 0 ? [] : [`${matched.triggers} trigger${matched.triggers === 1 ? "" : "s"}`]),
 		...(matched.views === 0 ? [] : [`${matched.views} view${matched.views === 1 ? "" : "s"}`]),
 	]
-	/* P10 of r18: what neither comparison reads, said every time, as a database may differ there unseen */
+	/* What neither comparison reads, said every time, as a database may differ there unseen */
 	return () => [
 		...(counted.length === 0
 			? []

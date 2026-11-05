@@ -1,6 +1,6 @@
 /**
  * Postgres DDL rated from its parse tree, as its writes are (pg-tree.ts), so no spelling the parser
- * accepts hides a dropped column, a retype, a rename or a drop (M70):
+ * accepts hides a dropped column, a retype, a rename or a drop:
  *
  * - an ALTER TABLE by each command's subtype: a dropped column, a retype and SET NOT NULL unsafe, a
  *   dropped constraint, default, identity or expression, row level security, a disabled trigger,
@@ -66,13 +66,13 @@ const UNSAFE_DROPS = /* @__PURE__ */ new Set([
 // lookup-table: the drops whose objects are named in the drop list, by the word the list writes
 const NAMED_DROPS: Readonly<Record<string, string>> = { OBJECT_INDEX: "INDEX", OBJECT_TABLE: "TABLE" }
 
-/** A table left with no replica identity: a publication's UPDATE and DELETE on it fail (M84) */
+/** A table left with no replica identity: a publication's UPDATE and DELETE on it fail */
 const NO_IDENTITY: Finding = {
 	level: "cautious",
 	note: "UPDATE and DELETE fail on a table a publication publishes them for",
 }
 
-/** A sequence restart, as an ALTER SEQUENCE or an identity column's SET or ADD spells it (M82) */
+/** A sequence restart, as an ALTER SEQUENCE or an identity column's SET or ADD spells it */
 const RESTART: Finding = {
 	level: "cautious",
 	note: "restarts a sequence, as a RESTART does: its next values may repeat ones already used",
@@ -82,7 +82,7 @@ const RESTART: Finding = {
 const restarts = (options: unknown): boolean =>
 	nodesOf(options).some(([type, node]) => type === "DefElem" && node["defname"] === "restart")
 
-/** An identity made GENERATED ALWAYS, by ADD or SET: a deployed insert that writes the column then fails (P16) */
+/** An identity made GENERATED ALWAYS, by ADD or SET: a deployed insert that writes the column then fails */
 function always(cmd: Node): Finding[] {
 	const def = cmd["def"] as Node
 	const made =
@@ -111,16 +111,16 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_AddColumn: addColumn,
 	AT_AttachPartition: (cmd, _table, { facts, key }) =>
 		attachedFindings((cmd["def"] as Node)["PartitionCmd"] as Node, key, facts),
-	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
+	/* an identity's RESTART resets its sequence, so the next insert may reuse an id */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_AlterColumnType: (cmd, _table, on) => retypeFindings(cmd, on),
 	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
 	AT_ColumnDefault: (cmd) => (cmd["def"] === undefined ? [{ level: "cautious" }] : []),
 	AT_DropColumn: (cmd, table) => [{ drops: [`DROP COLUMN ${table}.${String(cmd["name"])}`], level: "unsafe" }],
-	/* with no replica identity a publication's UPDATE and DELETE fail; Postgres refuses an index unfit for one (M84) */
+	/* with no replica identity a publication's UPDATE and DELETE fail; Postgres refuses an index unfit for one */
 	AT_ReplicaIdentity: (cmd) =>
 		((cmd["def"] as Node)["ReplicaIdentityStmt"] as Node)["identity_type"] === "n" ? [NO_IDENTITY] : [],
-	/* a new generation expression recomputes every row's stored value (M81) */
+	/* a new generation expression recomputes every row's stored value */
 	AT_SetExpression: (cmd) => [
 		{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
 		{ level: "lock", note: REWRITES },
@@ -129,14 +129,14 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_SetNotNull: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
 }
 
-/** The recipe for a foreign key on the partitioned table `table`, whose ADD then attaches each partition's and scans nothing (P18 of r19) */
+/** The recipe for a foreign key on the partitioned table `table`, whose ADD then attaches each partition's and scans nothing */
 const partitionsFirst = (table: string): string =>
 	`add it NOT VALID to each partition, VALIDATE CONSTRAINT on each in a later file, then add it to ${table}, which then scans nothing`
 
 /**
  * A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID. A foreign key
- * rewrites nothing, and blocks writes to its table and the one it references (P16 of r18). On a
- * partitioned table Postgres refuses a NOT VALID one, and a valid one scans every partition (P18 of r19).
+ * rewrites nothing, and blocks writes to its table and the one it references. On a
+ * partitioned table Postgres refuses a NOT VALID one, and a valid one scans every partition.
  */
 function addConstraint(cmd: Node, table: string, { facts, key }: On): Finding[] {
 	const constraint = (cmd["def"] as Node)["Constraint"] as Node
@@ -168,11 +168,11 @@ function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined
 	return subtype === "AT_AddConstraint" ? addConstraint(cmd, table, on) : COMMAND_RULES[subtype]?.(cmd, table, on)
 }
 
-/** One ALTER TABLE command's findings, on `table` as written: none for a move to where the history left it (PA17 of r22b) */
+/** One ALTER TABLE command's findings, on `table` as written: none for a move to where the history left it */
 const commandFindings = (cmd: Node, table: string, on: On): Finding[] =>
 	staysPut(cmd, on.facts.storage.get(on.key)) ? [] : (columnFindings(cmd, table, on) ?? tableFindings(cmd, table))
 
-// lookup-table: the relations a move to another tablespace rewrites, besides a table: an index, a materialized view (P11 of r18)
+// lookup-table: the relations a move to another tablespace rewrites, besides a table: an index, a materialized view
 const MOVED = /* @__PURE__ */ new Set(["OBJECT_INDEX", "OBJECT_MATVIEW"])
 
 /**
@@ -192,17 +192,17 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 		return cmds.some((cmd) => cmd["subtype"] === "AT_DropColumn" || cmd["subtype"] === "AT_AlterColumnType")
 			? [{ level: "unsafe" }]
 			: []
-	/* a partitioned index has no storage: its move changes only where its partitions' indexes go next (P19 of r19) */
+	/* a partitioned index has no storage: its move changes only where its partitions' indexes go next */
 	const key = tableOf(node["relation"], facts.schema).key
 	const index = objtype === "OBJECT_INDEX" ? facts.indexes.get(key) : undefined
 	const storageless = facts.partitioned.has(index?.table ?? "")
-	/* a move to where the history left it rewrites nothing (PA17 of r22b) */
+	/* a move to where the history left it rewrites nothing */
 	const where = objtype === "OBJECT_INDEX" ? index : facts.storage.get(key)
 	const rewrites = (cmd: Node) => REWRITE_COMMANDS.has(String(cmd["subtype"])) && !staysPut(cmd, where)
 	return MOVED.has(String(objtype)) && !storageless && cmds.some(rewrites) ? [{ level: "lock", note: REWRITES }] : []
 }
 
-/** An ALTER … ALL IN TABLESPACE: every relation of its kind there moves, and each is rewritten (P11 of r18) */
+/** An ALTER … ALL IN TABLESPACE: every relation of its kind there moves, and each is rewritten */
 function moveAllFindings(node: Node): Finding[] {
 	const kind = String(node["objtype"])
 		.replace(/^OBJECT_/, "")
@@ -256,10 +256,10 @@ const INDEX_CONSTRAINTS = /* @__PURE__ */ new Set(["CONSTR_EXCLUSION", "CONSTR_P
 
 /**
  * The lock warnings of an ALTER TABLE that adds a primary key, unique or exclusion constraint
- * without USING INDEX on a table the file did not create (M81): it locks the table against reads
+ * without USING INDEX on a table the file did not create: it locks the table against reads
  * and writes while it builds the index. A unique or primary key can take an index built
  * concurrently first; an exclusion constraint cannot. On ONLY a partitioned table it builds
- * nothing (PA10 of r22b).
+ * nothing.
  */
 function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Finding[] {
 	if (node["objtype"] !== "OBJECT_TABLE" || fresh.tables.has(tableOf(node["relation"], facts.schema).key)) return []
@@ -268,7 +268,7 @@ function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Fi
 	if (partitioned && !flag((node["relation"] as Node)["inh"])) return []
 	return (node["cmds"] as Node[]).flatMap((each): Finding[] => {
 		const cmd = each["AlterTableCmd"] as Node
-		/* an added column's inline primary key or unique builds its index as ADD CONSTRAINT does (P6) */
+		/* an added column's inline primary key or unique builds its index as ADD CONSTRAINT does */
 		const inline = cmd["subtype"] === "AT_AddColumn"
 		const constraints = inline
 			? inlineConstraints(cmd)
@@ -280,7 +280,7 @@ function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Fi
 				(constraint) => INDEX_CONSTRAINTS.has(String(constraint["contype"])) && constraint["indexname"] === undefined,
 			)
 			.map((constraint): Finding => {
-				/* PA10 of r22b: on a partitioned table it builds each partition's too, and USING INDEX is refused there */
+				/* On a partitioned table it builds each partition's too, and USING INDEX is refused there */
 				const locked = partitioned
 					? `${table} against reads and writes, and its partitions against writes,`
 					: `${table} against reads and writes`

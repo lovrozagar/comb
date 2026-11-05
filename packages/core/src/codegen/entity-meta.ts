@@ -13,8 +13,8 @@ import { namesColumn } from "./utils/sql-name.ts"
 
 /**
  * Whether a body sets `field` once, at creation, and never updates it: a key, as a composite key's
- * column is too (F7), a `nomutate` column, a tenant (CD1 of r22b, §6.3), and a reference that does
- * not declare `mutable` (F25), as an ownership key a body could move would move the row to another
+ * column is too, a `nomutate` column, a tenant (§6.3), and a reference that does
+ * not declare `mutable`, as an ownership key a body could move would move the row to another
  * tenant
  */
 const isSetOnce = (field: FieldMeta): boolean =>
@@ -31,7 +31,7 @@ type Writes = { create: boolean; update: boolean }
  * Which write bodies take `field`: what comb or the database fills neither, what a body sets once
  * the create body alone. The one rule the DTO generator, the stamp's `generated` and `immutable`
  * and the manifest's flags all read, a private column's included, so no channel can state a fact
- * another contradicts (CD7, CS4 and CS6 of r22b, meta-contract §8.2)
+ * another contradicts (meta-contract §8.2)
  */
 function writesOf(field: FieldMeta): Writes {
 	const filled = isGenerated(field)
@@ -103,7 +103,7 @@ function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
 
 /**
  * The partial unique indexes a table publishes: none over a private column, nor whose predicate,
- * SQL comb rendered, names one by its quoted SQL name (C7 of the 0.14.1 review, C5 of r17)
+ * SQL comb rendered, names one by its quoted SQL name
  */
 function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta[] {
 	const hidden = hiddenOf(table)
@@ -117,7 +117,7 @@ function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta
 
 /**
  * Whether comb or the database fills `field`: an `autogenerate` column, a generated or identity
- * column (F8), or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
+ * column, or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
  * caller supplies is not generated
  */
 function isGenerated(field: FieldMeta): boolean {

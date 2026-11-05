@@ -75,7 +75,6 @@ type ListQueryConfig<
 	pagination?: PaginationConfig | undefined
 	/** The fields `order` may sort on, as published; an `order` naming any other is a 400 */
 	sort: TSortFields
-	// QL10 of r22b
 	/**
 	 * The column the list breaks ties on, published as `stableTiebreak`. Omitted: `id`, as
 	 * buildListQuery breaks ties; a derived list names its `idColumn`'s.
@@ -113,13 +112,11 @@ type ListQueryOutput<TSortField extends string = string> = {
 	q: string | undefined
 	/** each sorted field's direction */
 	sortOrderBy: Partial<Record<TSortField, SortDirection>>
-	// C7 of r19, U29
 	/**
 	 * The schema's own maxPage, which holds the page wherever this object is read, a spread of it
 	 * included. A query built by hand leaves it out for the default maxPage, or states the bound it means
 	 */
 	pageBound?: number | undefined
-	// Q16 of r18, C7 of r19
 	/** The schema's own maxLimit, which holds the limit as `pageBound` holds the page */
 	limitBound?: number | undefined
 	/** The column the schema says the list breaks ties on, `id` by default, which a derived list's idColumn names */

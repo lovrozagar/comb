@@ -1,5 +1,5 @@
 /**
- * The supervisor load.ts runs between codegen and its loader child (F43 of the 0.13.0 round). The
+ * The supervisor load.ts runs between codegen and its loader child. The
  * child runs in a process group of its own, so its whole group, every process a module's pool or
  * worker started, is killed with SIGKILL when the time runs out, when the child exits, or when a
  * signal reaches this supervisor: a terminal's Ctrl-C reaches codegen and the supervisor, never the

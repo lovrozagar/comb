@@ -1,5 +1,5 @@
 /**
- * Whether a Postgres schema holds anything (PA6 of r22b). Postgres records every object placed in a
+ * Whether a Postgres schema holds anything. Postgres records every object placed in a
  * schema as depending on it in pg_depend: tables, views, sequences, functions, procedures,
  * aggregates, types, domains, collations, operators, conversions, text search objects, statistics
  * objects and extensions alike. DROP SCHEMA ... RESTRICT reads the same record. So this one read

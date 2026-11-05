@@ -2,8 +2,7 @@
  * The tables an engine keeps for itself, which comb never counts as the user's, copies or guards:
  * SQLite's `sqlite_` tables and Litestream's `_litestream_` ones everywhere, and the prefix a
  * connection declares as its engine's (D1's `_cf_`). On every other SQLite engine a `_cf_` table is
- * an ordinary table someone made. One predicate, so no reader of a schema drifts from another (S4
- * of the 0.15.0 review).
+ * an ordinary table someone made. One predicate, so no reader of a schema drifts from another.
  */
 import type { Connection } from "../types.ts"
 import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, D1_MIGRATIONS_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"

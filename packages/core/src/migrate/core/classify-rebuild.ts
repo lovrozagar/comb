@@ -2,7 +2,7 @@
  * The rebuild rule of the destructive-change gate, for SQLite: a drop that Atlas's copy, rename and
  * the history make a table rebuild is lossless when its copy writes every column the table had,
  * into a new table that stores each as the old one did, and the file creates again every trigger
- * the drop took with the table (S2 of the 0.14.1 review). Anything else loses rows, values or
+ * the drop took with the table. Anything else loses rows, values or
  * the writes a trigger made.
  */
 import type { ExtractedSchema } from "../migration-types.ts"
@@ -102,7 +102,7 @@ function rebuildFinding(table: string | undefined, ctx: RebuildContext): Finding
 	const name = table === undefined ? undefined : nameKey(table, ctx.naming)
 	const rebuilt = name === undefined ? undefined : ctx.rebuilds.get(name)
 	if (name === undefined || rebuilt === undefined) return undefined
-	/* each DROP pairs with its own rebuild, by position: a clean one later cannot launder a lossy one (M5) */
+	/* each DROP pairs with its own rebuild, by position: a clean one later cannot launder a lossy one */
 	const nth = ctx.drops.get(name) ?? 0
 	ctx.drops.set(name, nth + 1)
 	const rebuild = rebuilt[Math.min(nth, rebuilt.length - 1)] as FileRebuild

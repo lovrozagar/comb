@@ -1,6 +1,6 @@
 /**
- * A Postgres COPY read from its parse tree, as the pinned Atlas runs it (PA15 of r22b,
- * tests/integration/postgres/copy-execute-oracle.test.ts). Atlas's driver cannot run a COPY with the
+ * A Postgres COPY read from its parse tree, as the pinned Atlas runs it
+ * (tests/integration/postgres/copy-execute-oracle.test.ts). Atlas's driver cannot run a COPY with the
  * client's stream, FROM STDIN or TO STDOUT: the file fails with "driver: bad connection", so the
  * check refuses one. A COPY with a program runs it on the database server, and one TO a file writes
  * the server's file, so each is unsafe; a COPY FROM a server file loads rows into a table.

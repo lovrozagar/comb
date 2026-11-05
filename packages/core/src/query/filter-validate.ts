@@ -85,13 +85,12 @@ const FILTER_LIMITS: FilterLimits = {
 	maxValues: 60,
 }
 
-// KT1 of r22b
 /** Bounds as a caller gives them: a key left out or set to undefined keeps its default, and any other is a whole number from 0 */
 type LimitsGiven<T> = { [K in keyof T]?: number | undefined }
 
 /**
  * `given` over `defaults`, a key set to undefined left out as every other option bag reads it, each
- * other a whole number from 0, a TypeError naming it and `owner` otherwise (KT1 of r22b): a cap of
+ * other a whole number from 0, a TypeError naming it and `owner` otherwise: a cap of
  * NaN or undefined compared false, which turned it off. No cap is a large whole number
  */
 function limitsOver<T extends Record<string, number>>(
@@ -133,7 +132,7 @@ function checkedFields(fields: Record<string, FilterField>): Record<string, Chec
 	return checked
 }
 
-/** A like or ilike pattern past maxPatternBytes, as SQLite reads it, escaped: D1 refuses it only once it evaluates a row (Q8) */
+/** A like or ilike pattern past maxPatternBytes, as SQLite reads it, escaped: D1 refuses it only once it evaluates a row */
 function refuseLongPattern({ field, operator, value }: FilterCondition, check: Check): void {
 	if ((operator !== "like" && operator !== "ilike") || typeof value !== "string") return
 	const pattern = patternOf(operator, value)

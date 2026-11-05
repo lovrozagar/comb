@@ -180,7 +180,7 @@ function assertNamable(dbName: string): void {
 	}
 }
 
-/** Refuse a config dialect the tables contradict: it would generate the wrong engine's code (F18) */
+/** Refuse a config dialect the tables contradict: it would generate the wrong engine's code */
 function assertDialect(database: Database, tables: "postgres" | "sqlite" | null): void {
 	const declared = database.db.dialect
 	if (declared === undefined || tables === null || declared === tables) return
@@ -253,7 +253,7 @@ async function databases(positionals: readonly string[], tables: string | undefi
 		return [{ db: { tables }, direct: true, exportNamespace: undefined, generators: DIRECT, name: "", tablesPath }]
 	}
 	const config = await loadCombConfig(io.cwd)
-	/* a name given twice runs once: a second run into the same staged map would record nothing (F26) */
+	/* a name given twice runs once: a second run into the same staged map would record nothing */
 	const names = positionals.length > 0 ? [...new Set(positionals)] : Object.keys(config.databases)
 	const picked = names.map((name) => [name, databaseIn(config, name)] as const)
 	const namespaces = await exportNamespaces(config, io.cwd)
@@ -274,15 +274,15 @@ export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<vo
 		throw new CliError(`Unknown generator: ${only}. Known: ${GENERATORS.join(", ")}`)
 	}
 	const picked = await databases(positionals, options["tables"] as string | undefined, io)
-	/* a generator no picked database runs would write nothing and exit 0 (F32) */
+	/* a generator no picked database runs would write nothing and exit 0 */
 	const runnable = GENERATORS.filter((generator) => picked.some((database) => database.generators.includes(generator)))
 	if (only !== undefined && !runnable.includes(only as Generator))
 		throw new CliError(`codegen does not run ${only} here; it runs ${runnable.join(", ")}`)
-	/* every database runs into one staged set, so nothing is written until every one succeeds (F17)
+	/* every database runs into one staged set, so nothing is written until every one succeeds
 	 * and databases sharing a package.json each see the exports the others staged */
 	const staged: Staged = new Map()
 	const runs: Run[] = []
-	/* each line held until the files are written, so a failed run claims none it never wrote (KC10 of r22b) */
+	/* each line held until the files are written, so a failed run claims none it never wrote */
 	const { commit, context, failed, held } = holdLines(io)
 	for (const database of picked) {
 		if (!database.direct) context(`\nCodegen: ${database.name}`)

@@ -1,9 +1,9 @@
 /**
- * One JSON value, `CombJsonValue`, for every generated DTO of every database (A2-1 of r22). A
+ * One JSON value, `CombJsonValue`, for every generated DTO of every database. A
  * schema under an id must be one object per process: zod refuses two schemas under one id in one
  * JSON Schema run, so a definition each database's `_shared` module wrote threw when one document
  * held the DTOs of two. z.json() as a union, its recursion lazy inside: the id on z.json() names
- * its lazy, and its body still publishes as a positional `__schemaN` (AA9 of r22).
+ * its lazy, and its body still publishes as a positional `__schemaN`.
  */
 import * as z from "zod"
 

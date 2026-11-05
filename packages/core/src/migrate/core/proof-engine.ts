@@ -33,8 +33,8 @@ type Step = {
 	statement: string
 }
 
-/** A run's probe-name prefix: a token of its own, so no temp trigger a file made can take a probe's name (M46) */
-/* a UUID's hex, a string whatever Buffer's type is: Workers' types and Node's both name one (K1 of r18) */
+/** A run's probe-name prefix: a token of its own, so no temp trigger a file made can take a probe's name */
+/* a UUID's hex, a string whatever Buffer's type is: Workers' types and Node's both name one */
 const probePrefix = (): string => `comb_probe_${randomUUID().replaceAll("-", "").slice(0, 16)}_`
 
 /** Main's root pages: the table each stores, an index's root its table's, and which are tables' own */
@@ -229,8 +229,8 @@ function refusal(db: ScratchDb, sql: string): string | undefined {
 }
 
 /**
- * Apply one file to the copy as the target does: on a fresh connection (S1 of r21), foreign keys on, in one transaction,
- * a statement at a time (Bun's multi-statement exec skips a failing statement but the last, M9). Returns each statement's
+ * Apply one file to the copy as the target does: on a fresh connection, foreign keys on, in one transaction,
+ * a statement at a time (Bun's multi-statement exec skips a failing statement but the last). Returns each statement's
  * effects on the existing tables, read before it runs, their columns, or why a statement or the commit failed.
  */
 function applyToCopy(db: ScratchDb, sql: string): { error?: string | undefined; start: Tables; steps: Step[] } {
@@ -279,7 +279,7 @@ function engineFindings(steps: readonly Step[], start: Tables): { cautious: stri
 		for (const [table, columns] of effects.assigns) {
 			const listed = [...columns].join(", ")
 			const old = [...columns].some((column) => start.get(table)?.has(column) === true)
-			/* a write that also deletes rows of the table, as a REPLACE does, is no backfill of it (M41) */
+			/* a write that also deletes rows of the table, as a REPLACE does, is no backfill of it */
 			if (old) unsafe.push(`${at}: updates existing rows of ${table} (${listed})`)
 			else if (effects.triggers.length === 0 && !effects.deletes.has(table))
 				cautious.push(`${at}: backfills ${table} (${listed}), columns this file added`)

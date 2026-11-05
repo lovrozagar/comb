@@ -1,5 +1,5 @@
 /**
- * A sort key too long for a cursor (R8). Any client can write a long title, and a cursor carries
+ * A sort key too long for a cursor. Any client can write a long title, and a cursor carries
  * every sort value, so the cursor at that row would pass MAX_CURSOR_LENGTH and the next page would
  * refuse it. Such a value is carried by reference instead: the cursor holds the row's id (it always
  * does), the longest prefix of the value that fits and the value's length, both in code points, and
@@ -41,7 +41,7 @@ import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlit
 const ORIGINAL_NAME = /* @__PURE__ */ Symbol.for("drizzle:OriginalName")
 const SCHEMA = /* @__PURE__ */ Symbol.for("drizzle:Schema")
 
-/** Whether a key is read on SQLite: a SQLite column is, and an SQL expression is when its anchor table is SQLite's (27.7) */
+/** Whether a key is read on SQLite: a SQLite column is, and an SQL expression is when its anchor table is SQLite's */
 const onSqlite = (column: SQLWrapper, table: object): boolean => is(column, SQLiteColumn) || is(table, SQLiteTable)
 
 /** `table` as a FROM item: its own name, with the alias a relational query gave it reapplied */
@@ -95,7 +95,7 @@ const literal = (n: number): SQL => sql`${n < 0 ? sql`-` : sql``}${countLiteral(
  * 1970, (ms - 1, ms] before it, and (-1, 1) at 0. The milliseconds are literals, so the bound costs the
  * id alone.
  */
-// U10 and U20 for seconds; B2-6 of area B for a milliseconds-mode key holding a REAL fraction
+// the bound for a seconds-mode key, and for a milliseconds-mode key holding a REAL fraction
 function storedTimeBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
 	const truncated = value.getTime()
 	/* each edge widened on its own: a Date of 0 is any stored value within a millisecond either side of it */
@@ -118,8 +118,8 @@ const misreadInfinity = (value: Date): boolean => value.getTime() === new Date(2
 
 /**
  * The Date node-postgres gives both infinities, on a date-mode Postgres `timestamp` key: the row's
- * own value while it is infinite, at the precision the order compares it (U17); the Date itself
- * while the row still holds it, as a row of local 2000-01-01 does (U20). Once the row is gone, or
+ * own value while it is infinite, at the precision the order compares it; the Date itself
+ * while the row still holds it, as a row of local 2000-01-01 does. Once the row is gone, or
  * edited to another finite value, it may have held either infinity, so the list resumes from the
  * direction's own end, repeating rows and skipping none. Every other Date is bound as it is; a driver
  * that reads infinity as an Invalid Date is bounded by unheldBound.
@@ -138,7 +138,7 @@ function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor)
  * while it truncates to that millisecond, else the millisecond's edge toward the rows already
  * served, its start ascending and its end descending, so a row of it may come again and none is
  * skipped. The key is ordered and sought as the column itself, so an index on it and the id
- * serves the page (U27), as SQLite seconds are bounded (U20).
+ * serves the page, as SQLite seconds are bounded.
  */
 function millisecondBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
 	const date = sql.param(value, column as never)
@@ -151,7 +151,7 @@ function millisecondBound({ column, direction }: SortKey, value: Date, at: Ancho
 
 /**
  * `'-infinity'` or `'infinity'` as `column`'s own Postgres type: a `date`, else a `timestamptz`, the
- * two that read an infinity as an Invalid Date (a `timestamp` reads it as 2000-01-01, U17)
+ * two that read an infinity as an Invalid Date (a `timestamp` reads it as 2000-01-01)
  */
 function pgInfinity(column: SQLWrapper, sign: "-" | "+"): SQL {
 	const word = sign === "-" ? sql`'-infinity'` : sql`'infinity'`
@@ -160,11 +160,11 @@ function pgInfinity(column: SQLWrapper, sign: "-" | "+"): SQL {
 
 /**
  * A Date no JS Date holds, which a date-mode Postgres `timestamptz` or `date` holding ±infinity
- * reads as, and so does a SQLite timestamp holding ±Infinity on bun:sqlite and libsql (3.24), or a
+ * reads as, and so does a SQLite timestamp holding ±Infinity on bun:sqlite and libsql, or a
  * finite value past a Date's range: the row's own value, exact as the order compares it, so the
- * list resumes past the row, a finite one included (AB3-9 of area B). Once the row is gone it may
+ * list resumes past the row, a finite one included. Once the row is gone it may
  * have held either infinity, so the list resumes from the direction's own end, repeating rows and
- * skipping none, as a date-mode `timestamp` does (U17).
+ * skipping none, as a date-mode `timestamp` does.
  */
 function unheldBound({ column, direction }: SortKey, at: Anchor): SQL {
 	const sqlite = onSqlite(column, at.table)
@@ -180,7 +180,7 @@ const holdsInfinity = (column: SQLWrapper) =>
 /**
  * A null on a SQLite number key: the row's own value where it is ±Infinity, NULL where it is NULL.
  * Once the row is gone, on a driver that reads ±Infinity as null (D1) the null may have been any
- * of the three, so it is the earliest of them in the order (U24): NULL where NULLs come first,
+ * of the three, so it is the earliest of them in the order: NULL where NULLs come first,
  * else -Infinity ascending and +Infinity descending, which repeats rows and skips none. With
  * `nonFinite: "exact"` the driver reads them back, so a null is a real NULL and stays one. One
  * aggregate over the row tells a gone row from a NULL one.
@@ -210,7 +210,7 @@ function neighbours(value: number): { down: bigint; odd: boolean; up: bigint } {
 /**
  * The integer just outside the rounding interval of the double `value`, toward the rows still to
  * serve: ascending, the least integer that rounds to `value`, less one; descending, the greatest,
- * plus one. Ties round to the even mantissa, so an odd one keeps neither midpoint (Q1 of r18).
+ * plus one. Ties round to the even mantissa, so an odd one keeps neither midpoint.
  */
 function roundingEdge(value: number, direction: "asc" | "desc"): bigint {
 	const exact = BigInt(value)
@@ -225,9 +225,9 @@ function roundingEdge(value: number, direction: "asc" | "desc"): bigint {
 /**
  * A rounded integer key: the row's own exact value; once the row is gone, as on every shard of a
  * merged list but its own, the edge of the rounding interval of the cursor's double toward the rows
- * still to serve, which repeats the rows that round to it and skips none (Q1 of r18). Written as the
+ * still to serve, which repeats the rows that round to it and skips none. Written as the
  * integer it is, digits only, as storedTimeBound writes its milliseconds, so the bound costs the D1
- * budget the id alone (Q15 of r17)
+ * budget the id alone
  */
 const exactBound = ({ column, direction }: SortKey, value: number, at: Anchor): SQL =>
 	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${integerLiteral(roundingEdge(value, direction))})`
@@ -247,7 +247,7 @@ function assertNoReference(values: readonly unknown[]): void {
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
  * `tiebreak`: a reference, a Date on a SQLite timestamp key, a null on a SQLite number key, and an
  * integer a JS number rounds. Only a key the row supplies (readsBack) is read from it: any other is
- * bound as given, as an anchorless list binds it (QL1 of r22b)
+ * bound as given, as an anchorless list binds it
  */
 function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[] {
 	return values.map((value, i) => {

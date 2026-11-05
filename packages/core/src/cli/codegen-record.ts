@@ -12,13 +12,13 @@ import { CliError, type CliIo } from "./output.ts"
  * What each database's last run wrote, in one record beside comb.config.ts (beside the tables file in
  * direct mode), keyed by database name, its paths relative to the record: a run after filePrefix or
  * output.default moved still finds the last run's files, wherever they were. Its name keeps the `.gen.`
- * every formatter config already ignores, so no format pass rewrites what codegen writes (K22 of r17).
+ * every formatter config already ignores, so no format pass rewrites what codegen writes.
  */
 const RECORD = ".comb.codegen.gen.json"
 
 type RunRecord = { databases: Record<string, string[]> }
 
-/** A record's JSON; an error naming it, by its path from `recordDir`, when it is no JSON (F29) */
+/** A record's JSON; an error naming it, by its path from `recordDir`, when it is no JSON */
 function parsed<T>(file: string, recordDir: string): T {
 	try {
 		return JSON.parse(fs.readFileSync(file, "utf8")) as T
@@ -63,11 +63,11 @@ function removeStale(file: string, top: string): void {
 /**
  * Write everything the run staged, once every database's generators have run, record what each
  * wrote, then delete each file a database's last run wrote that no database wrote this time, as
- * long as comb wrote it (F15). A file without comb's header is never touched. A run of some
+ * long as comb wrote it. A file without comb's header is never touched. A run of some
  * generators (-g) only adds to a database's record: it cannot tell the others' files stale. A run
  * of the whole config names every database it `declared`, and a record entry it does not name is
- * a database renamed or removed, whose files are stale too (F14). Two databases that wrote one path
- * would overwrite each other, so that fails before anything is written (F16).
+ * a database renamed or removed, whose files are stale too. Two databases that wrote one path
+ * would overwrite each other, so that fails before anything is written.
  */
 export function commitRuns(
 	staged: Staged,
@@ -94,16 +94,16 @@ export function commitRuns(
 		before.push(...files.map((file) => path.resolve(recordDir, file)))
 		delete record.databases[name]
 	}
-	/* by name, so the databases in any order write the same bytes (F32) */
+	/* by name, so the databases in any order write the same bytes */
 	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => byCodeUnit(a, b)))
-	/* a file another database's entry lists is that database's, whatever this one's last run wrote (F20) */
+	/* a file another database's entry lists is that database's, whatever this one's last run wrote */
 	const others = new Set(
 		Object.entries(record.databases)
 			.filter(([name]) => !runs.some((each) => each.name === name))
 			.flatMap(([, files]) => files.map((file) => path.resolve(recordDir, file))),
 	)
 	/* deleted before anything is written: one that will not go fails the run with the record as it was,
-	 * so the next run deletes it (F28) */
+	 * so the next run deletes it */
 	for (const file of before.filter((each) => !now.has(each) && !others.has(each))) removeStale(file, recordDir)
 	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
 	commitStaged(staged)
@@ -114,7 +114,7 @@ type Claim = { cwd: string; generator: string; last: Staged; run: string; staged
 
 /**
  * Record the generated files `generator` staged as its own; one another generator of the database
- * staged is configured onto one path, and the second would replace the first (F21)
+ * staged is configured onto one path, and the second would replace the first
  */
 export function claim(owners: Map<string, string>, { cwd, generator, last, run, staged }: Claim): void {
 	for (const [file, content] of staged) {
@@ -132,7 +132,7 @@ export function claim(owners: Map<string, string>, { cwd, generator, last, run, 
 /**
  * A path two databases write: neither may own it, as the second would replace the first's files.
  * That is two databases of this run, or one of this run and one whose record entry lists the path,
- * which a run that names only some databases would otherwise overwrite (F21)
+ * which a run that names only some databases would otherwise overwrite
  */
 function refuseShared(runs: readonly Run[], { record, recordDir }: { record: RunRecord; recordDir: string }): void {
 	const owner = new Map<string, string>()
@@ -158,9 +158,9 @@ type Stream = "context" | "err" | "out"
 
 /**
  * An io that holds its out and err lines in the order said, so each database's warnings follow its
- * header (KC10n); `context` holds a line said on out either way, as a database's header is (AD3 of
- * the area D review); `commit` writes, then says every held line, and `failed` says that a run that
- * failed before its write wrote nothing, then fails with its error (KC10 of r22b)
+ * header; `context` holds a line said on out either way, as a database's header is;
+ * `commit` writes, then says every held line, and `failed` says that a run that
+ * failed before its write wrote nothing, then fails with its error
  */
 type Held = {
 	commit: (write: () => void) => void

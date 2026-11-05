@@ -40,7 +40,7 @@ export { searchText } from "./search-text.ts"
 /* LIKE search */
 export { likeSearch, type LikeSearchResolver } from "./search.ts"
 
-/* a _search column refolded with searchText, row by row (C15) */
+/* a _search column refolded with searchText, row by row */
 export { type Refold, refoldStatements } from "./refold.ts"
 
 export { SQL_SORT_DIR } from "./sql.ts"

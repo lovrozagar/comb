@@ -1,6 +1,6 @@
 /**
- * The locks a Postgres file's open transaction holds to its COMMIT that make another session wait
- * (0005 of r22b, the class of PA8): Atlas runs a file in one transaction, so a lock any statement
+ * The locks a Postgres file's open transaction holds to its COMMIT that make another session wait:
+ * Atlas runs a file in one transaction, so a lock any statement
  * takes lasts through every statement after it, a VALIDATE's scan of every row among them. Each
  * statement's lock is Postgres 17's, measured by tests/integration/postgres/lock-oracle-held.test.ts:
  * ACCESS EXCLUSIVE blocks reads and writes; SHARE, SHARE ROW EXCLUSIVE and EXCLUSIVE block writes;

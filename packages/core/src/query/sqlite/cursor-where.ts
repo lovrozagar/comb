@@ -19,10 +19,10 @@ import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
 type CursorWhere = {
 	cursor: string
-	/** the list's, which binds each value (QL4 of r22b) */
+	/** the list's, which binds each value */
 	dialect: ListDialect
 	keys: readonly SortKey[]
-	/** a merged list's, which mints no reference: one that carries one is no cursor of it (R1 of plan 16's review) */
+	/** a merged list's, which mints no reference: one that carries one is no cursor of it */
 	merged?: boolean | undefined
 	options: CursorOptions
 	sort: readonly SortField[]
@@ -49,8 +49,8 @@ function cursorWhere({ cursor: given, dialect, keys, merged, options, sort, tabl
 	}
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
-	/* a key no anchor row supplies binds as read: a list with no table, a joined table's key (QL1 of r22b), and
-	   every key of a merged list, whose row is on one shard alone and which carries a seconds key's seconds (AB3) */
+	/* a key no anchor row supplies binds as read: a list with no table, a joined table's key, and
+	   every key of a merged list, whose row is on one shard alone and which carries a seconds key's seconds */
 	const asRead = (i: number) =>
 		i < columns.length && (merged === true || table === undefined || !readsBack(columns[i] as SQLWrapper, table))
 	const carriedAt = (i: number) => cursor.carried[i] === true

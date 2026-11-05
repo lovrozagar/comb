@@ -32,7 +32,7 @@ type Finish = {
 	cursor: CursorOptions
 	/** the database the list reads: a Postgres key is typed by its operand, a SQLite key by its storage class */
 	dialect: ListDialect
-	/** a list every shard reads, merged by paginateMerged (K5 of r17) */
+	/** a list every shard reads, merged by paginateMerged */
 	merged?: { maxRowsPerShard?: number | undefined } | undefined
 	/** the table a cursor's references are read from; none on a derived list */
 	table?: SQLiteTable | undefined
@@ -63,7 +63,7 @@ function combId(tiebreak: SQLWrapper): SQL.Aliased<unknown> {
 	return (is(tiebreak, Column) ? value.mapWith(tiebreak) : value).as(COMB_ID)
 }
 
-/** Refuses a maxRowsPerShard that is no whole number from 1: the app's configuration, so a TypeError, never a 400 (Q16 of r18) */
+/** Refuses a maxRowsPerShard that is no whole number from 1: the app's configuration, so a TypeError, never a 400 */
 function assertMaxRows(merged: { maxRowsPerShard?: number | undefined }): void {
 	const max = merged.maxRowsPerShard
 	if (max !== undefined && (!Number.isInteger(max) || max < 1))
@@ -87,7 +87,7 @@ function shardWindow(parsed: ListQueryInput, merged: { maxRowsPerShard?: number 
 
 /**
  * Whether the list binds `column`'s key as read, with no row to read its bound from: every key of a
- * merged list or a list with no anchor, and an anchored list's key its anchor row doesn't supply (QL1 of r22b)
+ * merged list or a list with no anchor, and an anchored list's key its anchor row doesn't supply
  */
 const boundAsRead = ({ merged, table }: Finish, column: SQLWrapper): boolean =>
 	merged !== undefined || table === undefined || !readsBack(column, table)
@@ -108,15 +108,15 @@ function factsOf(list: Finish) {
 	const fieldsWhere = (keep: (column: SQLWrapper) => boolean) =>
 		new Set((keyset.keys ?? []).flatMap(({ column }, i) => (keep(column) ? [sort[i]?.field as string] : [])))
 	return {
-		/* the sort fields bound as the driver read them, which a rounded or unheld value can't page (QL1 of r22b) */
+		/* the sort fields bound as the driver read them, which a rounded or unheld value can't page */
 		asRead: fieldsWhere((column) => boundAsRead(list, column)),
-		/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number (Q6) */
+		/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number */
 		cursorable: keyset.keys !== null && tiebreak !== null,
-		/* the check cursorWhere opens the next cursor by, so no cursor minted here is refused there (AB4-1 of area B) */
+		/* the check cursorWhere opens the next cursor by, so no cursor minted here is refused there */
 		holds: holdsOf(list),
-		/* a merged list's anchor row is on one shard only, so it never pages by reference (Q1 of r17) */
+		/* a merged list's anchor row is on one shard only, so it never pages by reference */
 		keyset: merged !== undefined ? "merged" : table === undefined ? "derived" : "table",
-		/* the sort fields a reference reads back on, by the rule the cursor's read holds (27.7) */
+		/* the sort fields a reference reads back on, by the rule the cursor's read holds */
 		byReference: fieldsWhere((column) => refersBack(column, table)),
 		merged: merged !== undefined,
 		query: parsed,
@@ -126,20 +126,20 @@ function factsOf(list: Finish) {
 
 /**
  * The built list over `extras`: every row carries what paginate reads, and a page whose rows do not
- * is refused (Q3). Generic, so the caller's return checks `extras` as the ListExtras it hands out
+ * is refused. Generic, so the caller's return checks `extras` as the ListExtras it hands out
  */
 function withExtras<E extends object>(list: Finish, extras: E, window = list.parsed.limit + 1) {
 	const facts = { ...factsOf(list), expects: Object.keys(extras) as ListExtra[], window }
 	return { extras, pagination: paginationOf(list.cursor, facts) }
 }
 
-/* the id a cursor resumes from is the tiebreak itself, so no row's own id can stand in for it (Q2) */
+/* the id a cursor resumes from is the tiebreak itself, so no row's own id can stand in for it */
 const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} : { _combId: combId(tiebreak.column) })
 
 /**
  * The extra that carries each sort key's stored time, comma-joined, empty for a key the list reads
  * from its anchor row or that is no time; none where no key is one. A merged list carries it too, and
- * compares a seconds key by the seconds each row stored, which its Date rounds (AB3 of area B)
+ * compares a seconds key by the seconds each row stored, which its Date rounds
  */
 function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	const asRead = (column: SQLWrapper) => boundAsRead(list, column)
@@ -150,7 +150,7 @@ function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 /**
  * The extra that carries each stored value a key the list reads back holds apart from its read, a
  * SQLite key's value of a class its mode reads as another, a timestamp's TEXT or a boolean's value but
- * 0 or 1 among them (textKeysSQL; AB4-2 of area B); none where no key is one
+ * 0 or 1 among them (textKeysSQL); none where no key is one
  */
 function textKeysOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	const held = (column: SQLWrapper) => heldApart(column) && !boundAsRead(list, column)
@@ -166,11 +166,11 @@ const keyTypes = (classes: SQL[]): ListExtras => ({
 /**
  * The class of each sort key and of the tiebreak, which paginate and paginateMerged read each key
  * by. A list that binds a key as read (a derived list with no anchor, a merged list, and an anchored
- * list sorted by a key its anchor row doesn't supply, QL1 of r22b) needs it for every key: a SQLite REAL, and a Postgres double precision, past 2^53 is exact where an integer
- * read as a double is rounded (Q1 of r20, Q2 of r21), the merge compares an integer libsql's intMode
- * "string" reads as a decimal string as that integer (Q2 of r20), and D1 reads a REAL ±Infinity as
- * null (Q3 of r20). A list that reads every key back from the anchor row needs it, on SQLite,
- * only for a key that is no declared column (Q2 of r19), and on Postgres, which types the cursor's
+ * list sorted by a key its anchor row doesn't supply) needs it for every key: a SQLite REAL, and a Postgres double precision, past 2^53 is exact where an integer
+ * read as a double is rounded, the merge compares an integer libsql's intMode
+ * "string" reads as a decimal string as that integer, and D1 reads a REAL ±Infinity as
+ * null. A list that reads every key back from the anchor row needs it, on SQLite,
+ * only for a key that is no declared column, and on Postgres, which types the cursor's
  * value by its operand, never. Beside it, each time key's stored value (keyTextsOf).
  */
 function keyTypesOf(list: Finish): ListExtras {
@@ -247,7 +247,7 @@ function finish(given: Finish): Finished {
 	assertCursorWired(given.cursor)
 	assertLimitWithin(given.parsed)
 	if (given.merged !== undefined) assertMaxRows(given.merged)
-	/* paginateMerged compares as SQLite does (r22 Q2); a Postgres server's numeric and collated text orders are its own */
+	/* paginateMerged compares as SQLite does; a Postgres server's numeric and collated text orders are its own */
 	if (given.merged !== undefined && given.dialect === "postgres")
 		throw new TypeError(
 			"a merged list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",

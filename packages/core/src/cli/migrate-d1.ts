@@ -52,7 +52,7 @@ export async function migrateD1(
 		throw new CliError("--file does not apply to a D1 database: wrangler applies its migrations directory")
 	const { config, dir } = d1Config(request, resolved)
 	refuseNoDir(dir)
-	/* the provider's databaseName, the D1 database its connection reaches whatever the environment is called (K4 of r17) */
+	/* the provider's databaseName, the D1 database its connection reaches whatever the environment is called */
 	const name = config.databaseName
 	const exec = io.run ?? runProcess
 	const read = await wranglerReader(wrangler)

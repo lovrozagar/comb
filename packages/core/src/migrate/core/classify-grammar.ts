@@ -32,7 +32,7 @@ type GrammarContext = {
 	naming: Naming
 	/** whether a Postgres parse-tree rule rated the whole statement (pg-tree.ts), which then needs no shape here */
 	treeRated?: boolean | undefined
-	/** on Postgres, the statement's kind as its parse tree's command tag names it (P21 of r19) */
+	/** on Postgres, the statement's kind as its parse tree's command tag names it */
 	kind?: string | undefined
 }
 
@@ -124,7 +124,7 @@ function policyNote(code: string): string | undefined {
 
 /**
  * The first two words of a SQLite statement comb does not recognize, as its reason names it, a TEMP
- * or TEMPORARY left out; a Postgres statement is named by its parse tree's command tag (P21 of r19)
+ * or TEMPORARY left out; a Postgres statement is named by its parse tree's command tag
  */
 function kindOf(code: string): string {
 	return code
@@ -140,7 +140,7 @@ const DENIED =
 
 /**
  * Why comb rates an unrecognized statement unsafe: the rule, for a trigger or a routine, which
- * another reading may describe as well; else that it does not recognize it (S10, P16 of the 0.15.0 review)
+ * another reading may describe as well; else that it does not recognize it
  */
 function unrecognized(code: string, kind = kindOf(code)): string {
 	/* a pragma comb does not write is rated by its own rule too (classify-runtime.ts), never "not recognized" */
@@ -170,7 +170,7 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	/* an EXPLAIN is the statement it explains (ANALYZE runs it) */
 	const code = statement.replace(/^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i, "")
 	const recognized = ctx.dialect === "postgres" ? [...RECOGNIZED, PG_TRANSACTION] : RECOGNIZED
-	/* a statement a parse-tree rule rates whole is recognized by that rule, whatever its kind (P13 of r18) */
+	/* a statement a parse-tree rule rates whole is recognized by that rule, whatever its kind */
 	if (
 		!recognized.some((shape) => shape.test(code)) &&
 		!foreignKeyPragma(code) &&

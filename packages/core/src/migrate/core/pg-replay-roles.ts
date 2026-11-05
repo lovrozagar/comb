@@ -4,16 +4,16 @@
  * database so another replay cannot drop it meanwhile, and one comb creates is tagged with the
  * backend that made it and dropped after. The replay needs only a role's name, for a policy, a
  * grant or an owner, so it makes the role NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS whatever
- * the history says (P3 of r21), keeping only its memberships among roles it made itself: no role
+ * the history says, keeping only its memberships among roles it made itself: no role
  * the history logs in as, a superuser one least of all, exists on devUrl's server while a check
- * runs. A statement on roles the replay made alone runs, as their drop undoes it (P6 of r21, PR5 of
- * r22b, pg-replay-made.ts).
+ * runs. A statement on roles the replay made alone runs, as their drop undoes it
+ * (pg-replay-made.ts).
  *
  * A role a statement the replay cannot leave out adds, such as `DO … IF NOT EXISTS … CREATE ROLE`,
- * is adopted as one comb made when nothing else changed beside it (P5 of r22): made bare, tagged,
+ * is adopted as one comb made when nothing else changed beside it: made bare, tagged,
  * held and dropped after. And a change to a role the replay made or adopts, to its row, its
  * memberships, its settings, its comment or its labels, dies with it, so it is the replay's own,
- * the role made bare again before the COMMIT (PR6 of r22b, pg-replay-commit.ts).
+ * the role made bare again before the COMMIT (pg-replay-commit.ts).
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { codeOf, literal, type Sql, TAG } from "./pg-replay-database.ts"
@@ -40,7 +40,7 @@ type Run = {
 	seen: Snapshot
 	sql: Sql
 	strays: Strays
-	/** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead (PR5 of r22b) */
+	/** the tablespaces it left out the CREATE of, which a statement then runs in pg_default instead */
 	tablespaces: Set<string>
 	superuser: boolean
 }
@@ -125,7 +125,7 @@ function bareRole(
  * other made by `sent` and tagged with its `owner`, and either held by a grant on `database`;
  * whether the role is a replay's, which the replay then drops, so whichever of two replays using
  * one role ends last drops it. It runs in a transaction, as every statement a transaction allows
- * does (P1 of r21), and each try is a savepoint, so a role another replay made or dropped since the
+ * does, and each try is a savepoint, so a role another replay made or dropped since the
  * read is read again
  */
 async function createRole(
@@ -184,7 +184,7 @@ async function ownRole(run: Run, node: Record<string, unknown>): Promise<boolean
 /**
  * `roles` of the replay's, changed in its open transaction, made bare again before it commits: no
  * login, no password, and none of the attributes BARE denies, each said only where the role has it,
- * as a role that is not a superuser may not name one it lacks (PR6 of r22b)
+ * as a role that is not a superuser may not name one it lacks
  */
 async function bareAgain(run: Run, roles: readonly string[]): Promise<void> {
 	if (roles.length === 0) return
@@ -203,7 +203,7 @@ async function bareAgain(run: Run, roles: readonly string[]): Promise<void> {
 }
 
 /**
- * `roles` the open transaction added, adopted as the replay's own before it commits (P5 of r22):
+ * `roles` the open transaction added, adopted as the replay's own before it commits:
  * tagged with its owner, held by a grant on its database, and dropped with the roles it made
  */
 async function adopt(run: Run, roles: readonly string[]): Promise<void> {
@@ -214,7 +214,7 @@ async function adopt(run: Run, roles: readonly string[]): Promise<void> {
 	}
 }
 
-/* the roles of a list the server holds but those a replay made and tagged, which it drops after itself (P7 of r21) */
+/* the roles of a list the server holds but those a replay made and tagged, which it drops after itself */
 const HELD = `SELECT r.rolname FROM pg_roles r LEFT JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE r.rolname = ANY($1::text[]) AND (d.description IS NULL OR d.description NOT LIKE 'comb\\_replay %')`
 
 /** Which of `roles` the server holds, a replay's own left out: another replay's role is gone once it ends */

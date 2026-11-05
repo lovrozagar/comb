@@ -8,7 +8,7 @@ type Files = {
 /**
  * A migration run stopped: the reason, the files still pending, the files that applied before it
  * stopped, none when it was refused before anything ran, and the files that may have committed,
- * whose answer was lost, for `comb migrate status` to read (S3 of r20)
+ * whose answer was lost, for `comb migrate status` to read
  */
 export class Refused extends Error {
 	readonly applied: string[]

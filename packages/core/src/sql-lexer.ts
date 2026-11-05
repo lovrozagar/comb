@@ -152,7 +152,7 @@ function joined(stmt: string, dialect: Dialect, strings: boolean): string {
 
 /**
  * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
- * space, whitespace collapsed; a SQLite pragma keeps a quoted value, its operand (S2 of r20)
+ * space, whitespace collapsed; a SQLite pragma keeps a quoted value, its operand
  */
 function codeOf(stmt: string, dialect: Dialect): string {
 	const code = joined(stmt, dialect, false)

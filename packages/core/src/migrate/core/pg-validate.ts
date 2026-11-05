@@ -1,10 +1,10 @@
 /**
- * A VALIDATE CONSTRAINT in a transaction that holds a lock another session waits on (PA8 of r22b, and
+ * A VALIDATE CONSTRAINT in a transaction that holds a lock another session waits on (and
  * 0005, its class). A VALIDATE alone holds only SHARE UPDATE EXCLUSIVE, but every lock an earlier
  * statement of the file took lasts to its COMMIT (pg-held.ts): a NOT VALID ADD's, an ADD COLUMN's, an
  * index build's among them. A VALIDATE before that COMMIT scans every row under those locks, which is
  * what the NOT VALID recipe exists to avoid. Probed on Postgres 17
- * (.tmp/grunt/r22b/lock/notvalid-same-file.ts, tests/integration/postgres/lock-oracle-held.test.ts).
+ * (tests/integration/postgres/lock-oracle-held.test.ts).
  */
 import type { Finding } from "./classify-alter.ts"
 import { alterLocks, type Held, hold } from "./pg-held.ts"

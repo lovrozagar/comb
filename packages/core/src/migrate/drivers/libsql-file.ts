@@ -1,8 +1,8 @@
 /**
- * The connection one migration file applies on in a local libsql file (SL1 of r22): libsql's own
+ * The connection one migration file applies on in a local libsql file: libsql's own
  * synchronous Database, the engine @libsql/client runs a file through, driven by `exec` alone.
  * @libsql/client's close leaves the file open while a statement it prepared lives, so a run of files
- * on a connection each ran out of descriptors (c3bb8ee, .tmp/grunt/p21/areas/sqlite/5.6-probe-db.log);
+ * on a connection each ran out of descriptors (c3bb8ee);
  * `exec` keeps no statement past its call, and `close` lets go of the file.
  */
 import { createRequire } from "node:module"
@@ -42,10 +42,10 @@ function numberLiteral(value: number): string {
 
 /**
  * `value` as a SQL literal: the history row's hash, time and name, which `exec` takes with no
- * parameters, and the proof's seed, a blob among it, which libsql's Database panics binding
- * (.tmp/grunt/p21/areas/sqlite/sl3/bind-probe.log). A number keeps the class bun:sqlite's binding stores it
- * as, which BLOB and STRICT ANY affinity keep (SL3n of r22): a safe integer INTEGER, any other number REAL,
- * -0 and an integral one past 2^53 among them (.tmp/grunt/p21/areas/sqlite/sl3n/big-probe.log)
+ * parameters, and the proof's seed, a blob among it, which libsql's Database panics binding.
+ * A number keeps the class bun:sqlite's binding stores it
+ * as, which BLOB and STRICT ANY affinity keep: a safe integer INTEGER, any other number REAL,
+ * -0 and an integral one past 2^53 among them
  */
 function literal(value: unknown): string {
 	if (value === null) return "NULL"
@@ -91,7 +91,7 @@ async function openLibsqlFile(file: string): Promise<FileConnection> {
 	return {
 		batch: async (statements) => {
 			try {
-				/* the write lock taken as the batch begins, so a lock another process holds is waited for (SL4 of r22) */
+				/* the write lock taken as the batch begins, so a lock another process holds is waited for */
 				db.exec("BEGIN IMMEDIATE")
 				for (const { params, sql } of statements) db.exec(bound(sql, params))
 				db.exec("COMMIT")
