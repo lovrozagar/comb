@@ -27,7 +27,7 @@ const OCTAL =
 	"which Rust's regex refuses as an octal escape, so a validator there refuses the whole document: write \\x00, which ECMAScript, Go's RE2 and Rust's regex read as NUL"
 
 /* a group's opening that looks around, which a named group's (?<name> is not */
-export const LOOKAROUND = /^\(\?<?[!=]/
+export const LOOKAROUND: RegExp = /^\(\?<?[!=]/
 
 /* the escapes past a letter or \0 every engine reads as ECMAScript does: syntax characters, - in a class, and \t \n \r \f \v */
 const SAME_ESCAPES = "^$\\.*+?()[]{}|/tnrfv"
