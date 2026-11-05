@@ -53,6 +53,8 @@ type TreeContext = {
 	fresh: Fresh
 	/** the locks the open transaction holds to its COMMIT, and what it made (PA8 and 0005 of r22b) */
 	held: Held
+	/** the query each PREPARE so far holds, by the name Postgres keys it under, which an EXECUTE runs (PA15 of r22b) */
+	preparing: Map<string, Node>
 }
 
 // lookup-table: the settings whose change decides what a later statement runs, and why
@@ -251,7 +253,13 @@ function pgTreeFindings(
 	}
 	/* a PREPARE is rated as itself, never as the statement it holds (P21 of r19) */
 	const raws = tree.stmts as Array<{ stmt: Node }>
-	const nodes = nodesOf(raws.map((raw) => ("PrepareStmt" in raw.stmt ? { stmt: { PrepareStmt: {} } } : raw)))
+	/* an EXECUTE is rated by the query it runs too, read where the EXECUTE runs it (PA15 of r22b) */
+	const runs = raws.flatMap((raw) => {
+		if ("PrepareStmt" in raw.stmt) return [{ stmt: { PrepareStmt: {} } }]
+		const query = ctx.preparing.get(String((raw.stmt["ExecuteStmt"] as Node | undefined)?.["name"]))
+		return query === undefined ? [raw] : [raw, { stmt: query }]
+	})
+	const nodes = nodesOf(runs)
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
 		return [
@@ -262,7 +270,10 @@ function pgTreeFindings(
 	})
 	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
 	/* the locks the statement takes last to its transaction's COMMIT, read before the history follows it */
-	for (const [type, node] of tops) holdStatement(type, node, ctx)
+	for (const [type, node] of tops) {
+		holdStatement(type, node, ctx)
+		if (type === "PrepareStmt") ctx.preparing.set(String(node["name"]), node["query"] as Node)
+	}
 	/* what the statement made new, attached and reparented counts for the statements after it */
 	for (const [type, node] of nodes) {
 		followFresh(type, node, ctx)

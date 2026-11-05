@@ -58,7 +58,8 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "CLUSTER post USING i", "safe"],
 	["postgres", "COMMENT ON TABLE post IS 'x'", "safe"],
 	["postgres", NO_TX + "COMMIT", "cautious"],
-	["postgres", "COPY post FROM STDIN", "unsafe"],
+	/* rows from a server file; one with the client's stream Atlas cannot run, so the check refuses it (pg-copy.ts, PA15 of r22b) */
+	["postgres", "COPY post FROM '/dev/null'", "cautious"],
 	["postgres", "CREATE ACCESS METHOD m TYPE TABLE HANDLER h", "unsafe"],
 	["postgres", "CREATE AGGREGATE a(int) (SFUNC = f, STYPE = int)", "unsafe"],
 	["postgres", "CREATE CAST (int AS text) WITH FUNCTION f(int)", "unsafe"],

@@ -47,7 +47,7 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 	it.each([
 		["PREPARE s AS DELETE FROM t; EXECUTE s;", "unsafe", "an EXECUTE of a statement the file prepares"],
 		["PREPARE s (int) AS UPDATE t SET x = 1 WHERE id = $1; EXECUTE s(1);", "unsafe", "a filtered prepared write"],
-		["EXECUTE stmt;", "unsafe", "an EXECUTE, no shape comb recognizes"],
+		["EXECUTE stmt;", "unsafe", "an EXECUTE of a statement comb cannot read (PA15 of r22b)"],
 		["PREPARE s AS SELECT 1;", "cautious", "a PREPARE, which runs nothing until an EXECUTE (P21 of r19)"],
 		["SELECT setval('s', 1);", "cautious", "setval"],
 		["SELECT pg_catalog.setval('s', 1, false);", "cautious", "a qualified setval"],
@@ -60,8 +60,8 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 		["CREATE RULE r AS ON INSERT TO t DO INSTEAD NOTHING;", "unsafe", "a rule that discards every insert (M9)"],
 		["ALTER TABLE t OWNER TO nobody;", "cautious", "a new owner, who bypasses row level security"],
 		["REASSIGN OWNED BY a TO b;", "unsafe", "reassigned ownership, no shape comb recognizes"],
-		["COPY t FROM PROGRAM 'x';", "unsafe", "a COPY, no shape comb recognizes"],
-		["COPY t TO STDOUT;", "unsafe", "a COPY, no shape comb recognizes"],
+		["COPY t FROM PROGRAM 'x';", "unsafe", "a COPY that runs a server program (PA15 of r22b)"],
+		["COPY t TO '/tmp/x';", "unsafe", "a COPY that writes a server file (PA15 of r22b)"],
 		[
 			"CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;\nCREATE TRIGGER t AFTER INSERT ON post FOR EACH ROW EXECUTE FUNCTION f();",
 			"unsafe",

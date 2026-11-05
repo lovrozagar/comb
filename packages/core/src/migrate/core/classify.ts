@@ -26,6 +26,7 @@ import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts } from "./pg-history.ts"
+import type { Node } from "./pg-nodes.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { partitionedRecipe } from "./pg-partitioned.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
@@ -69,6 +70,8 @@ type FileContext = RebuildContext & {
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
 	prepared: Map<string, string>
+	/** on Postgres, the query each PREPARE so far holds, by the name Postgres keys it under (pg-tree.ts) */
+	preparing: Map<string, Node>
 }
 
 const UNSAFE_DROP =
@@ -213,7 +216,6 @@ function readFile(
 	const guards = dialect === "sqlite" ? readGuards(statements, codes, before) : noGuards()
 	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes, guards.guarded) : new Map()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
-	const prepared = preparedOf(codes)
 	const ftsTriggers = ftsTriggersOf(statements, before, naming)
 	const ctx: FileContext = {
 		after: dialect === "sqlite" ? extractSchema(sql, before) : undefined,
@@ -222,11 +224,12 @@ function readFile(
 		dialect,
 		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
 		held: heldStart(),
+		preparing: new Map(),
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),
 		txmodeNone: dialect === "sqlite" && outsideTransaction(sql),
-		prepared,
+		prepared: preparedOf(codes),
 		drops: new Map(),
 		fired: guards.fired,
 		rebuilds,

@@ -1,7 +1,7 @@
 /**
  * The destructive-change gate on statements whose effect is what they run at apply time or after: a
  * prepared statement executed later in the file, a rule (an INSTEAD NOTHING one discards writes) and its action, a SQLite trigger's body (run by
- * every later write to its table), a sequence reset through setval, rows loaded by COPY,
+ * every later write to its table), a sequence reset through setval (a COPY is pg-copy.ts's),
  * ownership handed to a role that bypasses row level security, and SQLite's foreign_keys pragma (writable_schema,
  * which can corrupt the schema, is unsafe; every other pragma comb does not write is unsafe by default-deny's rule alone).
  */
@@ -105,12 +105,12 @@ function runtimeFindings(
 	const body = executed === undefined ? undefined : prepared.get(lastPart(executed))
 	if (body !== undefined) findings.push(...read(body))
 	else if (executed !== undefined || /^EXECUTE\b/i.test(code))
-		findings.push({ level: "cautious", note: "runs a prepared statement comb cannot read" })
+		/* PA15 of r22b: an earlier file's PREPARE, on Atlas's one session, may hold any write */
+		findings.push({ level: "unsafe", note: "runs a prepared statement comb cannot read; approve it in the file" })
 	const rule = ruleFinding(code)
 	if (rule !== undefined) findings.push(rule)
 	findings.push(...triggerFindings(code))
 	if (SETVAL.test(code)) findings.push({ level: "cautious", note: "sets a sequence, as a RESTART does" })
-	if (/^COPY\b.*\bFROM\b/i.test(code)) findings.push({ level: "cautious", note: "loads rows into a table" })
 	if (/^CREATE POLICY\b.*\bAS RESTRICTIVE\b/i.test(code))
 		findings.push({
 			level: "cautious",

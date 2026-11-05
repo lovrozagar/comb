@@ -17,7 +17,7 @@ describe("runtimeFindings", () => {
 		const prepared = new Map([["s", "DELETE FROM t"]])
 		expect(runtimeFindings("EXECUTE s", prepared, () => [{ level: "unsafe" }])).toEqual([{ level: "unsafe" }])
 		expect(runtimeFindings("EXECUTE other", prepared, none)).toEqual([
-			{ level: "cautious", note: "runs a prepared statement comb cannot read" },
+			{ level: "unsafe", note: "runs a prepared statement comb cannot read; approve it in the file" },
 		])
 	})
 
