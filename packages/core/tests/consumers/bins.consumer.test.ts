@@ -19,7 +19,8 @@ afterAll(() => rmSync(dirname(tarball), { force: true, recursive: true }))
  * K1 of r22: 0.20.1 checked the wrangler comb's own import resolved and spawned the one on PATH, so
  * in a workspace the check spoke for another package than the one that ran. Bun workspaces, comb
  * hoisted to the root, each bin peer at one version in the root and another in the workspace `db`.
- * Every peer is a fake whose bin logs its version, the runtime it runs on and its argv, and exits 1;
+ * Every peer is a fake whose bin logs its version, the runtime it runs on and its argv as JSON (one line a
+ * call, though a --command holds several statements a line each), and exits 1;
  * wrangler's module logs the config read, and the platform proxy the D1 proof starts, which fails,
  * with the runtime that starts it (bun says process.release.name is node)
  */
@@ -32,7 +33,7 @@ describe("comb runs the bin it checked (K1; sibling: drizzle-kit's resolution)",
 		const log = `require("node:fs").appendFileSync(process.cwd() + "/ran.log", ${JSON.stringify(`${peer} ${version} `)} + `
 		return {
 			"bin/run-fake.js": `#!/usr/bin/env node
-${log}require("node:path").basename(process.execPath) + " " + process.argv.slice(2).join(" ") + "\\n")
+${log}require("node:path").basename(process.execPath) + " " + JSON.stringify(process.argv.slice(2)) + "\\n")
 process.stderr.write(${JSON.stringify(`fake ${peer} ${version}\n`)})
 process.exit(1)
 `,
