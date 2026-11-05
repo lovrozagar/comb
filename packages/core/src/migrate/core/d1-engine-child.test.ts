@@ -193,6 +193,22 @@ describe("prove over a schema with foreign keys, which D1 always enforces", () =
 	)
 })
 
+/* AC2-3 of area C round 2: reading the scratch D1's shadow tables through pragma_table_list opens every table,
+   which runs workerd's SQLite out of memory near 3 000 tables */
+describe("prove over a database of 3 000 tables", () => {
+	it("answers a pending ALTER TABLE", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))
+		dirs.push(dir)
+		const files = [{ name: "1_add.sql", sql: "ALTER TABLE t0 ADD COLUMN c TEXT;" }]
+		const input = await proofInput([], files, { bin: wranglerBin(), dir, table: "d1_migrations" })
+		const tables = Array.from(
+			{ length: 3000 },
+			(_, i) => `CREATE TABLE t${i} (id INTEGER PRIMARY KEY, a TEXT, b INTEGER)`,
+		)
+		expect(await prove({ ...input, seed: [...tables, ...input.seed] })).toEqual({})
+	}, 120_000)
+})
+
 describe("main: the proof of the input JSON d1-engine.ts writes", () => {
 	it("reads the input from its file and answers as prove does", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))

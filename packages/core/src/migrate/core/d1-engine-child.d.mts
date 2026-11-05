@@ -6,6 +6,8 @@ export type ProofInput = {
 	files: Array<{ name: string; query: string }>
 	/** The copy of the live schema with its seed rows, and the history table, in one batch */
 	seed: string[]
+	/** The shadow tables each virtual table module makes, by module: the suffix after its table's name */
+	shadows: Readonly<Record<string, readonly string[]>>
 	/** The checked wrangler's entry module */
 	wrangler: string
 }

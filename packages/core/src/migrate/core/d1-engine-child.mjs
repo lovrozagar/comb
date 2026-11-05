@@ -25,7 +25,14 @@ import { pathToFileURL } from "node:url"
  * @typedef {{ sql: string; table: string; type: string }} SchemaObject
  * @typedef {import("./d1-engine-child.d.mts").ProofInput} ProofInput
  * @typedef {import("./d1-engine-child.d.mts").ProofResult} ProofResult
+ * @typedef {{ db: D1Database; shadows: ProofInput["shadows"] }} Scratch
  */
+
+/**
+ * `name` as SQLite compares names, ASCII case folded
+ * @param {string} name
+ */
+const fold = (name) => name.replaceAll(/[A-Z]/g, (letter) => letter.toLowerCase())
 
 /** @param {string} name */
 const quote = (name) => `"${name.replaceAll('"', '""')}"`
@@ -51,21 +58,26 @@ async function run(db, statements) {
 
 /**
  * The scratch D1's schema, each object by type and name: a virtual table's shadow tables left out,
- * which its module alone writes (D1: "may not be modified"), as SQLite itself marks them
+ * which its module alone writes (D1: "may not be modified"), named by the `shadows` its module makes.
+ * Not pragma_table_list, which opens every table and runs D1 out of memory on a large schema
  * @param {D1Database} db
+ * @param {ProofInput["shadows"]} shadows
  * @returns {Promise<Map<string, SchemaObject>>}
  */
-async function master(db) {
-	const { results: shadows = [] } = await db
-		.prepare("SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'shadow'")
-		.all()
-	const shadow = new Set(shadows.map((row) => String(row["name"])))
+async function master(db, shadows) {
 	const { results = [] } = await db
 		.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL")
 		.all()
+	const shadow = new Set(
+		results.flatMap((row) => {
+			const module = /^CREATE\s+VIRTUAL\s+TABLE\b[^]*?\bUSING\s+(\w+)/i.exec(String(row["sql"]))?.[1]
+			const suffixes = module === undefined ? [] : (shadows[module.toLowerCase()] ?? [])
+			return suffixes.map((suffix) => fold(`${String(row["name"])}_${suffix}`))
+		}),
+	)
 	return new Map(
 		results
-			.filter((row) => !(row["type"] === "table" && shadow.has(String(row["name"]))))
+			.filter((row) => !(row["type"] === "table" && shadow.has(fold(String(row["name"])))))
 			.map((row) => [
 				`${String(row["type"])} ${String(row["name"])}`,
 				{ sql: String(row["sql"]), table: String(row["tbl_name"]), type: String(row["type"]) },
@@ -77,11 +89,12 @@ async function master(db) {
  * The EXPLAINs that compile what a file made or changed: each view's read, and each table's writes,
  * triggers and generated columns with them
  * @param {D1Database} db
+ * @param {ProofInput["shadows"]} shadows
  * @param {ReadonlyMap<string, SchemaObject>} before
  * @returns {Promise<string[]>}
  */
-async function probes(db, before) {
-	const changed = [...(await master(db))].filter(([key, object]) => before.get(key)?.sql !== object.sql)
+async function probes(db, shadows, before) {
+	const changed = [...(await master(db, shadows))].filter(([key, object]) => before.get(key)?.sql !== object.sql)
 	const views = changed.filter(([, object]) => object.type === "view").map(([, object]) => object.table)
 	const tables = new Set(
 		changed
@@ -105,19 +118,19 @@ async function probes(db, before) {
 /**
  * Runs `file` on the scratch D1 as wrangler sends it, then its probes; what D1 refuses, naming D1's
  * error, or undefined
- * @param {D1Database} db
+ * @param {Scratch} scratch
  * @param {Wrangler} wrangler
  * @param {{ name: string; query: string }} file
  * @returns {Promise<string | undefined>}
  */
-async function proveFile(db, wrangler, file) {
-	const before = await master(db)
+async function proveFile({ db, shadows }, wrangler, file) {
+	const before = await master(db, shadows)
 	try {
 		await run(db, wrangler.unstable_splitSqlQuery(file.query))
 	} catch (error) {
 		return `${file.name}: D1 refuses this file on its own engine, as wrangler's apply would: ${d1Error(error)}; leave out what D1 does not run`
 	}
-	for (const probe of await probes(db, before)) {
+	for (const probe of await probes(db, shadows, before)) {
 		try {
 			await run(db, [probe])
 		} catch (error) {
@@ -133,14 +146,14 @@ async function proveFile(db, wrangler, file) {
  * @param {ProofInput} input
  * @returns {Promise<ProofResult>}
  */
-export async function prove({ configPath, files, seed, wrangler: entry }) {
+export async function prove({ configPath, files, seed, shadows, wrangler: entry }) {
 	const wrangler = /** @type {Wrangler} */ (await import(pathToFileURL(entry).href))
 	const proxy = await wrangler.getPlatformProxy({ configPath, persist: false })
 	try {
 		const db = /** @type {D1Database} */ (proxy.env["DB"])
 		await run(db, seed)
 		for (const file of files) {
-			const refused = await proveFile(db, wrangler, file)
+			const refused = await proveFile({ db, shadows }, wrangler, file)
 			if (refused !== undefined) return { refused }
 		}
 		return {}
