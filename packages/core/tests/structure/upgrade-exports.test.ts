@@ -171,6 +171,40 @@ function becamePromises(exports: Exports): string[] {
 	return [...new Set(names)].sort()
 }
 
+/** Whether `type`, past `readonly`, `| undefined` and parentheses, is `Run` */
+const isRun = (type: ts.TypeNode | undefined): boolean => bare(type)?.getText() === "Run"
+
+/**
+ * Each place a snapshot's declarations take a `Run`, which returns a promise since 0.21: a function's
+ * parameter, as `fn(param)`, and a member of an interface, class or object type, as `Type.member`
+ */
+function runSitesOf(text: string): string[] {
+	const sites: string[] = []
+	const visit = (node: ts.Node): void => {
+		if (ts.isFunctionDeclaration(node) && node.name !== undefined)
+			for (const parameter of node.parameters)
+				if (isRun(parameter.type)) sites.push(`${node.name.text}(${parameter.name.getText()})`)
+		const [type, members] = membersOf(node) ?? ["", []]
+		for (const member of members)
+			if ((ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) && isRun(member.type))
+				sites.push(`${type}.${member.name.getText()}`)
+		ts.forEachChild(node, visit)
+	}
+	visit(ts.createSourceFile("snapshot.d.ts", text, ts.ScriptTarget.Latest, true))
+	return sites
+}
+
+/** Each public place that takes a `Run`, whose function or type an export of its snapshot's subpath names, sorted, once */
+function publicRunSites(exports: Exports): string[] {
+	const sites = readdirSync(API).flatMap((file) => {
+		const exported = exports[subpathOf(file)] ?? {}
+		return runSitesOf(readFileSync(join(API, file), "utf8")).filter(
+			(site) => exported[site.split(/[.(]/)[0] as string] !== undefined,
+		)
+	})
+	return [...new Set(sites)].sort()
+}
+
 /** The section's one paragraph opening "`a`, `b` … return a promise:", and that clause, up to its colon */
 function promiseParagraph(section: string): { clause: string; paragraph: string } {
 	const lines = [...section.matchAll(/^ *(`[^:\n]*? returns? a promise[^:\n]*):.*$/gm)]
@@ -231,15 +265,21 @@ describe("the members a type a released callable took gained as required (AD7-3)
 	})
 })
 
+/** Whether `version` is the release the snapshot is checked in from: right after a release the newest section is the release's own, and the snapshot is regenerated from its tag */
+function isReleased(version: string): boolean {
+	const [major, minor] = version.split(".").map(Number)
+	const [wasMajor, wasMinor] = RELEASED.version.split(".").map(Number)
+	return major === wasMajor && minor === wasMinor
+}
+
 describe("the newest upgrade section's exports", () => {
 	const api = apiOf(ROOT)
 	const now = api.exports
 	const { section, version } = newestUpgrade()
 
-	/* right after a release the newest section is the release's own, and the snapshot is regenerated from its tag */
 	const [major, minor] = version.split(".").map(Number)
 	const [wasMajor, wasMinor] = RELEASED.version.split(".").map(Number)
-	const released = major === wasMajor && minor === wasMinor
+	const released = isReleased(version)
 	const since = {
 		changed: differing(RELEASED.exports, now),
 		new: missingFrom(RELEASED.exports, now),
@@ -286,5 +326,19 @@ describe("the newest upgrade section's exports", () => {
 		expect(released ? [] : became).toContain("CliIo.run")
 		const paragraph = released ? "" : promiseParagraph(section).paragraph
 		expect(became.filter((name) => !paragraph.includes(`\`${name}\``))).toEqual([])
+	})
+})
+
+describe("the newest upgrade section's async paragraph", () => {
+	const now = apiOf(ROOT).exports
+	const { section, version } = newestUpgrade()
+	const released = isReleased(version)
+
+	/* G1-5 of the G1 read: the async paragraph named three of the six places a runner is passed */
+	it("names in that paragraph each public place that takes a `Run`, which returns a promise now", () => {
+		const sites = publicRunSites(now)
+		expect(sites).toContain("CliIo.run")
+		const paragraph = released ? "" : promiseParagraph(section).paragraph
+		expect(released ? [] : sites.filter((site) => !paragraph.includes(`\`${site}\``))).toEqual([])
 	})
 })
