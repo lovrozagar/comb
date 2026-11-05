@@ -52,13 +52,41 @@ const ROWS = [
 	`('g', ${LONG_TEXT}, ${LONG_TEXT})`,
 ] as const
 
+/** The statements that seed one database with every one of `rows`, or one shard of two with its half */
+const seedOf =
+	(rows: readonly string[]) =>
+	(shard?: 0 | 1): string[] => [
+		"CREATE TABLE post (id TEXT PRIMARY KEY, s INTEGER, m INTEGER)",
+		"CREATE TABLE metric (post_id TEXT, s INTEGER, m INTEGER)",
+		`INSERT INTO post VALUES ${(shard === undefined ? rows : rows.filter((_, i) => i % 2 === shard)).join(", ")}`,
+		"INSERT INTO metric SELECT id, s, m FROM post",
+	]
+
 /** The statements that seed one database with every row, or one shard of two with its half */
-export const TEXT_SEED = (shard?: 0 | 1): string[] => [
-	"CREATE TABLE post (id TEXT PRIMARY KEY, s INTEGER, m INTEGER)",
-	"CREATE TABLE metric (post_id TEXT, s INTEGER, m INTEGER)",
-	`INSERT INTO post VALUES ${(shard === undefined ? ROWS : ROWS.filter((_, i) => i % 2 === shard)).join(", ")}`,
-	"INSERT INTO metric SELECT id, s, m FROM post",
-]
+export const TEXT_SEED = seedOf(ROWS)
+
+/*
+ * B2-6 of area B: milliseconds holding a fraction below one, as a raw writer stores a REAL, which the
+ * Date drizzle reads truncates toward zero: -1.5 < -1.25 < 1000.25 < 1000.5 < 1000.75 < 1001, the
+ * seconds the same; no TEXT, so every list pages them
+ */
+const FRACTION_ROWS = [
+	"('c', 1000.5, 1000.5)",
+	"('f', -1.25, -1.25)",
+	"('a', 1001, 1001)",
+	"('e', 1000.25, 1000.25)",
+	"('b', -1.5, -1.5)",
+	"('d', 1000.75, 1000.75)",
+] as const
+
+/** The statements that seed a database, or one shard of two, with the fraction rows */
+export const FRACTION_SEED = seedOf(FRACTION_ROWS)
+
+/** Every id by either key over the fraction rows */
+export const FRACTION_SERVED = {
+	asc: ["b", "f", "e", "c", "d", "a"],
+	desc: ["a", "d", "c", "e", "f", "b"],
+} as const
 
 /** Every id in SQLite's order of either key */
 export const TEXT_SERVED = {

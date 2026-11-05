@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { drizzle } from "drizzle-orm/d1"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import {
+	FRACTION_SEED,
+	FRACTION_SERVED,
 	firstPage,
 	startsOrder,
 	TEXT_RELATIONS,
@@ -30,9 +32,9 @@ async function holding(statements: readonly string[]) {
 	return drizzle(shard.CORE, { relations: TEXT_RELATIONS })
 }
 
-/** One database, or two shards for the merged list */
-const dbsFor = async (shape: TextShape) =>
-	shape === "merged" ? [await holding(TEXT_SEED(0)), await holding(TEXT_SEED(1))] : [await holding(TEXT_SEED())]
+/** One database, or two shards for the merged list, seeded by `seed` */
+const dbsFor = async (shape: TextShape, seed = TEXT_SEED) =>
+	shape === "merged" ? [await holding(seed(0)), await holding(seed(1))] : [await holding(seed())]
 
 const WALKS = (["s", "m"] as const).flatMap((key) =>
 	[false, true].flatMap((deleting) => (["asc", "desc"] as const).map((direction) => ({ deleting, direction, key }))),
@@ -74,6 +76,19 @@ describe("TEXT in a SQLite timestamp column pages or is refused by name (B2-3 of
 					status: 500,
 				})
 				expect(startsOrder(ids, TEXT_SERVED[walk.direction]), `${JSON.stringify(walk)} ${ids}`).toBe(true)
+			}
+		},
+	)
+})
+
+/* B2-6 of area B: a Date keeps a stored millisecond's integer part only, so a list bound by it repeated or skipped */
+describe("a SQLite timestamp holding a fraction of its unit pages exactly on every list (B2-6 of area B; sibling: AB3's seconds)", () => {
+	it.each(["table", "anchored own", "anchored joined", "anchorless", "listOptions", "merged"] as const)(
+		"pages the %s list by milliseconds and seconds below the unit, every row once",
+		async (shape) => {
+			for (const walk of WALKS) {
+				const served = await servedText(await dbsFor(shape, FRACTION_SEED), { ...walk, shape })
+				expect(served, JSON.stringify(walk)).toEqual({ ids: FRACTION_SERVED[walk.direction] })
 			}
 		},
 	)
