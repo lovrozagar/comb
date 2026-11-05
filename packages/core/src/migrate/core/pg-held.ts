@@ -4,7 +4,8 @@
  * takes lasts through every statement after it, a VALIDATE's scan of every row among them. Each
  * statement's lock is Postgres 17's, measured by tests/integration/postgres/lock-oracle-held.test.ts:
  * ACCESS EXCLUSIVE blocks reads and writes; SHARE, SHARE ROW EXCLUSIVE and EXCLUSIVE block writes;
- * weaker blocks neither. A relation the file made, or a temporary one, no other session sees.
+ * weaker blocks neither. A relation the file made, or a temporary one, no other session sees. A
+ * sequence is the relation Postgres locks for another session's nextval, so it counts by its own name.
  */
 import {
 	changeLocks,
@@ -22,27 +23,34 @@ import {
 	SHARE_ALL,
 	truncateLocks,
 } from "./pg-lock.ts"
+import type { Calls, Locked } from "./pg-held-types.ts"
 import { type Facts, flag, keyOf, names, type Node, num, type Reads, tableOf, typed, typeOf } from "./pg-nodes.ts"
 
-/* the relations a move to another schema, and a rename, carry with them */
-const RELATIONS = /^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE)$/
+/* the relations a move to another schema, a rename, a DROP and an ALTER TABLE's lock take by their own name */
+const RELATIONS = /^OBJECT_(?:TABLE|VIEW|MATVIEW|FOREIGN_TABLE|SEQUENCE)$/
 
-/** The relations the open transaction holds locked, by key, each with whether reads wait too, and the relations it made */
-type Held = { locks: Map<string, boolean>; made: Set<string> }
+/**
+ * The relations the open transaction holds locked, by key, each with whether reads wait too, the
+ * relations it made, and the tables that call each sequence it holds, as Postgres said it last
+ */
+type Held = { calls: Map<string, Calls>; locks: Map<string, boolean>; made: Set<string> }
 
 /** A transaction's start: nothing held, nothing made */
-const heldStart = (): Held => ({ locks: new Map(), made: new Set() })
+const heldStart = (): Held => ({ calls: new Map(), locks: new Map(), made: new Set() })
 
 /** `held` at a COMMIT, which releases every lock and shows what the file made to other sessions */
 function clearHeld(held: Held): void {
+	held.calls.clear()
 	held.locks.clear()
 	held.made.clear()
 }
 
-/** `held` as Postgres held it, `locks` read from pg_locks, in place of what the file's text says */
-function measured(held: Held, locks: ReadonlyMap<string, boolean>): void {
+/** `held` as Postgres held it, `locked` read from pg_locks, in place of what the file's text says */
+function measured(held: Held, locked: Locked): void {
 	held.locks.clear()
-	for (const [key, reads] of locks) held.locks.set(key, reads)
+	held.calls.clear()
+	for (const [key, reads] of locked.locks) held.locks.set(key, reads)
+	for (const [key, calls] of locked.calls) held.calls.set(key, calls)
 }
 
 /** `held` with `locks` taken, each but those on what the file made */
@@ -65,7 +73,7 @@ const referenced = (constraints: unknown): unknown[] =>
 const UNBLOCKING = /^AT_(?:SetStatistics|SetOptions|ResetOptions|ClusterOn|DropCluster|ValidateConstraint)$/
 const TRIGGER_STATE = /^AT_(?:Enable|Disable)\w*Trig/
 
-/** The locks one command of an ALTER TABLE, VIEW, MATERIALIZED VIEW or FOREIGN TABLE takes */
+/** The locks one command of an ALTER TABLE, VIEW, MATERIALIZED VIEW, FOREIGN TABLE or SEQUENCE takes */
 function commandLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	const table = node["relation"]
 	const subtype = cmd["subtype"] as string
@@ -93,7 +101,7 @@ function commandLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	]
 }
 
-/** The locks an ALTER TABLE, INDEX, VIEW, MATERIALIZED VIEW or FOREIGN TABLE's command takes; none for any other ALTER */
+/** The locks an ALTER TABLE, INDEX, VIEW, MATERIALIZED VIEW, FOREIGN TABLE or SEQUENCE's command takes; none for any other ALTER */
 function alterLocks(node: Node, cmd: Node, facts: Facts): Lock[] {
 	if (node["objtype"] === "OBJECT_INDEX") return indexLocks(node, cmd, facts)
 	return RELATIONS.test(node["objtype"] as string) ? commandLocks(node, cmd, facts) : []
@@ -176,7 +184,8 @@ function createLocks(node: Node, facts: Facts): Lock[] {
 }
 
 /* the renames that take ACCESS EXCLUSIVE on their table; an index's takes SHARE UPDATE EXCLUSIVE */
-const EXCLUSIVE_RENAMES = /^OBJECT_(?:TABLE|COLUMN|TABCONSTRAINT|TRIGGER|MATVIEW|VIEW|FOREIGN_TABLE|POLICY|RULE)$/
+const EXCLUSIVE_RENAMES =
+	/^OBJECT_(?:TABLE|COLUMN|TABCONSTRAINT|TRIGGER|MATVIEW|VIEW|FOREIGN_TABLE|SEQUENCE|POLICY|RULE)$/
 
 /** The locks a RENAME takes, through the table's descendants for a column's or constraint's */
 const renameLocks = (node: Node, facts: Facts): Lock[] =>
@@ -202,6 +211,8 @@ const STATEMENTS: Readonly<Record<string, (node: Node, facts: Facts) => Lock[]>>
 	AlterObjectSchemaStmt: (node, facts) =>
 		RELATIONS.test(node["objectType"] as string) ? on(node["relation"], facts, EXCLUSIVE) : [],
 	AlterPolicyStmt: (node, facts) => on(node["table"], facts, EXCLUSIVE),
+	/* every ALTER SEQUENCE but the ALTER TABLE forms takes SHARE ROW EXCLUSIVE, which another session's nextval waits on */
+	AlterSeqStmt: (node, facts) => on(node["sequence"], facts, SHARE),
 	ClusterStmt: (node, facts) => (node["relation"] === undefined ? [] : on(node["relation"], facts, EXCLUSIVE)),
 	CreatePolicyStmt: (node, facts) => on(node["table"], facts, EXCLUSIVE),
 	CreateStmt: createLocks,
@@ -232,6 +243,9 @@ function movedTo(type: string, node: Node, facts: Facts): string | undefined {
 
 /** The relation a statement makes that the history does not hold, undefined for any other statement */
 function madeBy(type: string, node: Node, facts: Facts): string | undefined {
+	/* the history's sequences are not read, so CREATE SEQUENCE IF NOT EXISTS may make none */
+	if (type === "CreateSeqStmt")
+		return flag(node["if_not_exists"]) ? undefined : tableOf(node["sequence"], facts.schema).key
 	const relation =
 		type === "CreateStmt"
 			? node["relation"]

@@ -12,12 +12,12 @@ function blocking(modes: readonly string[]): string | undefined {
 }
 
 /*
- * Each table, view and materialized view of public by its oid, and each index and TOAST table of
+ * Each table, view, materialized view and sequence of public by its oid, and each index and TOAST table of
  * one, and each TOAST table's index, under the name of the relation it belongs to: a query of a
  * table opens every index of it, so a lock on one blocks the table as much as a lock on the table
  */
 const OWNED = `WITH owner AS (
-  SELECT oid, oid AS of FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p', 'v', 'm', 'f')
+  SELECT oid, oid AS of FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
 ), part AS (
   SELECT oid, of FROM owner
   UNION ALL SELECT c.reltoastrelid, o.of FROM owner o JOIN pg_class c ON c.oid = o.oid WHERE c.reltoastrelid <> 0
@@ -32,7 +32,7 @@ const NAMES = `SELECT oid::int8::text AS oid,
 FROM pg_class WHERE oid = ANY($1::oid[])`
 
 /**
- * What the transaction of `file` holds blocked at its end, `setup` committed before it: each table,
+ * What the transaction of `file` holds blocked at its end, `setup` committed before it: each table, sequence,
  * view and materialized view of public there before the transaction, by the name it has at the
  * end, as the file names it after a rename or a move, or the name it had if the file drops it; one
  * the file makes, which no other session sees, is not read; a lock on an index or TOAST table

@@ -122,6 +122,18 @@ const HOLDS: Array<[string, string]> = [
 	["ALTER MATERIALIZED VIEW mv SET SCHEMA s;", "s.mv locked against reads and writes"],
 	/* EXCLUSIVE, which readers pass */
 	["REFRESH MATERIALIZED VIEW CONCURRENTLY mv;", "mv locked against writes"],
+	/*
+	 * AE2-3 of r22: a sequence, the relation another session's nextval waits on, by the name it has
+	 * next; the history's sequences are not read, so one IF EXISTS names is held as a missing table is
+	 */
+	["ALTER SEQUENCE s RESTART;", "s locked against writes"],
+	["ALTER SEQUENCE s OWNED BY orders.id;", "s locked against writes"],
+	["ALTER SEQUENCE IF EXISTS s SET LOGGED;", "s locked against reads and writes"],
+	["ALTER SEQUENCE s OWNER TO CURRENT_USER;", "s locked against reads and writes"],
+	["ALTER SEQUENCE IF EXISTS s RENAME TO s2;", "s2 locked against reads and writes"],
+	["ALTER SEQUENCE s SET SCHEMA s;", "s.s locked against reads and writes"],
+	["DROP SEQUENCE IF EXISTS s;", "s locked against reads and writes"],
+	["CREATE SEQUENCE IF NOT EXISTS s;\nALTER SEQUENCE s RESTART;", "s locked against writes"],
 ]
 
 /* statements that leave nothing held */
@@ -132,7 +144,6 @@ const NOTHING: string[] = [
 	"ALTER DOMAIN posint SET DEFAULT 1;",
 	"DROP DOMAIN posint;",
 	"DROP INDEX nowhere;",
-	"DROP SEQUENCE IF EXISTS s;",
 	"REINDEX INDEX nowhere;",
 	"ALTER INDEX orders_user SET (fillfactor = 70);",
 	"ALTER INDEX orders_user RENAME TO orders_u;",
@@ -141,8 +152,7 @@ const NOTHING: string[] = [
 	"ALTER INDEX ev_i ATTACH PARTITION nowhere;",
 	"ALTER FUNCTION trg() SET SCHEMA s;",
 	"ALTER TYPE posint SET SCHEMA s;",
-	"ALTER SEQUENCE IF EXISTS s RENAME TO s2;",
-	"ALTER SEQUENCE IF EXISTS s SET LOGGED;",
+	"ALTER TYPE pair ADD ATTRIBUTE z int;",
 	/* a temporary table, and a relation the file made, which no other session sees */
 	"CREATE TEMP TABLE tt (id int);\nALTER TABLE tt ADD COLUMN x int;",
 	"LOCK TABLE pg_temp.tt;",
@@ -152,6 +162,8 @@ const NOTHING: string[] = [
 	"CREATE MATERIALIZED VIEW mv2 AS SELECT 1 AS one;\nREFRESH MATERIALIZED VIEW mv2;",
 	"CREATE TABLE t (id int);\nALTER TABLE t RENAME TO t2;\nALTER TABLE t2 ADD COLUMN x int;",
 	"CREATE TABLE t (id int);\nALTER TABLE t RENAME COLUMN id TO num;\nALTER TABLE t ADD COLUMN x int;",
+	"CREATE SEQUENCE sq;\nALTER SEQUENCE sq RENAME TO sq2;\nALTER SEQUENCE sq2 RESTART;",
+	"CREATE TEMP SEQUENCE tsq;\nALTER SEQUENCE tsq RESTART;",
 ]
 
 describe("what a statement before a VALIDATE leaves held (0005)", () => {

@@ -13,6 +13,7 @@ import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { blockAfter, nodeOf } from "./pg-outside-transaction.ts"
 import { segments } from "../../sql-lexer.ts"
 import { hashedSql, normalizeSql } from "./sql-scan.ts"
+import type { Locked } from "./pg-held-types.ts"
 import { flag } from "./pg-nodes.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
@@ -265,7 +266,7 @@ function refuseHeader(sql: string, dialect: Dialect): void {
  * What check's replay on devUrl read of a file it replays (pg-replay-held.ts): what the file's
  * transaction held, from pg_locks, before each statement it read that at, by the statement's index
  */
-type Replayed = { held: ReadonlyMap<number, ReadonlyMap<string, boolean>> }
+type Replayed = { held: ReadonlyMap<number, Locked> }
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const CREATE_TABLE = /* @__PURE__ */ new RegExp(

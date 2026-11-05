@@ -4,6 +4,7 @@
  * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
  */
 import { outsideRefusal } from "./classify-file.ts"
+import type { Locked } from "./pg-held-types.ts"
 import { outsideOnly } from "./pg-outside-transaction.ts"
 import { codeOf, type Sql } from "./pg-replay-database.ts"
 import { runRole } from "./pg-replay-made.ts"
@@ -24,7 +25,7 @@ type Replay = {
 	/** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
 	adopted?: ((file: string, role: string) => void) | undefined
 	/** what `file`'s transaction held before its `statement`th statement, a VALIDATE, read from pg_locks (pg-replay-held.ts) */
-	held?: { at(file: string, statement: number, locks: ReadonlyMap<string, boolean>): void; schema: string } | undefined
+	held?: { at(file: string, statement: number, locked: Locked): void; schema: string } | undefined
 	/** what a refusal stops */
 	stops: string
 }

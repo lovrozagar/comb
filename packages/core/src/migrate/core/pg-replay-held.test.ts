@@ -44,11 +44,12 @@ describe("opens", () => {
 	})
 })
 
-/* the snapshot at BEGIN: public.orders with its index, and s.items */
+/* the snapshot at BEGIN: public.orders with its index, s.items, and the sequence ids */
 const OWNED = [
-	{ name: "orders", of: "10", oid: "10", schema: "public" },
-	{ name: "orders", of: "10", oid: "11", schema: "public" },
-	{ name: "items", of: "20", oid: "20", schema: "s" },
+	{ name: "orders", of: "10", oid: "10", schema: "public", sequence: false },
+	{ name: "orders", of: "10", oid: "11", schema: "public", sequence: false },
+	{ name: "items", of: "20", oid: "20", schema: "s", sequence: false },
+	{ name: "ids", of: "30", oid: "30", schema: "public", sequence: true },
 ]
 
 describe("heldBefore", () => {
@@ -56,20 +57,32 @@ describe("heldBefore", () => {
 		const { sql } = fake(() => OWNED)
 		expect(await heldBefore(sql, "public")).toEqual(
 			new Map([
-				["10", { key: "orders", of: "10" }],
-				["11", { key: "orders", of: "10" }],
-				["20", { key: "s.items", of: "20" }],
+				["10", { key: "orders", of: "10", sequence: false }],
+				["11", { key: "orders", of: "10", sequence: false }],
+				["20", { key: "s.items", of: "20", sequence: false }],
+				["30", { key: "ids", of: "30", sequence: true }],
 			]),
 		)
 	})
 })
 
-/** What the transaction holds when pg_locks holds `locks` and pg_class names `names` now */
-async function held(locks: Array<{ mode: string; oid: string }>, names: Array<Record<string, string>>) {
+/** What the transaction holds when pg_locks holds `locks`, pg_class names `names` now, and pg_depend says `calls` */
+async function heldAll(
+	locks: Array<{ mode: string; oid: string }>,
+	names: Array<Record<string, string>>,
+	calls: Array<Record<string, unknown>> = [],
+) {
 	const snapshot = fake(() => OWNED)
 	const before = await heldBefore(snapshot.sql, "public")
-	const dev = fake((query) => (query.includes("pg_locks") ? locks : names))
-	return { held: await heldNow(dev.sql, before, "public"), sent: dev.sent }
+	const dev = fake((query) => (query.includes("pg_locks") ? locks : query.includes("pg_depend") ? calls : names))
+	return { locked: await heldNow(dev.sql, before, "public"), sent: dev.sent }
+}
+
+/** What the transaction holds of each relation, as `heldAll` reads it */
+async function held(locks: Array<{ mode: string; oid: string }>, names: Array<Record<string, string>>) {
+	const { locked, sent } = await heldAll(locks, names)
+	expect(locked.calls).toEqual(new Map())
+	return { held: locked.locks, sent }
 }
 
 describe("heldNow", () => {
@@ -118,5 +131,40 @@ describe("heldNow", () => {
 		const { held: now, sent } = await held([{ mode: "AccessShareLock", oid: "10" }], [])
 		expect(now).toEqual(new Map())
 		expect(sent).toHaveLength(1)
+	})
+})
+
+/* AE2-3 of r22: a sequence is held by its own name, and the warning names the tables that call it */
+describe("heldNow of a sequence", () => {
+	it("names the tables there at BEGIN whose default or identity calls a sequence it holds, by their names now", async () => {
+		const { locked, sent } = await heldAll(
+			[{ mode: "ShareRowExclusiveLock", oid: "30" }],
+			[
+				{ name: "ids2", oid: "30", schema: "public" },
+				{ name: "orders", oid: "10", schema: "public" },
+				{ name: "items2", oid: "20", schema: "s" },
+			],
+			[
+				{ caller: "20", identity: false, sequence: "30" },
+				{ caller: "10", identity: false, sequence: "30" },
+				{ caller: "10", identity: true, sequence: "30" },
+				{ caller: "99", identity: false, sequence: "30" },
+				{ caller: "11", identity: false, sequence: "30" },
+			],
+		)
+		expect(locked).toEqual({
+			calls: new Map([["ids2", { defaults: ["orders", "s.items2"], identity: "orders" }]]),
+			locks: new Map([["ids2", false]]),
+		})
+		expect(sent[1]?.[1]).toEqual(["30"])
+		expect(sent[2]?.[1]).toEqual(["30,20,10"])
+	})
+
+	it("asks pg_depend nothing when no sequence is held", async () => {
+		const { sent } = await held(
+			[{ mode: "AccessExclusiveLock", oid: "10" }],
+			[{ name: "orders", oid: "10", schema: "public" }],
+		)
+		expect(sent.map(([query]) => query.includes("pg_depend"))).toEqual([false, false])
 	})
 })

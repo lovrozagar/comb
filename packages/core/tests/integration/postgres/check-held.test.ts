@@ -23,11 +23,15 @@ const { checked, devUrl, files, options, targetUrl } = pgCheck()
 const ALLOW = "-- comb:allow-unsafe: the test's pending file\n"
 const WARNING = "Lock warning in 20260102000000_two.sql: "
 
-/** The warnings `out` prints of `validate`, the pending file's VALIDATE */
-const heldOf = (out: readonly string[], validate: string): string[] =>
+/* what the replay says of a sequence it names: the tables whose default calls it, which the map does not read */
+const CALLS = / \([^()]+ calls? it\)/g
+
+/** The warnings `out` prints of `validate`, the pending file's VALIDATE, as they name each relation */
+const heldOf = (out: readonly string[], validate: string, said: "as said" | "bare" = "bare"): string[] =>
 	out
 		.filter((line) => line.startsWith(`${WARNING}${validate.slice(0, -1)} (`))
 		.map((line) => line.slice(WARNING.length))
+		.map((line) => (said === "bare" ? line.replaceAll(CALLS, "") : line))
 
 /** What a warning of `validate`, a VALIDATE on `table`, says its file holds, read so warningOf writes it back */
 function heldIn(lines: readonly string[], { table, validate }: { table: string; validate: string }) {
@@ -157,6 +161,18 @@ describe("check's held warnings of a lock no CASE takes, measured on devUrl (Are
 		const { out, refused } = await checked(one, two)
 		expect(refused).toBeUndefined()
 		expect(heldOf(out, VALIDATE_T)).toEqual(warningOf(AT_T, { tx: "reads and writes" }))
+		mapHolds({ one, out, two }, AT_T)
+	})
+
+	/* AE2-3 of r22: a sequence is the relation Postgres locks, and the replay says which tables call it */
+	it("names a sequence the file locks, with each table another session sees whose default or identity calls it", async () => {
+		const one = `${NOT_VALID}CREATE SEQUENCE sq;\nCREATE TABLE a (id bigint DEFAULT nextval('sq'));\nCREATE TABLE b (id serial, n bigint DEFAULT nextval('sq'));\nCREATE SEQUENCE lone;\nCREATE TABLE g (id int GENERATED ALWAYS AS IDENTITY);\n`
+		const two = `${ALLOW}CREATE TABLE fresh (id bigint DEFAULT nextval('sq'));\nALTER SEQUENCE sq RESTART;\nALTER SEQUENCE lone RESTART;\nALTER SEQUENCE g_id_seq RESTART;\n${VALIDATE_T}\n`
+		const { out, refused } = await checked(one, two)
+		expect(refused).toBeUndefined()
+		expect(heldOf(out, VALIDATE_T, "as said")).toEqual([
+			`${VALIDATE_T.slice(0, -1)} (scans t while this file holds g_id_seq (g's identity calls it), lone and sq (the defaults of a and b call it) locked against writes; those locks last to the file's COMMIT; validate in a later file)`,
+		])
 		mapHolds({ one, out, two }, AT_T)
 	})
 

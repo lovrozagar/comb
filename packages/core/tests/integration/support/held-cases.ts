@@ -25,6 +25,9 @@ export const HISTORY = [
 	"CREATE TABLE pt_1 PARTITION OF pt FOR VALUES IN (1);",
 	"CREATE INDEX pt_i ON ONLY pt (id);",
 	"CREATE INDEX pt_1_i ON pt_1 (id);",
+	"CREATE SEQUENCE seq;",
+	"CREATE TABLE ids (id bigint DEFAULT nextval('seq'));",
+	"CREATE SEQUENCE seq_free;",
 	"ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;",
 ].join("\n")
 
@@ -96,6 +99,15 @@ export const CASES: ReadonlyArray<readonly [string, Readonly<Record<string, stri
 	["DROP DOMAIN posint CASCADE;", { dm: READS }],
 	["CREATE OR REPLACE VIEW v_users AS SELECT id, n FROM users;", { v_users: READS }],
 	["ALTER DOMAIN posint SET NOT NULL;", { dm: WRITES }],
+	/* AE2-3 of r22: a sequence another session's nextval takes a lock on, by the name it has at the file's end */
+	["ALTER SEQUENCE seq RESTART WITH 100;", { seq: WRITES }],
+	["ALTER SEQUENCE seq OWNED BY ids.id;", { seq: WRITES }],
+	["ALTER SEQUENCE seq OWNER TO CURRENT_USER;", { seq: READS }],
+	["ALTER SEQUENCE seq SET UNLOGGED;", { seq: READS }],
+	["ALTER SEQUENCE seq RENAME TO seq2;", { seq2: READS }],
+	["ALTER SEQUENCE seq SET SCHEMA s;", { "s.seq": READS }],
+	["DROP SEQUENCE seq_free;", { seq_free: READS }],
+	["CREATE SEQUENCE seq_new;\nALTER SEQUENCE seq_new RESTART;", {}],
 	/* what blocks nothing */
 	["COMMENT ON TABLE orders IS 'x';", {}],
 	["GRANT SELECT ON orders TO PUBLIC;", {}],

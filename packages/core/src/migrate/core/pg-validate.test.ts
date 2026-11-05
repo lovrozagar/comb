@@ -9,7 +9,13 @@
  */
 import { beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
+import type { Calls } from "./pg-held-types.ts"
+import { heldStart, measured } from "./pg-held.ts"
+import { historyFacts } from "./pg-history.ts"
+import { nodeOf } from "./pg-outside-transaction.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
+import { pgRead } from "./pg-split.ts"
+import { heldScans } from "./pg-validate.ts"
 import { extractSchema } from "./schema.ts"
 
 beforeAll(loadPostgresParser)
@@ -114,5 +120,48 @@ describe("every NOT VALID recipe says to validate in a later file (PA8)", () => 
 		["ALTER TABLE ev ATTACH PARTITION ev_old DEFAULT;", "VALIDATE it in a later file, then ATTACH"],
 	])("%s", (sql, recipe) => {
 		expect(rate(sql).lockWarnings.join(" ")).toContain(recipe)
+	})
+})
+
+/** The warning a VALIDATE of t gives when Postgres said it held `locks`, its sequences called as `calls` say */
+function measuredNote(locks: Array<[string, boolean]>, calls: Array<[string, Calls]>): string | undefined {
+	const held = heldStart()
+	measured(held, { calls: new Map(calls), locks: new Map(locks) })
+	const [, node] = nodeOf(pgRead("ALTER TABLE t VALIDATE CONSTRAINT c;").statements[0]?.tree)
+	return heldScans(node, { facts: historyFacts(undefined, "public"), held })[0]?.note
+}
+
+/* AE2-3 of r22: a sequence the replay measured is named with the tables Postgres said call it */
+describe("what a VALIDATE names of a sequence Postgres held", () => {
+	it.each<[string, Calls | undefined, string]>([
+		["no table", undefined, "sq"],
+		["one table's default", { defaults: ["a"], identity: undefined }, "sq (a's default calls it)"],
+		[
+			"several tables' defaults",
+			{ defaults: ["a", "b", "c"], identity: undefined },
+			"sq (the defaults of a, b and c call it)",
+		],
+		["an identity", { defaults: [], identity: "g" }, "sq (g's identity calls it)"],
+		["a default and an identity", { defaults: ["a"], identity: "g" }, "sq (a's default, and g's identity call it)"],
+	])("names it after %s", (_, calls, said) => {
+		expect(
+			measuredNote(
+				[
+					["sq", false],
+					["u", true],
+				],
+				calls === undefined ? [] : [["sq", calls]],
+			),
+		).toBe(`scans t while this file holds u locked against reads and writes, and ${said} against writes; ${HELD}`)
+	})
+
+	it("keeps no caller past the next measure", () => {
+		const held = heldStart()
+		measured(held, {
+			calls: new Map([["sq", { defaults: ["a"], identity: undefined }]]),
+			locks: new Map([["sq", false]]),
+		})
+		measured(held, { calls: new Map(), locks: new Map([["sq", false]]) })
+		expect(held.calls).toEqual(new Map())
 	})
 })

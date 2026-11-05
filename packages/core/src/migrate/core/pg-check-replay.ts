@@ -21,6 +21,7 @@ import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { type HistoryFile, onDev } from "./pg-replay.ts"
 import type { Replayed } from "./classify-file.ts"
+import type { Locked } from "./pg-held-types.ts"
 import { heldRoles } from "./pg-replay-roles.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
@@ -118,7 +119,7 @@ async function replayPending(
 		print(`${NOT_REPLAYED}: ${DOCKER(target.devUrl)}`)
 		return undefined
 	}
-	const measured = new Map(pending.map((name) => [name, { held: new Map<number, ReadonlyMap<string, boolean>>() }]))
+	const measured = new Map(pending.map((name) => [name, { held: new Map<number, Locked>() }]))
 	await onDev(target, files, {
 		adopted: (file, role) =>
 			print(
@@ -127,7 +128,7 @@ async function replayPending(
 		after: async () => undefined,
 		print,
 		doing: "check replayed the history and the pending files there",
-		held: { at: (file, statement, locks) => measured.get(file)?.held.set(statement, locks), schema: target.schema },
+		held: { at: (file, statement, locked) => measured.get(file)?.held.set(statement, locked), schema: target.schema },
 		leftOut: (file, sent, what) =>
 			print(
 				`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${what} reaches past the database the replay runs in, so apply alone runs it`,
