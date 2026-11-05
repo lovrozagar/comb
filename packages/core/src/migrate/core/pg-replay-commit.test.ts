@@ -31,6 +31,7 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 	const run: Run = {
 		admin,
 		created: [],
+		createrole: false,
 		database: "comb_replay_7_9_00000000",
 		ours: { rows: new Map(), writes: new Map() },
 		owner: "comb_replay_7_9",

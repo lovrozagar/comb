@@ -452,9 +452,9 @@ export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDa
  * pg-replay-made.ts runs it, one in a tablespace the replay left out in pg_default
  * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
  */
-import type { Sql } from "./pg-replay-database.ts";
+import { type Sql } from "./pg-replay-database.ts";
 import type { Run } from "./pg-replay-roles.ts";
-import type { ReplayFailed } from "./replay-failed.ts";
+import { ReplayFailed } from "./replay-failed.ts";
 /** How the replay words what it does, and where it says what it left out */
 type Replay = {
     /** what the replay was doing, as a refusal names it */
@@ -532,7 +532,7 @@ import type { Snapshot, Strays } from "./pg-server-snapshot.ts";
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
  * that owns it, its role (`role`, which CURRENT_USER and its kin name in a file), whether that role
- * is a superuser, which reads pg_authid, and the roles it made; the
+ * is a superuser, which reads pg_authid, whether it has CREATEROLE (`createrole`), and the roles it made; the
  * open transaction's own writes, comb's CREATE ROLEs', with the rows they left; the shared catalogs
  * as last read committed (`seen`), and the roles, databases and replication slots a refused window
  * added (`strays`), which the cleanup drops
@@ -540,6 +540,7 @@ import type { Snapshot, Strays } from "./pg-server-snapshot.ts";
 type Run = {
     admin: Sql;
     created: string[];
+    createrole: boolean;
     database: string;
     ours: {
         rows: Rows;
@@ -554,8 +555,9 @@ type Run = {
     tablespaces: Set<string>;
     superuser: boolean;
 };
-/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, and whether it is a superuser */
+/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, whether it is a superuser, and whether it has CREATEROLE */
 declare function devRoleOf(sql: Sql): Promise<{
+    createrole: boolean;
     role: string;
     superuser: boolean;
 }>;

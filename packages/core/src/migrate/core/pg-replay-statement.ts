@@ -3,11 +3,11 @@
  * pg-replay-made.ts runs it, one in a tablespace the replay left out in pg_default
  * (pg-replay-tablespaces.ts), and any other as it is, with the words the replay reports it in.
  */
-import type { Sql } from "./pg-replay-database.ts"
+import { codeOf, type Sql } from "./pg-replay-database.ts"
 import { runRole } from "./pg-replay-made.ts"
 import type { Run } from "./pg-replay-roles.ts"
 import { inDefault } from "./pg-replay-tablespaces.ts"
-import type { ReplayFailed } from "./replay-failed.ts"
+import { ReplayFailed } from "./replay-failed.ts"
 
 /** How the replay words what it does, and where it says what it left out */
 type Replay = {
@@ -41,6 +41,18 @@ async function runSent(run: Run, { name, node, sent, type }: Sent, replay: Repla
 	if (moved !== undefined) replay.movedTo?.(name, sent, moved.names)
 }
 
+/* PR9 of r22b: why a replay stops on a role the history creates, which devUrl's role cannot, as NO_CREATEDB says of the database */
+const noCreaterole = (role: string) =>
+	`creates the role ${role}, which devUrl's server lacks, and devUrl's role cannot create a role (CREATEROLE), as comb replays the history in a database of its own on that server; grant the role CREATEROLE, or point devUrl at a server where it has it`
+
+/**
+ * Whether `error` refused a history CREATE ROLE for want of CREATEROLE: permission denied (42501) to a
+ * role that is no superuser and lacks it. The replay makes the role bare, among roles it made alone,
+ * so no attribute or membership is what was denied; a role that has CREATEROLE gets devUrl's own error
+ */
+const cannotCreateRole = (run: Run, type: string, error: unknown) =>
+	type === "CreateRoleStmt" && codeOf(error) === "42501" && !run.superuser && !run.createrole
+
 /** `statement` run on the replay's connection, a statement on roles as the replay runs it (pg-replay-made.ts) */
 async function runStatement(run: Run, statement: Sent, replay: Replaying): Promise<void> {
 	const { name, sent, type } = statement
@@ -49,6 +61,10 @@ async function runStatement(run: Run, statement: Sent, replay: Replaying): Promi
 		if (bare === undefined) await runSent(run, statement, replay)
 		else if (await bare) replay.madeBare?.(name, sent)
 	} catch (error) {
+		if (cannotCreateRole(run, type, error))
+			throw new ReplayFailed(`${name} ${noCreaterole(String(statement.node["role"]))}; ${replay.stops}`, {
+				cause: error,
+			})
 		throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
 	}
 	/* an extension devUrl's database holds that requires the one just made follows it, as on the target */

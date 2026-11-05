@@ -24,7 +24,7 @@ import { flag } from "./pg-nodes.ts"
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
  * that owns it, its role (`role`, which CURRENT_USER and its kin name in a file), whether that role
- * is a superuser, which reads pg_authid, and the roles it made; the
+ * is a superuser, which reads pg_authid, whether it has CREATEROLE (`createrole`), and the roles it made; the
  * open transaction's own writes, comb's CREATE ROLEs', with the rows they left; the shared catalogs
  * as last read committed (`seen`), and the roles, databases and replication slots a refused window
  * added (`strays`), which the cleanup drops
@@ -32,6 +32,7 @@ import { flag } from "./pg-nodes.ts"
 type Run = {
 	admin: Sql
 	created: string[]
+	createrole: boolean
 	database: string
 	ours: { rows: Rows; writes: Writes }
 	owner: string
@@ -44,10 +45,17 @@ type Run = {
 	superuser: boolean
 }
 
-/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, and whether it is a superuser */
-async function devRoleOf(sql: Sql): Promise<{ role: string; superuser: boolean }> {
-	const [row] = await sql.unsafe("SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user", [])
-	return { role: String(row?.["rolname"] ?? ""), superuser: row?.["rolsuper"] === true }
+/** The role `sql` runs as, which CURRENT_USER and its kin name in a file, whether it is a superuser, and whether it has CREATEROLE */
+async function devRoleOf(sql: Sql): Promise<{ createrole: boolean; role: string; superuser: boolean }> {
+	const [row] = await sql.unsafe(
+		"SELECT rolname, rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user",
+		[],
+	)
+	return {
+		createrole: row?.["rolcreaterole"] === true,
+		role: String(row?.["rolname"] ?? ""),
+		superuser: row?.["rolsuper"] === true,
+	}
 }
 
 /** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */

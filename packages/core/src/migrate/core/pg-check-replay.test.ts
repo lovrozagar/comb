@@ -53,7 +53,7 @@ const AROUND = {
 		/* the target database's locale, which the replay's database is made at */
 		expect.stringMatching(/^SELECT pg_encoding_to_char\(d\.encoding\) AS encoding, /),
 		"CREATE DATABASE <db> TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8' LOCALE_PROVIDER icu ICU_LOCALE 'en-US'",
-		"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
+		"SELECT rolname, rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user",
 		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
 		/* the read prepared on the connection that makes it, once, and read before the first file */

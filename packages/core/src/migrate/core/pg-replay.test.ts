@@ -70,7 +70,7 @@ const MADE = [
 		/^SELECT pg_encoding_to_char\(d\.encoding\) AS encoding, .* WHERE d\.datname = current_database\(\)$/,
 	),
 	"CREATE DATABASE <db> TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' LOCALE_PROVIDER libc",
-	"SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user",
+	"SELECT rolname, rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user",
 	COUNTED,
 	expect.stringMatching(/^SELECT e\.extname/),
 ]
