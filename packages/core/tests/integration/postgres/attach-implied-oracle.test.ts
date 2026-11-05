@@ -67,6 +67,10 @@ const PROVEN_BEYOND_COMB: ReadonlyMap<string, string> = new Map([
 	["an integer key bounded by a string", "a string Postgres coerces to the key's type"],
 	["a list with NULL", "a NULL the key's NOT NULL excludes"],
 	["another constraint dropped", "a proof comb forgets on any DROP CONSTRAINT"],
+	[
+		"a CHECK that also names another column",
+		"a CHECK term on a column beside the key, which a CASCADE drop may take (AE2-1 of r22)",
+	],
 ])
 
 describe("an ATTACH comb warns of nothing for, on Postgres 17 (PA16 of r22b)", () => {

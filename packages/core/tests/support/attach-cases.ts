@@ -327,6 +327,37 @@ export const SCANNED: readonly AttachCase[] = [
 		"CREATE TABLE g (at date NOT NULL, k int NOT NULL) PARTITION BY RANGE (k);\nCREATE TABLE ev (at date NOT NULL, k int NOT NULL) PARTITION BY RANGE (at);\nALTER TABLE g ATTACH PARTITION ev FOR VALUES FROM (0) TO (10);\nCREATE TABLE o (at date NOT NULL, k int NOT NULL, CHECK (at >= '2026-01-01' AND at < '2027-01-01'));\n",
 		ATTACH,
 	],
+	/* AE2-1 of r22: a DROP … CASCADE of what another column needs drops that column and the CHECK naming it */
+	[
+		"a CHECK that also names a column a DROP TYPE … CASCADE drops",
+		`${PARENT}CREATE TYPE e AS ENUM ('a');\nCREATE TABLE o (id int, at date NOT NULL, j e, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND j = 'a'));\nDROP TYPE e CASCADE;\n`,
+		ATTACH,
+	],
+	[
+		"a CHECK that also names a column a DROP DOMAIN … CASCADE drops",
+		`${PARENT}CREATE DOMAIN d AS int;\nCREATE TABLE o (id int, at date NOT NULL, j d, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND j = 1));\nDROP DOMAIN d CASCADE;\n`,
+		ATTACH,
+	],
+	[
+		"a CHECK that also names a column a DROP SCHEMA … CASCADE drops through its type",
+		`${PARENT}CREATE SCHEMA s;\nCREATE DOMAIN s.d AS int;\nCREATE TABLE o (id int, at date NOT NULL, j s.d, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND j = 1));\nDROP SCHEMA s CASCADE;\n`,
+		ATTACH,
+	],
+	[
+		"a CHECK that also names a column a DROP COLLATION … CASCADE drops",
+		`${PARENT}CREATE COLLATION cx FROM "C";\nCREATE TABLE o (id int, at date NOT NULL, j text COLLATE cx, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND j = 'x'));\nDROP COLLATION cx CASCADE;\n`,
+		ATTACH,
+	],
+	[
+		"a CHECK that also names a generated column a DROP FUNCTION … CASCADE drops",
+		`${PARENT}CREATE FUNCTION g(int) RETURNS int IMMUTABLE LANGUAGE sql AS 'SELECT $1';\nCREATE TABLE o (id int, at date NOT NULL, j int GENERATED ALWAYS AS (g(id)) STORED, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND j = 1));\nDROP FUNCTION g(int) CASCADE;\n`,
+		ATTACH,
+	],
+	[
+		"a CHECK that also names another column",
+		`${PARENT}CREATE TABLE o (id int, at date NOT NULL, CHECK (at >= '2026-01-01' AND at < '2027-01-01' AND id > 0));\n`,
+		ATTACH,
+	],
 	[
 		"a key with an operator class",
 		"CREATE TABLE l (c text NOT NULL) PARTITION BY RANGE (c text_pattern_ops);\nCREATE TABLE o (c text NOT NULL CHECK (c >= 'a' AND c < 'm'));\n",
