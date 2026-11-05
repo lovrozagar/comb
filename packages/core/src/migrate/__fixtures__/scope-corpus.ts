@@ -222,6 +222,34 @@ function closureCases(): ScopeCase[] {
 	}))
 }
 
+/** `n` tables of one column, x1 on */
+const tables = (n: number) => Array.from({ length: n }, (_, i) => `CREATE TABLE x${i + 1} (x);`).join("\n")
+
+/* a file that reads the schema's catalog, which lists every object without naming one (AC2-1 of area C round 2) */
+function catalogCases(): ScopeCase[] {
+	return [
+		[
+			"the greatest name in sqlite_master",
+			"CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT NOT NULL CHECK (n < 'u'));\nCREATE TABLE zz (x);",
+			"INSERT INTO t (n) SELECT max(name) FROM sqlite_master;",
+		],
+		[
+			"a count of sqlite_schema",
+			`CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER NOT NULL CHECK (n < 4));\n${tables(3)}`,
+			"INSERT INTO t (n) SELECT count(*) FROM sqlite_schema;",
+		],
+		[
+			"a count of pragma_table_list",
+			`CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER NOT NULL CHECK (n < 6));\n${tables(4)}`,
+			"INSERT INTO t (n) SELECT count(*) FROM pragma_table_list;",
+		],
+	].map(([label, schema, file]) => ({
+		file: file as string,
+		label: `catalog: ${label as string}`,
+		schema: schema as string,
+	}))
+}
+
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
 	return [
@@ -231,6 +259,7 @@ export function scopeCorpus(): ScopeCase[] {
 		...viewTriggerCases(),
 		...brokenElsewhereCases(),
 		...closureCases(),
+		...catalogCases(),
 		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
 	]
 }

@@ -7,7 +7,9 @@
  *   substring), and the history table; S is N's tables, which a file creates, alters, drops, renames or writes.
  * - Rows go to S, each table a trigger or view reached from S names (to a fixpoint), D (their FK descendants: a
  *   cascade reaches them) and A (the FK ancestors of all those: their keys must be met).
- * - The copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
+ * - A file that reads a catalog (sqlite_master, sqlite_schema, their temp forms, pragma_table_list or PRAGMA
+ *   table_list) observes every object, so the copy creates them all, seeding only the tables above.
+ * - Otherwise the copy creates N, the seeded tables, and each view and trigger whose text names an S table (SQLite checks
  *   them on DROP COLUMN and RENAME COLUMN). When a pending file holds an ALTER TABLE, it creates every view and
  *   trigger instead: SQLite checks the whole schema's on a rename or a dropped column, so one broken anywhere fails
  *   the file, and the copy carries them all rather than a list of which ALTER forms check. Then to a fixpoint each
@@ -35,6 +37,16 @@ const isVirtual = (object: LiveObject): boolean => /^CREATE VIRTUAL TABLE\b/i.te
 
 /** Whether SQLite statement `stmt` is an ALTER TABLE, read as code (a comment or a string before it is not) */
 const isAlterTable = (stmt: string): boolean => /^ALTER\s+TABLE\b/i.test(codeOf(stmt, "sqlite"))
+
+// lookup-table: the catalogs that list every object of a schema without a statement naming one
+const CATALOGS = ["sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema", "pragma_table_list"]
+
+/** Whether SQLite statement `stmt` reads a catalog: names one, or is the PRAGMA table_list that reads one */
+function readsCatalog(stmt: string): boolean {
+	const names = sqliteNames(stmt)
+	if (CATALOGS.some((catalog) => names.has(catalog))) return true
+	return /^PRAGMA\b/i.test(codeOf(stmt, "sqlite")) && names.has("table_list")
+}
 
 /** The folded names of the shadow tables virtual table `object`'s module makes */
 function shadowsOf(object: LiveObject): string[] {
@@ -142,7 +154,10 @@ function observable(
 	const seeded = reach(reach(written, graph.childrenOf), graph.parentsOf)
 	/* SQLite checks each view and trigger naming a table on DROP COLUMN and RENAME COLUMN of it, and every one of
 	   them on an ALTER TABLE that renames or drops a column, wherever it reads */
-	const altered = files.some(({ sql }) => splitSqlStatements(sql).some(isAlterTable))
+	const statements = files.flatMap(({ sql }) => splitSqlStatements(sql))
+	/* a catalog lists every object, so a file that reads one observes them all, though no more rows */
+	if (statements.some(readsCatalog)) return { objects: [...objects], seeded }
+	const altered = statements.some(isAlterTable)
 	const checked = objects.filter(
 		(object) =>
 			(object.type === "view" || object.type === "trigger") &&

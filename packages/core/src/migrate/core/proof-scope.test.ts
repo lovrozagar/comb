@@ -116,3 +116,32 @@ describe("observable: what the scoped copy creates and seeds", () => {
 		expect([...observable(objects, [{ sql: "SELECT 1;" }], "D1_Migrations").seeded]).toEqual(["d1_migrations"])
 	})
 })
+
+/* AC2-1 of area C round 2: a catalog lists every object, so a file that reads one observes them all */
+describe("observable: a file that reads the schema's catalog", () => {
+	const objects = [
+		table("t", "CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)"),
+		table("far", "CREATE TABLE far (id INTEGER PRIMARY KEY)"),
+		{ name: "far_v", sql: "CREATE VIEW far_v AS SELECT id FROM far", table: "far_v", type: "view" },
+	]
+	const names = (sql: string) => observable(objects, [{ sql }]).objects.map(({ name }) => name)
+
+	it.each([
+		"INSERT INTO t (n) SELECT name FROM sqlite_master;",
+		"INSERT INTO t (n) SELECT name FROM main.SQLITE_SCHEMA;",
+		"INSERT INTO t (n) SELECT name FROM sqlite_temp_master;",
+		'INSERT INTO t (n) SELECT name FROM "sqlite_temp_schema";',
+		"INSERT INTO t (n) SELECT name FROM pragma_table_list;",
+		"UPDATE t SET n = 'x';\nPRAGMA table_list;",
+		"UPDATE t SET n = 'x';\nPRAGMA main.table_list;",
+	])("creates every object for %j, and seeds only what it writes", (sql) => {
+		const scope = observable(objects, [{ sql }])
+		expect(scope.objects.map(({ name }) => name)).toEqual(["t", "far", "far_v"])
+		expect([...scope.seeded]).toEqual(["t"])
+	})
+
+	it("reads a catalog's name in a comment as no read, and table_list outside a PRAGMA as a name", () => {
+		expect(names("-- sqlite_master\nUPDATE t SET n = 'x';")).toEqual(["t"])
+		expect(names("UPDATE t SET n = 'table_list';")).toEqual(["t"])
+	})
+})
