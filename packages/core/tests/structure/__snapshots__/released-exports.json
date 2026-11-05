@@ -395,7 +395,6 @@
 		"BuildDerivedListQueryOpts",
 		"BuildListQueryOpts",
 		"BunSqliteProviderConfig",
-		"COMB_FILTER_GRAMMAR",
 		"CheckConstraintMeta",
 		"CircuitBreakerState",
 		"ClassifyOptions",
@@ -466,7 +465,6 @@
 		"FtsSource",
 		"FtsState",
 		"FtsTableConfig",
-		"GENERATORS",
 		"GeneratorContext",
 		"GeneratorName",
 		"HistoryFile",
@@ -504,8 +502,6 @@
 		"ProviderConfig",
 		"ProviderDeps",
 		"QueryResult",
-		"RESERVED_LIST_KEYS",
-		"RESERVED_RETRIEVE_KEYS",
 		"ReadOptions",
 		"RelationConfig",
 		"RelationsConfig",
@@ -556,9 +552,7 @@
 		"TursoProviderConfig",
 		"UlidFactoryOptions",
 		"UniqueIndexMeta",
-		"WaitUntilCtx",
-		"generateOrm",
-		"replayCatalog"
+		"WaitUntilCtx"
 	],
 	"members": {
 		"AnalysisResult": {
