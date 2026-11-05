@@ -8,9 +8,10 @@
  * its path from it (`../lone.sql`), and no file of the directory is expected to match it: a file
  * that has its text, a copy of it moved into the directory, is named, since it would run again
  * (M45). A file's
- * earlier hashes match only a row recorded before comb stopped recording them (migrationHashes): a
- * later row was recorded under the current hash, so a match by an earlier one is an edit its
- * normalizing hides, inside a literal for the pre-0.5.0 hash (M44), in a name for the folded one (SL5).
+ * pre-0.5.0 hash matches only a row recorded before comb stopped recording it (migrationHashes): a
+ * later row was recorded under the current hash, so a match by it is an edit its normalizing hides
+ * inside a literal (M44). Its folded hash (0.5.0 to 0.20) matches a row of any date, as no date tells
+ * which comb recorded it (SL5).
  */
 import type { AcceptedHash } from "./parse.ts"
 

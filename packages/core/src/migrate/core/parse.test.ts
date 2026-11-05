@@ -6,7 +6,6 @@ import {
 	extractSchema,
 	foldedMigrationHash,
 	generateMigrationHash,
-	SPACES_KEPT_SINCE,
 	V0_5_0,
 	parseMigration,
 	parseRead,
@@ -354,15 +353,14 @@ describe("migrationHashes — the hashes a file may be recorded under", () => {
 	})
 
 	/* SL5 of r22 (sibling: the pre-0.5.0 hash): 0.5.0 to 0.20 folded every Unicode space, which SQLite reads as part of a name */
-	it("takes the hash 0.5.0 to 0.20 recorded, which folded every space, on a row recorded before comb kept them", () => {
+	it("takes the hash 0.5.0 to 0.20 recorded, which folded every space, on a row of any date", () => {
 		const sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, a b);"
 		expect(foldedMigrationHash(sql)).toBe(generateMigrationHash("CREATE TABLE t (id INTEGER PRIMARY KEY, a b);"))
 		expect(generateMigrationHash(sql)).not.toBe(foldedMigrationHash(sql))
 		expect(migrationHashes(sql)).toEqual([
 			{ hash: generateMigrationHash(sql), until: Infinity },
-			{ hash: foldedMigrationHash(sql), until: SPACES_KEPT_SINCE },
+			{ hash: foldedMigrationHash(sql), until: Infinity },
 		])
-		expect(SPACES_KEPT_SINCE).toBeGreaterThan(V0_5_0)
 	})
 
 	it("keeps the legacy normalization, whose regexes cut -- inside literals", () => {

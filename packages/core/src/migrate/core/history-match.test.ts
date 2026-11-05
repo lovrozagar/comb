@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { matchHistory, orphanMessage } from "./history-match.ts"
-import { SPACES_KEPT_SINCE, V0_5_0 } from "./parse.ts"
+import { foldedMigrationHash, generateMigrationHash, migrationHashes, V0_5_0 } from "./parse.ts"
 
 /** A file with its current hash and, after it, its pre-0.5.0 one */
 const file = (name: string, current: string, legacy?: string) => ({
@@ -33,31 +33,31 @@ describe("matchHistory: the legacy hash", () => {
 	})
 })
 
-/* SL5 of r22 (sibling: the legacy hash): 0.5.0 to 0.20 folded every Unicode space, so their hash of a file edited
-   to name another column (`a b` to `a`, a no-break space and `b`) is the one recorded for it; a row since comb kept them is not fooled */
+/* SL5 of r22 (sibling: the legacy hash): 0.5.0 to 0.20 folded every Unicode space, and no date tells which comb
+   recorded a row, so a row of any date matches by the folded hash */
 describe("matchHistory: the hash that folded every space", () => {
-	const files = [
-		{
-			hashes: [
-				{ hash: "kept", until: Infinity },
-				{ hash: "folded", until: SPACES_KEPT_SINCE },
-			],
-			name: "1.sql",
-		},
-	]
+	const unicode = "CREATE TABLE t (id INTEGER PRIMARY KEY, a\u00a0b);"
+	const ascii = "CREATE TABLE t (id INTEGER PRIMARY KEY, a b);"
+	const later = Date.parse("2027-01-01T00:00:00Z")
+	const files = [{ hashes: migrationHashes(unicode), name: "1.sql" }]
 
-	it("matches a row by the folded hash only when the row predates comb keeping spaces", () => {
-		const before = SPACES_KEPT_SINCE - 1
-		expect([...matchHistory(files, [{ createdAt: before, hash: "folded", name: "1.sql" }], true).applied]).toEqual([
-			"1.sql",
+	it("matches a row of any date by the folded hash of the unchanged file", () => {
+		const folded = foldedMigrationHash(unicode)
+		const matched = matchHistory(files, [{ createdAt: later, hash: folded, name: "1.sql" }], true)
+		expect([...matched.applied]).toEqual(["1.sql"])
+		expect(matched.edited).toEqual([])
+		expect(matchHistory(files, [{ createdAt: later, hash: folded, name: null }], true).named).toEqual([
+			{ hash: folded, name: "1.sql" },
 		])
-		expect(matchHistory(files, [{ createdAt: before, hash: "folded", name: null }], true).named).toEqual([
-			{ hash: "folded", name: "1.sql" },
-		])
-		expect(matchHistory(files, [{ createdAt: SPACES_KEPT_SINCE, hash: "folded", name: "1.sql" }], true).edited).toEqual(
-			["1.sql"],
-		)
-		expect(matchHistory(files, [{ createdAt: NOW + 1e10, hash: "kept", name: "1.sql" }], true).edited).toEqual([])
+	})
+
+	it("names a file applied with such a space, then edited to a plain one, and takes the edit the other way", () => {
+		const plain = [{ hashes: migrationHashes(ascii), name: "1.sql" }]
+		const kept = [{ createdAt: later, hash: generateMigrationHash(unicode), name: "1.sql" }]
+		expect(matchHistory(plain, kept, true).edited).toEqual(["1.sql"])
+		expect(
+			matchHistory(files, [{ createdAt: later, hash: generateMigrationHash(ascii), name: "1.sql" }], true).edited,
+		).toEqual([])
 	})
 })
 

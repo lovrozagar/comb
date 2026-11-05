@@ -70,7 +70,7 @@ async function history(
 	const table = resolveBinding(read, target)
 	if (!writes) assertLocalExists(read, target)
 	const rows = await readHistory(read, target, table)
-	const { applied, appliedAt, drizzle: hashes, recorded } = rows
+	const { applied, drizzle: hashes, recorded } = rows
 	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
@@ -79,10 +79,7 @@ async function history(
 		)
 	}
 	const edited = files.find(
-		({ name, sql }) =>
-			applied.has(name) &&
-			recorded.has(name) &&
-			!vouched(sql, recorded.get(name) as string, { appliedAt: appliedAt.get(name) as number, drizzle: hashes }),
+		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as string, hashes),
 	)
 	if (edited !== undefined) {
 		throw new Error(

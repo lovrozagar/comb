@@ -127,22 +127,35 @@ describe("statusD1 on a hash a 0.13 baseline copied from comb's pre-0.8 history"
 	})
 })
 
-/* SL5 of r22 (sibling: the pre-0.5.0 hash above): wrangler's applied_at dates the hash comb recorded in the same apply */
+/* SL5 of r22 (sibling: the pre-0.5.0 hash above): 0.20 recorded a hash that folded every space, on any date */
 describe("statusD1 on a file holding a space SQLite reads as part of a name", () => {
 	const ascii = "CREATE TABLE post (id TEXT, a b);"
 	const unicode = "CREATE TABLE post (id TEXT, a b);"
 
-	it("refuses an applied file edited to name another column through such a space", async () => {
+	it("refuses a file applied with such a space, then edited to a plain one", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), unicode)
+		writeSum(d1.migrationsDir)
+		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), ascii)
+		writeSum(d1.migrationsDir)
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+	})
+
+	/* the folded hash of the edited file is the plain file's own hash, so no hash can tell this edit */
+	it("takes a file applied with a plain space, then edited to such a space", async () => {
 		const { d1, read } = await target({})
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), ascii)
 		writeSum(d1.migrationsDir)
 		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), unicode)
 		writeSum(d1.migrationsDir)
-		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+		const lines: string[] = []
+		await statusD1(d1, read, (line) => lines.push(line))
+		expect(lines).toEqual(["Applied: 1_init.sql", "Pending: none"])
 	})
 
-	it("takes the hash 0.20 recorded for such a file only where wrangler applied it before comb kept the space", async () => {
+	it("takes the hash 0.20 recorded for such a file, whenever wrangler applied it", async () => {
 		const { d1, read } = await target({})
 		writeFileSync(join(d1.migrationsDir, "1_init.sql"), unicode)
 		writeSum(d1.migrationsDir)
@@ -150,8 +163,7 @@ describe("statusD1 on a file holding a space SQLite reads as part of a name", ()
 		await d1.conn.execute("UPDATE _comb_migration_hashes SET hash = ? WHERE name = '1_init.sql'", [
 			foldedMigrationHash(unicode),
 		])
-		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
-		await d1.conn.execute("UPDATE d1_migrations SET applied_at = '2026-11-01 12:00:00' WHERE name = '1_init.sql'")
+		await d1.conn.execute("UPDATE d1_migrations SET applied_at = '2027-01-01 12:00:00' WHERE name = '1_init.sql'")
 		const lines: string[] = []
 		await statusD1(d1, read, (line) => lines.push(line))
 		expect(lines).toEqual(["Applied: 1_init.sql", "Pending: none"])
