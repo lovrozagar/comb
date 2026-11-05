@@ -14,6 +14,7 @@ import type { ExtractedSchema } from "../migration-types.ts"
 import { preview } from "./classify-file.ts"
 import { readGuards } from "./guard-read.ts"
 import { refuseOutside } from "./proof-outside.ts"
+import { quote } from "./proof-seed-keys.ts"
 import { refuseFolded } from "./proof-split.ts"
 import { extractSchema } from "./schema.ts"
 import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
@@ -35,8 +36,6 @@ type Step = {
 /** A run's probe-name prefix: a token of its own, so no temp trigger a file made can take a probe's name (M46) */
 /* a UUID's hex, a string whatever Buffer's type is: Workers' types and Node's both name one (K1 of r18) */
 const probePrefix = (): string => `comb_probe_${randomUUID().replaceAll("-", "").slice(0, 16)}_`
-
-const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 /** Main's root pages: the table each stores, an index's root its table's, and which are tables' own */
 function rootsOf(db: LocalDb): Pick<Context, "main" | "tables"> {
@@ -218,10 +217,21 @@ function classifiedOf(statements: readonly string[], before: ExtractedSchema): S
 	return out
 }
 
+/** Why the copy refuses `sql`, or undefined once it ran */
+function refusal(db: ScratchDb, sql: string): string | undefined {
+	try {
+		db.exec(sql)
+		return undefined
+	} catch (thrown) {
+		// reason: a statement, or the commit that checks the keys a file deferred, refused is the file's failure
+		return (thrown as Error).message
+	}
+}
+
 /**
  * Apply one file to the copy as the target does: on a fresh connection (S1 of r21), foreign keys on, in one transaction,
  * a statement at a time (Bun's multi-statement exec skips a failing statement but the last, M9). Returns each statement's
- * effects on the tables there before the file, read before it runs, those tables' columns, or why a statement failed.
+ * effects on the existing tables, read before it runs, their columns, or why a statement or the commit failed.
  */
 function applyToCopy(db: ScratchDb, sql: string): { error?: string | undefined; start: Tables; steps: Step[] } {
 	db.reopen()
@@ -234,15 +244,7 @@ function applyToCopy(db: ScratchDb, sql: string): { error?: string | undefined; 
 	db.exec("BEGIN")
 	for (const [i, statement] of statements.entries()) {
 		const effects = explainStatement(db, statement, existing)
-		let error = typeof effects === "string" ? effects : undefined
-		if (error === undefined) {
-			try {
-				db.exec(statement)
-			} catch (thrown) {
-				// reason: a statement the copy refuses is the file's failure, returned with the statement
-				error = (thrown as Error).message
-			}
-		}
+		const error = typeof effects === "string" ? effects : refusal(db, statement)
 		if (error !== undefined) {
 			db.exec("ROLLBACK")
 			return { error: `${preview(statement)}: ${error}`, start, steps }
@@ -254,8 +256,9 @@ function applyToCopy(db: ScratchDb, sql: string): { error?: string | undefined; 
 			statement,
 		})
 	}
-	db.exec("COMMIT")
-	return { start, steps }
+	const error = refusal(db, "COMMIT")
+	if (error !== undefined) db.exec("ROLLBACK")
+	return error === undefined ? { start, steps } : { error: `COMMIT: ${error}`, start, steps }
 }
 
 /**

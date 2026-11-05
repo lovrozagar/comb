@@ -378,3 +378,19 @@ CREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(post_fts)
 		synced.close()
 	})
 })
+
+/* found by the scope corpus's quiet-pragma case: a deferred key is checked at the commit, which then fails */
+describe("the engine pass on a file that defers its keys", () => {
+	it("returns a key the file leaves broken as the file's failure, and leaves no transaction open", async () => {
+		const db = await openScratch()
+		db.exec(
+			"CREATE TABLE p (id INTEGER PRIMARY KEY);\nCREATE TABLE c (id INTEGER PRIMARY KEY, p INTEGER REFERENCES p (id));",
+		)
+		db.exec("INSERT INTO p (id) VALUES (1);\nINSERT INTO c (p) VALUES (1);")
+		const run = applyToCopy(db, "PRAGMA defer_foreign_keys = ON;\nDELETE FROM p;")
+		expect(run.error).toBe("COMMIT: FOREIGN KEY constraint failed")
+		expect(db.all("SELECT count(*) AS n FROM p")).toEqual([{ n: 1 }])
+		expect(applyToCopy(db, "PRAGMA defer_foreign_keys = ON;\nDELETE FROM c;\nDELETE FROM p;").error).toBeUndefined()
+		db.close()
+	})
+})
