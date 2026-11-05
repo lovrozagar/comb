@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { adopted, adopts, proveAdoption, sharedPrefix } from "./atlas-adopt.ts"
+import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"
 import { applyWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import type { AtlasRevision, AtlasStatus } from "./atlas-history.ts"
@@ -143,7 +143,7 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 		).rejects.toThrow(refusal)
 	})
 
-	it("says nothing is pending when 0.12 ran every file, and writes nothing", async () => {
+	it("says nothing is pending when 0.12 ran every file in a schema holding something, and writes nothing", async () => {
 		const calls: string[][] = []
 		const allRan: Run = async (_cmd, args) => {
 			calls.push([...args])
@@ -159,12 +159,67 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 			schema: "app",
 			url: "postgres://localhost/app",
 		}
-		expect(await statusWithAtlas({ dir, exec: allRan, print: (line) => out.push(line), target })).toEqual({
+		const status = { dir, exec: allRan, print: (line: string) => out.push(line), readHeld: async () => true, target }
+		expect(await statusWithAtlas(status)).toEqual({
 			applied: [],
 			pending: [],
 		})
 		expect(out).toEqual(["Applied: 0", "Pending: none", `3 files ${PENDING}`])
 		expect(calls.map((args) => args[1])).toEqual(["hash", "status", "status"])
+	})
+})
+
+/** Atlas's inspect of the target, its schema holding `tables` */
+const inspected = (tables: unknown[]): RunResult => ({
+	code: 0,
+	stderr: "",
+	stdout: JSON.stringify({ schemas: [{ name: "app", tables }] }),
+})
+
+/** Atlas on an app schema 0.12's shared history ran 1_a and 2_b for, its own history empty and the schema holding nothing */
+const sharingPublic: Run = async (_cmd, args) => {
+	if (args[1] === "hash") return hashed(args)
+	if (args[1] === "inspect") return inspected([])
+	const config = readFileSync((args[args.indexOf("--config") + 1] as string).replace("file://", ""), "utf8")
+	const isShared = config.includes('"atlas_schema_revisions"')
+	const rows = isShared ? [row("1_a.sql"), row("2_b.sql")] : []
+	const pending = isShared ? [] : ["1_a.sql", "2_b.sql", "3_c.sql"].map((Name) => ({ Name }))
+	return { code: 0, stderr: "", stdout: JSON.stringify({ ...shared(rows), pending }) }
+}
+
+/* PA6 of r22b: public's own rows match a schema sharing its directory by version and hash alone */
+describe("adoption: a schema sharing public's directory and holding nothing (PA6)", () => {
+	it("lists every file as pending, saying the matching rows are another schema's", async () => {
+		const out: string[] = []
+		const target = {
+			devUrl: "postgres://localhost/dev",
+			lockTimeout: "5s",
+			schema: "app",
+			url: "postgres://localhost/app",
+		}
+		const status = await statusWithAtlas({
+			dir,
+			exec: sharingPublic,
+			print: (line) => out.push(line),
+			readHeld: async () => false,
+			target,
+		})
+		expect(status).toEqual({ applied: [], pending: ["1_a.sql", "2_b.sql", "3_c.sql"] })
+		expect(out[0]).toBe(theirs("app", ["1_a.sql", "2_b.sql"]))
+	})
+})
+
+describe("holdsNothing: no object of any kind in the schema (PA6)", () => {
+	const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
+	it("is true when the read finds nothing in the schema, and false when it finds anything", async () => {
+		const asked: unknown[] = []
+		const read = (held: boolean) => async (live: unknown) => {
+			asked.push(live)
+			return held
+		}
+		expect(await holdsNothing({ readHeld: read(false), target })).toBe(true)
+		expect(await holdsNothing({ readHeld: read(true), target })).toBe(false)
+		expect(asked).toEqual([target, target])
 	})
 })
 
@@ -212,6 +267,13 @@ describe("proveAdoption", () => {
 		)
 		expect(out).toEqual(["Warning: Atlas: views are not inspected", UNCOMPARED])
 		rmSync(copy, { force: true, recursive: true })
+	})
+
+	it("is what check says once it holds", () => {
+		expect(proven(["1_a.sql"])).toBe(
+			"1 file ran under 0.12's shared history, and the schema holds what they leave; apply would adopt them",
+		)
+		expect(proven(["1_a.sql", "2_b.sql"])).toMatch(/^2 files ran/)
 	})
 })
 

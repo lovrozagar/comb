@@ -6,8 +6,12 @@
  * the schema's own history, and check and status say so. A shared row that names no file here is
  * another schema's, and stays as it is (M78). A matching prefix is no proof: public's own rows
  * live in that table too, so a schema beside it that shares its directory matches them by version
- * and hash alone. Apply and baseline adopt only once the schema holds what replaying the prefix
- * leaves, its tables and every kind COMPARED names (pg-live-catalog.ts's ARM_KINDS) (P2 of the 0.14.1 review, P9 of 0.15.0, P10 of r18, P12 of r19).
+ * and hash alone. A schema that holds nothing made none of what they make, so they are another
+ * schema's and its files are pending, in status, check, apply and baseline alike (PA6 of r22b);
+ * holding nothing is read from pg_depend, so it holds for every kind of object alike. Any
+ * other schema is adopted only once it holds what replaying the prefix leaves, its tables and every
+ * kind COMPARED names (pg-live-catalog.ts's ARM_KINDS), and check proves it as apply does (P2 of
+ * the 0.14.1 review, P9 of 0.15.0, P10 of r18, P12 of r19).
  */
 import { copyFileSync } from "node:fs"
 import { join } from "node:path"
@@ -17,6 +21,7 @@ import type { PgTarget } from "./atlas-target.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
+import { holdsAnything, type ReadHeld } from "./pg-schema-members.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import type { Run } from "./process.ts"
 import { scratchDir } from "./cleanup.ts"
@@ -83,11 +88,27 @@ async function proveAdoption(
 	}
 }
 
-/** What status and check say of the files 0.12 ran, which they do not prove */
+/**
+ * Whether the target's schema holds nothing: no object of any kind depends on it (pg-schema-members.ts),
+ * default privileges apart. Reads only
+ */
+async function holdsNothing(options: { readHeld?: ReadHeld | undefined; target: PgTarget }): Promise<boolean> {
+	return !(await (options.readHeld ?? holdsAnything)(options.target))
+}
+
+/** What status, check, apply and baseline say of shared rows matching `ran` in a schema that holds nothing (PA6) */
+const theirs = (schema: string, ran: readonly string[]): string =>
+	`the rows 0.12's shared history holds for ${ran.join(", ")} are another schema's, public's where it migrates this directory: ${schema} holds nothing they make, so they are pending here`
+
+/** What status says of the files 0.12 ran, which it does not prove */
 const adopts = (ran: readonly string[]): string =>
 	`${ran.length} file${ran.length === 1 ? "" : "s"} ran under 0.12's shared history; apply would adopt them, pending proof that the schema holds what they leave`
+
+/** What check says once it proved them */
+const proven = (ran: readonly string[]): string =>
+	`${ran.length} file${ran.length === 1 ? "" : "s"} ran under 0.12's shared history, and the schema holds what they leave; apply would adopt them`
 
 /** What apply and baseline say once they recorded them */
 const adopted = (ran: readonly string[]): string => `Adopted from 0.12's shared history: ${ran.join(", ")}`
 
-export { adopted, adopts, proveAdoption, sharedPrefix }
+export { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs }

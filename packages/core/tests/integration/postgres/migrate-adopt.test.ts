@@ -104,9 +104,10 @@ async function migratedUnder012(
 	return shared(url)
 }
 
+/* check proves an adoption as apply does (PA6 of r22b) */
+const PROVEN = "1 file ran under 0.12's shared history, and the schema holds what they leave; apply would adopt them"
 const ADOPTS =
 	"1 file ran under 0.12's shared history; apply would adopt them, pending proof that the schema holds what they leave"
-const PENDING_PROOF = ADOPTS
 
 /** A dev database and a target, each a scratch database of its own: adoption replays what 0.12 ran on the dev database */
 const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
@@ -122,7 +123,7 @@ describe("migrate on Postgres: a schema migrated under 0.12's shared history (M7
 				expect(status.out).toContain(ADOPTS)
 				const check = command(url, devUrl)
 				expect(await applyWithAtlas({ ...check, checkOnly: true })).toEqual(["20260102000000_backfill.sql"])
-				expect(check.out).toContain(ADOPTS)
+				expect(check.out).toContain(PROVEN)
 				expect(await own(url)).toBeUndefined()
 				expect(await shared(url)).toEqual(before)
 			})
@@ -247,31 +248,83 @@ describe("migrate on Postgres: what adopting 0.12's shared history refuses and k
 	})
 })
 
+const A = "20260101000010_a.sql"
+const B = "20260101000020_b.sql"
+/** Public migrated the directory itself, so its own history is the shared table, and app has none */
+async function publicMigrated(url: string, devUrl: string): Promise<void> {
+	await migrations({ [A]: 'CREATE TABLE "a" ("id" integer);\n', [B]: 'CREATE TABLE "b" ("id" integer);\n' })
+	const pub = command(url, devUrl)
+	expect(await applyWithAtlas({ ...pub, target: { ...pub.target, schema: "public" } })).toEqual([A, B])
+	await query(url, "CREATE SCHEMA app")
+}
+const THEIRS = `the rows 0.12's shared history holds for ${A}, ${B} are another schema's, public's where it migrates this directory: app holds nothing they make, so they are pending here`
+/** The tables of app, by name */
+const appTables = async (url: string) =>
+	(
+		await query<{ table_name: string }>(
+			url,
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'app' ORDER BY table_name",
+		)
+	).map((r) => r.table_name)
+
 /* P2 of the 0.14.1 review: public's rows share 0.12's table, so a new schema beside it matches them by version and hash alone */
-describe("migrate on Postgres: an empty schema sharing public's directory and its shared history (P2)", () => {
+describe("migrate on Postgres: an empty schema sharing public's directory migrates (PA6; sibling: 0.14.1 P2's adoption)", () => {
 	describe("with Atlas v1.3.0", () => {
-		it("refuses to adopt in apply and baseline, recording nothing, and check and status say it awaits proof", async () => {
+		it("lists, checks and applies its files as pending, then a second apply and status find it in sync", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
-				await migrations({ "20260101000000_users.sql": USERS })
-				applyAs012(url, "public")
-				await query(url, "CREATE SCHEMA app")
-				const refusal =
-					"app does not hold what 0.12's shared history ran (20260101000000_users.sql), so comb adopts none of it"
-				await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(refusal)
-				await expect(baselineWithAtlas(command(url, devUrl))).rejects.toThrow(refusal)
-				expect((await own(url)) ?? []).toEqual([])
-				expect(await query(url, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'app'")).toEqual(
-					[],
-				)
+				await publicMigrated(url, devUrl)
 				const status = command(url, devUrl)
-				await statusWithAtlas(status)
-				expect(status.out).toContain(PENDING_PROOF)
+				expect(await statusWithAtlas(status)).toEqual({ applied: [], pending: [A, B] })
+				expect(status.out).toContain(THEIRS)
 				const check = command(url, devUrl)
-				await applyWithAtlas({ ...check, checkOnly: true })
-				expect(check.out).toContain(PENDING_PROOF)
+				expect(await applyWithAtlas({ ...check, checkOnly: true })).toEqual([A, B])
+				expect(check.out).toContain(THEIRS)
+				expect(await own(url)).toBeUndefined()
+				const apply = command(url, devUrl)
+				expect(await applyWithAtlas(apply)).toEqual([A, B])
+				expect(apply.out).toContain(THEIRS)
+				expect(await appTables(url)).toEqual(["a", "b"])
+				expect(await own(url)).toEqual(["20260101000010", "20260101000020"])
+				const again = command(url, devUrl)
+				expect(await applyWithAtlas(again)).toEqual([])
+				expect(again.out).toEqual(["No migrations to apply"])
+				expect(await statusWithAtlas(command(url, devUrl))).toEqual({ applied: [A, B], pending: [] })
+				await expect(baselineWithAtlas(command(url, devUrl))).rejects.toThrow(
+					"the database already records 2 migrations (up to 20260101000020); baseline marks a database that has none",
+				)
 			})
 		}, 90_000)
 
+		it("baselines nothing while it holds none of what the files leave, as any database without them", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				await publicMigrated(url, devUrl)
+				const baseline = command(url, devUrl)
+				await expect(baselineWithAtlas(baseline)).rejects.toThrow(
+					"the database's tables are not the ones the migrations leave, so baseline records nothing",
+				)
+				expect(baseline.out).toContain(THEIRS)
+				expect(await own(url)).toBeUndefined()
+				expect(await appTables(url)).toEqual([])
+			})
+		}, 90_000)
+
+		it("refuses, in check as in apply and baseline, a schema that holds part of what the files leave", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				await publicMigrated(url, devUrl)
+				await query(url, 'CREATE TABLE app."a" ("id" integer)')
+				const refusal = `app does not hold what 0.12's shared history ran (${A}, ${B}), so comb adopts none of it`
+				await expect(applyWithAtlas({ ...command(url, devUrl), checkOnly: true })).rejects.toThrow(refusal)
+				await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(refusal)
+				await expect(baselineWithAtlas(command(url, devUrl))).rejects.toThrow(refusal)
+				expect(await own(url)).toBeUndefined()
+				expect(await appTables(url)).toEqual(["a"])
+			})
+		}, 90_000)
+	})
+})
+
+describe("migrate on Postgres: adoption's proof needs the dev database (0.14.1 P2)", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("refuses to adopt, naming devUrl, when the dev database cannot be reached, recording nothing", async () => {
 			await withScratchDb(async (url) => {
 				await migratedUnder012(url)

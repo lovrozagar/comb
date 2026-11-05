@@ -14,7 +14,7 @@
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
-import { adopted, adopts, proveAdoption, sharedPrefix } from "./atlas-adopt.ts"
+import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"
 import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
 import {
 	type AtlasFile,
@@ -39,21 +39,35 @@ import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { sweepDev } from "./pg-replay-drops.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { classifyPending } from "./atlas-pending.ts"
+import type { ReadHeld } from "./pg-schema-members.ts"
 
-type ApplyOptions = AtlasCommand & {
-	/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
-	approve(migration: ParsedMigration): Promise<Approval>
-	/** only check: stop once every pending file is approved, applying nothing */
-	checkOnly?: boolean | undefined
-	/** how check replays the history and the pending files on dev: comb's own (pg-check-replay.ts) unless a test says otherwise */
-	replayPending?: typeof replayPending | undefined
-	sweepDev?: typeof sweepDev | undefined
-}
+/** What Postgres's adoption reads beside Atlas: the catalog, the replay, the dev schema and whether the schema holds anything, comb's own unless a test says otherwise */
+type Reads = Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev"> & { readHeld?: ReadHeld | undefined }
 
-/** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
-async function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): Promise<string[]> {
+type ApplyOptions = AtlasCommand &
+	Reads & {
+		/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
+		approve(migration: ParsedMigration): Promise<Approval>
+		/** only check: stop once every pending file is approved, applying nothing */
+		checkOnly?: boolean | undefined
+		/** how check replays the history and the pending files on dev: comb's own (pg-check-replay.ts) unless a test says otherwise */
+		replayPending?: typeof replayPending | undefined
+		sweepDev?: typeof sweepDev | undefined
+	}
+
+/**
+ * The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77):
+ * none when the schema holds nothing, whose matching rows are another schema's, said here (PA6)
+ */
+async function sharedRan(options: AtlasCommand & Reads, copy: string, own: AtlasStatus): Promise<string[]> {
 	if (options.target.schema === "public" || own.applied.length > 0) return []
-	return sharedPrefix(await atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }), copy)
+	const prefix = sharedPrefix(
+		await atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }),
+		copy,
+	)
+	if (prefix.length === 0 || !(await holdsNothing(options))) return prefix
+	options.print(theirs(options.target.schema, prefix))
+	return []
 }
 
 /** `own` as status, apply and check take it: a database with objects and no history, or one adoption gave, refused */
@@ -74,11 +88,7 @@ async function ownOf(
 }
 
 /** Record `ran` in the schema's own history, without running it, once the schema proves it holds what they leave: Atlas writes the rows in one transaction */
-async function adopt(
-	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev">,
-	copy: string,
-	ran: readonly string[],
-): Promise<void> {
+async function adopt(options: AtlasCommand & Reads, copy: string, ran: readonly string[]): Promise<void> {
 	await proveAdoption({ ...options, exec: options.exec ?? run }, copy, ran)
 	const set = await atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
 	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
@@ -120,9 +130,10 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 	try {
 		const own = await atlasStatus(options, copy, { notClean: true })
 		const ran = await sharedRan(options, copy, own)
-		/* a check of an adoption writes nothing: it classifies the files after what 0.12 ran */
+		/* a check of an adoption proves it as apply does, writes nothing, and classifies the files after what 0.12 ran (PA6) */
 		if (ran.length > 0 && options.checkOnly === true) {
-			options.print(adopts(ran))
+			await proveAdoption({ ...options, exec: options.exec ?? run }, copy, ran)
+			options.print(proven(ran))
 			await approvePending(options, copy, after(copy, ran))
 			return after(copy, ran).map((file) => file.Name)
 		}
@@ -179,9 +190,7 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
  * the database already records migrations, and when its tables, functions or triggers are not the
  * ones the migrations leave. Returns the files marked.
  */
-async function baselineWithAtlas(
-	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev">,
-): Promise<string[]> {
+async function baselineWithAtlas(options: AtlasCommand & Reads): Promise<string[]> {
 	return onSnapshot(options, async (copy) => {
 		const status = await atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
@@ -214,7 +223,9 @@ async function baselineWithAtlas(
 }
 
 /** Print what Atlas records as applied, what is pending, and where a file stopped halfway; returns both, by file name */
-async function statusWithAtlas(options: AtlasCommand): Promise<{ applied: string[]; pending: string[] }> {
+async function statusWithAtlas(
+	options: AtlasCommand & Pick<Reads, "readHeld" | "readLive">,
+): Promise<{ applied: string[]; pending: string[] }> {
 	return onSnapshot(options, async (copy) => {
 		const own = await atlasStatus(options, copy, { notClean: true })
 		const ran = await sharedRan(options, copy, own)
