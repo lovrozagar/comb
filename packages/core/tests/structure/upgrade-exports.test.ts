@@ -3,10 +3,10 @@
  * adds, removes or changes since the release it upgrades from, so it never promises an export that
  * is not there, nor leaves one out, nor hides a changed signature, and it names each member a type
  * the release's exports reach lost or made required. The release's exports, each with a hash of its
- * emitted declaration, and the members of those types are checked in (__snapshots__/released-exports.json); after a
- * release, regenerate them from the tag with support/write-released-exports.ts.
+ * emitted declaration, the members of those types and the text of its API snapshots are checked in
+ * (__snapshots__/released-exports.json), so the check needs no git, whose CI checkout is shallow and
+ * has no tags; after a release, regenerate them from the tag with support/write-released-exports.ts.
  */
-import { spawnSync } from "node:child_process"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { ts } from "ts-morph"
@@ -18,6 +18,8 @@ const RELEASED = JSON.parse(readFileSync(join(import.meta.dirname, "__snapshots_
 	exports: Exports
 	inputs: string[]
 	members: Members
+	/** Each API snapshot file the release had, and its text */
+	snapshots: Record<string, string>
 	version: string
 }
 const README = readFileSync(join(ROOT, "../../README.md"), "utf8")
@@ -151,20 +153,14 @@ function callablesOf(text: string): Map<string, boolean> {
 	return found
 }
 
-/** The snapshot `file` at the release's tag, or nothing when the release had no such subpath */
-function releasedSnapshot(file: string, version: string): string {
-	const path = `packages/core/tests/structure/__snapshots__/api/${file}`
-	const shown = spawnSync("git", ["show", `v${version}:${path}`], { cwd: ROOT, encoding: "utf8" })
-	if (shown.status === 0) return shown.stdout
-	expect(shown.stderr, `git show v${version}:${path}`).toMatch(/does not exist|exists on disk, but not in/)
-	return ""
-}
+/** The snapshot `file` the release had, or nothing when it had no such subpath */
+const releasedSnapshot = (file: string): string => RELEASED.snapshots[file] ?? ""
 
 /** Each public callable the release exports that returned no promise there and returns one now, sorted, once */
-function becamePromises(exports: Exports, version: string): string[] {
+function becamePromises(exports: Exports): string[] {
 	const names = readdirSync(API).flatMap((file) => {
 		const now = callablesOf(readFileSync(join(API, file), "utf8"))
-		const then = callablesOf(releasedSnapshot(file, version))
+		const then = callablesOf(releasedSnapshot(file))
 		const exported = exports[subpathOf(file)] ?? {}
 		/* a member counts when its type is exported: `CliIo.run` with `CliIo` */
 		return [...then.keys()].filter(
@@ -280,13 +276,13 @@ describe("the newest upgrade section's exports", () => {
 
 	/* D5-1 of the area D round-five review: the async paragraph left out exportDrizzleSchema and named a bare run */
 	it("names, in its async paragraph, exactly the public callables that return a promise since then", () => {
-		const became = becamePromises(RELEASED.exports, RELEASED.version).filter((name) => !name.includes("."))
+		const became = becamePromises(RELEASED.exports).filter((name) => !name.includes("."))
 		expect(released ? [] : promised(section), `became promises since ${RELEASED.version}`).toEqual(became)
 	})
 
 	/* D6-4 of the area D round-six review: a runner an embedder passes, `CliIo.run`, became async too */
 	it("names in that paragraph each member of a public type that returns a promise since then", () => {
-		const became = becamePromises(RELEASED.exports, RELEASED.version).filter((name) => name.includes("."))
+		const became = becamePromises(RELEASED.exports).filter((name) => name.includes("."))
 		expect(released ? [] : became).toContain("CliIo.run")
 		const paragraph = released ? "" : promiseParagraph(section).paragraph
 		expect(became.filter((name) => !paragraph.includes(`\`${name}\``))).toEqual([])
