@@ -81,6 +81,23 @@ describe("the README's Postgres lock warnings (AE2-12)", () => {
 	})
 })
 
+describe("the README on the locks only check's replay measures (AE2-13)", () => {
+	it("tells the apply paragraph's reader to run check on a postgres:// devUrl before apply", () => {
+		const advice = sentence(
+			paragraph("`apply` works on a private copy of the migrations directory"),
+			"run `check` on a `postgres://` `devUrl` before `apply`",
+		)
+		expect(advice).toContain("a lock a `DO` block, a function or `EXECUTE` takes")
+		expect(advice).toContain("a table a `DO` block renamed")
+	})
+
+	it("leaves the advice out of the 0.21 upgrade item, which installed docs strip", () => {
+		const item = /^74\. [^\n]*$/m.exec(upgrade)?.[0]
+		expect(item).toContain("**Fix:** none")
+		expect(item).not.toContain("before `apply`")
+	})
+})
+
 describe("the README on Postgres's outside-transaction statements (PA14 of r22b)", () => {
 	const list = sentence(
 		paragraph("A statement Postgres runs only outside a transaction needs its own file"),
