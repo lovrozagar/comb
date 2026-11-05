@@ -33,8 +33,8 @@ type Scan = {
 	width: number
 }
 
-/** A chunk Atlas sends, exactly as it sends it, and the comments before it that it leaves out */
-type Chunk = { lead: string; text: string }
+/** A chunk Atlas sends, exactly as it sends it, the comments before it that it leaves out, and the offset in the file its text starts at */
+type Chunk = { at: number; lead: string; text: string }
 
 /** The paren depth of the chunk being read, and where its first open paren was */
 type Parens = { depth: number; opening: number }
@@ -134,11 +134,13 @@ function scanOf(input: string): Scan {
 /** The chunk read so far, emitted: the input moves past it, the delimiter trimmed when not `;` */
 function emit(s: Scan, text: string): Chunk {
 	const lead = trim(s.src.slice(s.base + s.start, s.base + s.total - s.pos))
+	/* the text starts the unread input, its spaces trimmed off */
+	const at = s.src.length - s.input.length + text.length - trimStart(text).length
 	s.input = s.input.slice(s.pos)
 	s.pos = 0
 	s.start = s.total
 	const kept = s.delim !== DELIMITER && text.endsWith(s.delim) ? text.slice(0, -s.delim.length) : text
-	return { lead, text: trim(kept) }
+	return { at, lead, text: trim(kept) }
 }
 
 /** Past the quoted text opening before `pos`; an unclosed one refuses the file */

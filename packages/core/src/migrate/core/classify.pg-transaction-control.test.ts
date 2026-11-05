@@ -48,3 +48,41 @@ describe("a transactional file holds no transaction control (PA2; sibling: PA13'
 		).not.toThrow()
 	})
 })
+
+/* AE7 of r22: Atlas records a txmode none file after its last statement, in a block the file left open */
+describe("a txmode none file ends the transaction it opens (AE7)", () => {
+	const none = "-- atlas:txmode none\n\n"
+
+	it.each([
+		["BEGIN", `${none}BEGIN;\nINSERT INTO t VALUES (1);\n`, "BEGIN at line 3"],
+		[
+			"START TRANSACTION after comments",
+			`${none}-- a\n/* b\n */ START TRANSACTION;\nINSERT INTO t VALUES (1);\n`,
+			"START TRANSACTION at line 5",
+		],
+		["a second BEGIN", `${none}BEGIN;\nCOMMIT;\nINSERT INTO t VALUES (1); BEGIN;\n`, "BEGIN at line 5"],
+		["COMMIT AND CHAIN", `${none}BEGIN;\nINSERT INTO t VALUES (1);\nCOMMIT AND CHAIN;\n`, "COMMIT AND CHAIN at line 5"],
+		["ROLLBACK AND CHAIN", `${none}BEGIN;\nROLLBACK AND CHAIN;\n`, "ROLLBACK AND CHAIN at line 4"],
+		[
+			"BEGIN after comments in a chunk it shares",
+			`-- atlas:delimiter GO\n${none}SELECT 1; -- c\n/* d */ BEGIN\nGO\n`,
+			"BEGIN at line 5",
+		],
+	])("refuses a file that leaves its %s open", (_, sql, at) => {
+		expect(() => rate(sql)).toThrow(
+			`the file's ${at} is never committed: Atlas records a "-- atlas:txmode none" file after its last statement, in the transaction still open, and closing the connection rolls back both; end it with COMMIT or ROLLBACK`,
+		)
+	})
+
+	it("names the BEGIN that opened a block a later BEGIN only warns in", () => {
+		expect(() => rate(`${none}BEGIN;\nBEGIN;\nINSERT INTO t VALUES (1);\n`)).toThrow(
+			"the file's BEGIN at line 3 is never committed",
+		)
+	})
+
+	it("leaves a file whose block a COMMIT, a ROLLBACK or a PREPARE TRANSACTION ends", () => {
+		expect(() => rate(`${none}BEGIN;\nINSERT INTO t VALUES (1);\nCOMMIT;\n`)).not.toThrow()
+		expect(() => rate(`${none}START TRANSACTION;\nCOMMIT AND CHAIN;\nROLLBACK;\n`)).not.toThrow()
+		expect(() => rate(`${none}BEGIN;\nINSERT INTO t VALUES (1);\nPREPARE TRANSACTION 'p';\n`)).not.toThrow()
+	})
+})

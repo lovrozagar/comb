@@ -198,14 +198,16 @@ describe("atlasChunks: the chunks atlas 1.3.0 sends Postgres", () => {
 describe("atlasChunks: the comments before a chunk, which Atlas leaves out", () => {
 	it("keeps them beside the chunk, and none past the last", () => {
 		expect(atlasChunks("-- a\n/* b */\nSELECT 1;\n-- c\nSELECT 2; -- d\n")).toEqual([
-			{ lead: "-- a\n/* b */", text: "SELECT 1;" },
-			{ lead: "-- c", text: "SELECT 2;" },
+			{ at: 13, lead: "-- a\n/* b */", text: "SELECT 1;" },
+			{ at: 28, lead: "-- c", text: "SELECT 2;" },
 		])
 	})
 
 	it("reads them from past a delimiter directive and a DELIMITER line", () => {
-		expect(atlasChunks("-- atlas:delimiter GO\n-- a\nSELECT 1 GO\n")).toEqual([{ lead: "-- a", text: "SELECT 1" }])
-		expect(atlasChunks("-- a\nDELIMITER //\n-- b\nSELECT 1//\n")).toEqual([{ lead: "-- b", text: "SELECT 1" }])
+		expect(atlasChunks("-- atlas:delimiter GO\n-- a\nSELECT 1 GO\n")).toEqual([
+			{ at: 27, lead: "-- a", text: "SELECT 1" },
+		])
+		expect(atlasChunks("-- a\nDELIMITER //\n-- b\nSELECT 1//\n")).toEqual([{ at: 23, lead: "-- b", text: "SELECT 1" }])
 	})
 
 	it("puts them before the chunk's text, on a line of their own, and the ; off", () => {

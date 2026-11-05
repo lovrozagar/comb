@@ -174,6 +174,8 @@ function blockAfter(open: boolean, type: string, node: Node): boolean {
 	const kind = String(node["kind"])
 	if (kind === "TRANS_STMT_BEGIN" || kind === "TRANS_STMT_START") return true
 	if (kind === "TRANS_STMT_COMMIT" || kind === "TRANS_STMT_ROLLBACK") return node["chain"] === true
+	/* a prepared transaction leaves the session, which is then in none */
+	if (kind === "TRANS_STMT_PREPARE") return false
 	return open
 }
 

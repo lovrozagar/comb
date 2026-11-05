@@ -10,6 +10,7 @@ import { extractSchema } from "./schema.ts"
 
 /* Postgres runs these only outside a transaction, and Atlas's transaction ends at a file's own BEGIN, COMMIT or ROLLBACK, so comb refuses them anywhere but a txmode none file, which is cautious at least (P8 of r19, PA2 of r22b) */
 const NO_TX = "-- atlas:txmode none\n\n"
+/* a block a txmode none file opens it also ends, as an open one is refused (AE7 of r22) */
 
 const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", NO_TX + "ABORT", "unsafe"],
@@ -48,7 +49,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ALTER USER MAPPING FOR u SERVER s OPTIONS (SET x 'y')", "unsafe"],
 	["postgres", "ALTER VIEW v OWNER TO r", "cautious"],
 	["postgres", "ANALYZE post", "safe"],
-	["postgres", NO_TX + "BEGIN", "cautious"],
+	["postgres", NO_TX + "BEGIN;\nCOMMIT", "cautious"],
 	/* a procedure's body is code comb does not read (pg-tree.ts) */
 	["postgres", "CALL p()", "unsafe"],
 	["postgres", "CHECKPOINT", "unsafe"],
@@ -143,7 +144,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "SELECT 1", "safe"],
 	["postgres", "SET x = 1", "safe"],
 	["postgres", "SHOW x", "unsafe"],
-	["postgres", NO_TX + "START TRANSACTION", "cautious"],
+	["postgres", NO_TX + "START TRANSACTION;\nROLLBACK", "cautious"],
 	["postgres", "TRUNCATE post", "unsafe"],
 	["postgres", "UNLISTEN x", "unsafe"],
 	["postgres", "UPDATE post SET a = 1 WHERE id = 1", "unsafe"],

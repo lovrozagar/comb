@@ -791,9 +791,11 @@ type RawStmt = {
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
  * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
- * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); and its tree
+ * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); the line,
+ * from 1, `sent` starts on in the file; and its tree
  */
 type PgStatement = {
+    line: number;
     sent: string;
     text: string;
     tree: RawStmt[] | undefined;
@@ -1107,6 +1109,8 @@ type ReadStatement = {
     control?: string | undefined;
     dialect: Dialect;
     inside?: string | undefined;
+    /** on Postgres, the line, from 1, the statement starts on in its file */
+    line?: number | undefined;
     outside?: string | undefined;
     stmt: string;
     tree?: unknown;
@@ -1124,8 +1128,14 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  */
 declare function refuseUnrunnable({ code, control, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
 /**
+ * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
+ * records the file after its last statement, in that transaction, and closing the connection rolls
+ * back both, so apply would say the file ran with nothing of it kept
+ */
+declare function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void;
+/**
  * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
  * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
  */
 declare function refuseHeader(sql: string, dialect: Dialect): void;
-export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseUnrunnable, reindexedOf };
+export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseOpenBlock, refuseUnrunnable, reindexedOf, };

@@ -10,7 +10,8 @@ import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasHeader, outsideTransaction } from "./atlas-header.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { type TargetKind, targetRefusal } from "./classify-target.ts"
-import { hashedSql, normalizeSql } from "./sql-scan.ts"
+import { blockAfter, nodeOf } from "./pg-outside-transaction.ts"
+import { hashedSql, normalizeSql, segments } from "./sql-scan.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_TABLE = /* @__PURE__ */ new RegExp(
@@ -84,6 +85,8 @@ type ReadStatement = {
 	control?: string | undefined
 	dialect: Dialect
 	inside?: string | undefined
+	/** on Postgres, the line, from 1, the statement starts on in its file */
+	line?: number | undefined
 	outside?: string | undefined
 	stmt: string
 	tree?: unknown
@@ -201,6 +204,40 @@ function refuseOutOfScope(
 	}
 }
 
+/** The line `read`'s code starts on, past the comments a later statement of a chunk opens with */
+function codeLine({ line = 1, stmt }: ReadStatement): number {
+	let skipped = ""
+	for (const { kind, text } of segments(stmt, "postgres")) {
+		const lead = kind === "comment" ? text : (/^\s*/.exec(text)?.[0] as string)
+		skipped += lead
+		if (lead !== text) break
+	}
+	return line + skipped.split("\n").length - 1
+}
+
+// AE7 of r22
+/**
+ * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
+ * records the file after its last statement, in that transaction, and closing the connection rolls
+ * back both, so apply would say the file ran with nothing of it kept
+ */
+function refuseOpenBlock(reads: readonly ReadStatement[], sql: string): void {
+	if (!outsideTransaction(sql)) return
+	let opener: { name: string; read: ReadStatement } | undefined
+	for (const read of reads) {
+		if (read.dialect !== "postgres" || read.tree === undefined) continue
+		const [type, node] = nodeOf(read.tree)
+		if (!blockAfter(opener !== undefined, type, node)) opener = undefined
+		/* a BEGIN in an open block only warns; a COMMIT or ROLLBACK AND CHAIN opens the next */
+		else if (opener === undefined || node["chain"] === true)
+			opener = { name: `${read.control}${node["chain"] === true ? " AND CHAIN" : ""}`, read }
+	}
+	if (opener === undefined) return
+	throw new Error(
+		`the file's ${opener.name} at line ${codeLine(opener.read)} is never committed: Atlas records a "-- atlas:txmode none" file after its last statement, in the transaction still open, and closing the connection rolls back both; end it with COMMIT or ROLLBACK`,
+	)
+}
+
 /**
  * Refuses a Postgres file whose header's txmode Atlas refuses, quoting Atlas (PA3 of r22b): apply
  * would stop at it before it runs a statement; no `-- comb:allow-unsafe:` overrides this
@@ -213,4 +250,13 @@ function refuseHeader(sql: string, dialect: Dialect): void {
 	)
 }
 
-export { ftsCommandFindings, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseUnrunnable, reindexedOf }
+export {
+	ftsCommandFindings,
+	preview,
+	PROCESS_PRAGMAS,
+	type ReadStatement,
+	refuseHeader,
+	refuseOpenBlock,
+	refuseUnrunnable,
+	reindexedOf,
+}

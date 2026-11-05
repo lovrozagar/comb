@@ -91,3 +91,29 @@ describe("a transactional file holds no transaction control (PA2; sibling: PA13'
 		)
 	}, 60_000)
 })
+
+/* AE7 of r22: Atlas records a txmode none file after its last statement, so a block the file leaves open takes the record, and the closed connection rolls back both */
+describe("a txmode none file ends the transaction it opens (AE7; sibling: PA2's transaction control)", () => {
+	const OPEN = "-- atlas:txmode none\n\nBEGIN;\nCREATE TABLE a (x int);\n"
+	const NEVER = "the file's BEGIN at line 3 is never committed"
+
+	it.each([
+		["alone", [OPEN]],
+		["with a file after it", [OPEN, "CREATE TABLE b (x int);\n"]],
+	])(
+		"is refused at check and at apply %s, and nothing of it stays",
+		async (_, files) => {
+			await write(files)
+			await withScratchDb((dev) =>
+				withScratchDb(async (url) => {
+					await expect(applyWithAtlas(options(dev, url, true))).rejects.toThrow(NEVER)
+					await expect(applyWithAtlas(options(dev, url))).rejects.toThrow(NEVER)
+					expect(await tables(url)).toEqual([])
+					/* Atlas makes its revisions table on its first read; nothing of the file is in it */
+					expect(await query(url, "SELECT version FROM atlas_schema_revisions.atlas_schema_revisions")).toEqual([])
+				}),
+			)
+		},
+		60_000,
+	)
+})

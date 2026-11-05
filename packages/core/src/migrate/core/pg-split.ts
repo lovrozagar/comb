@@ -17,9 +17,10 @@ type RawStmt = { stmt_len?: number | undefined; stmt_location?: number | undefin
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
  * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
- * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); and its tree
+ * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); the line,
+ * from 1, `sent` starts on in the file; and its tree
  */
-type PgStatement = { sent: string; text: string; tree: RawStmt[] | undefined }
+type PgStatement = { line: number; sent: string; text: string; tree: RawStmt[] | undefined }
 
 /** A statement the parser cannot read, with its reason */
 type Unreadable = { error: string; statement: string }
@@ -33,12 +34,18 @@ type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
 /** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
 type FileRead = { dialect: "sqlite"; sql: string } | { dialect: "postgres"; read: PgRead; sql: string }
 
+/** A chunk with the line, from 1, its text starts on in the file */
+type Lined = Chunk & { line: number }
+
+/** How many line breaks `text` holds */
+const newlines = (text: string): number => text.split("\n").length - 1
+
 /**
  * The statements Postgres reads in one chunk, the comments before it kept on the first. Atlas
  * sends the chunk's text without its lead, and Postgres nests block comments where Atlas's split
  * does not, so the text alone is parsed: a lead can never hide what runs (P1 of the 0.14.1 review)
  */
-function readChunk(chunk: Chunk): Read {
+function readChunk(chunk: Lined): Read {
 	/* the parser is loaded, or this throws before a chunk is read as unreadable */
 	postgresParser()
 	const source = chunk.text
@@ -49,14 +56,19 @@ function readChunk(chunk: Chunk): Read {
 		stmts = parsePostgres(source).stmts as RawStmt[]
 	} catch (error) {
 		const text = unterminated(chunk)
-		return { error: (error as Error).message, statements: [{ sent: text, text, tree: undefined }] }
+		return { error: (error as Error).message, statements: [{ line: chunk.line, sent: text, text, tree: undefined }] }
 	}
 	const bytes = new TextEncoder().encode(source)
 	const decoder = new TextDecoder()
+	/* the lines counted to `at`, a byte offset, as each statement starts past the one before it */
+	let [line, at] = [chunk.line, 0]
 	const statements = stmts.map((stmt) => {
 		const { stmt_len: length = 0, stmt_location: from = 0 } = stmt
-		const text = decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length)).trim()
-		return { sent: text, text, tree: [stmt] }
+		const raw = decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length))
+		line += newlines(decoder.decode(bytes.subarray(at, from)))
+		at = from
+		const text = raw.trim()
+		return { line: line + newlines(raw.slice(0, raw.length - raw.trimStart().length)), sent: text, text, tree: [stmt] }
 	})
 	const read = statements.filter(({ text }) => text !== "")
 	const [first] = read
@@ -68,8 +80,13 @@ function readChunk(chunk: Chunk): Read {
  * The chunks of `sql`, the file's header (atlasHeader), which is no statement's comments, off the
  * first one's lead; a first-line delimiter directive the scan already read past
  */
-function chunksOf(sql: string): Chunk[] {
-	const chunks = atlasChunks(sql)
+function chunksOf(sql: string): Lined[] {
+	let [line, at] = [1, 0]
+	const chunks = atlasChunks(sql).map((chunk) => {
+		line += newlines(sql.slice(at, chunk.at))
+		at = chunk.at
+		return { ...chunk, line }
+	})
 	const [first] = chunks
 	const own = atlasHeader(sql).text.replace(DELIMITER_DIRECTIVE, "").trim()
 	if (first !== undefined && own !== "" && first.lead.startsWith(own)) first.lead = first.lead.slice(own.length).trim()
@@ -116,7 +133,7 @@ const DELIMITER_DIRECTIVE = /^-- atlas:delimiter(?=[ \n])[^\n]*\n/
 
 /** Whether Atlas sends each statement of `file` alone, as the one statement Postgres reads in it, in order */
 function sendsAlone(file: string, statements: readonly string[]): boolean {
-	let chunks: Chunk[]
+	let chunks: Lined[]
 	try {
 		chunks = chunksOf(file)
 	} catch {

@@ -258,7 +258,8 @@ function readFile(
 			followAdds(codes[i] as string, ctx.fresh)
 			ctx.schema = extractSchema(stmt, ctx.schema)
 		}
-		return { code: codes[i] as string, control, dialect, findings, inside, outside, stmt, tree }
+		const line = read?.statements[i]?.line
+		return { code: codes[i] as string, control, dialect, findings, inside, line, outside, stmt, tree }
 	})
 }
 

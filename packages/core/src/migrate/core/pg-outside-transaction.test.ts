@@ -203,6 +203,7 @@ describe("insideOnly and blockAfter", () => {
 		[true, "COMMIT", false],
 		[true, "ROLLBACK", false],
 		[true, "COMMIT AND CHAIN", true],
+		[true, "PREPARE TRANSACTION 'p'", false],
 		[true, "SAVEPOINT s", true],
 		[true, "SELECT 1", true],
 		[false, "SELECT 1", false],

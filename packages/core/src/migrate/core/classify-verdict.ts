@@ -6,7 +6,7 @@
  */
 import type { MigrationClassification } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
-import { preview, type ReadStatement, refuseUnrunnable } from "./classify-file.ts"
+import { preview, type ReadStatement, refuseOpenBlock, refuseUnrunnable } from "./classify-file.ts"
 import type { TargetKind } from "./classify-target.ts"
 import { outsideTransaction } from "./atlas-header.ts"
 
@@ -30,6 +30,7 @@ function classificationOf(
 	{ kind = "local" }: { kind?: TargetKind | undefined } = {},
 ): MigrationClassification {
 	for (const read of reads) refuseUnrunnable(read, sql, kind)
+	refuseOpenBlock(reads, sql)
 	const unsafeStatements = [...new Set(entries(reads, at("unsafe")))]
 	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
 	const unsafe = new Set(

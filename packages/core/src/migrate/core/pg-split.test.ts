@@ -3,6 +3,9 @@ import { atlasChunks } from "./atlas-scan.ts"
 import { classifyMigration } from "./classify.ts"
 import { atlasFile, pgRead, pgStatements } from "./pg-split.ts"
 
+/** The line each statement of `sql` starts on */
+const lines = (sql: string): number[] => pgRead(sql).statements.map(({ line }) => line)
+
 describe("pgStatements: a Postgres file as the statements Postgres runs", () => {
 	it("splits a chunk Atlas sends whole into each statement, by the parser's byte offsets", () => {
 		expect(pgStatements("-- atlas:delimiter GO\nSELECT 'ž😀'; CREATE TABLE \"€\" (id int);DROP TABLE x\nGO\n")).toEqual(
@@ -27,6 +30,14 @@ describe("pgRead: the file read once, each statement's tree kept, and its first 
 		expect(read.unreadable).toEqual({ error: 'syntax error at or near "SELEC"', statement: "SELEC 2" })
 		expect(read.statements.map(({ tree }) => tree === undefined)).toEqual([false, true, true])
 		expect(pgRead("SELECT 1;").unreadable).toBeUndefined()
+	})
+
+	it("gives each statement the line its code starts on, past its comments, in any chunk or delimiter", () => {
+		expect(lines("SELECT 1; -- a\n/* b\n */ SELECT 2;\n\n-- c\nSELECT 3;\n")).toEqual([1, 3, 6])
+		expect(lines("-- atlas:txmode none\n\nBEGIN;\nSELECT 'x\ny'; SELECT 1;\n")).toEqual([3, 4, 5])
+		expect(lines("-- atlas:delimiter GO\nSELECT 1;\nSELECT 2\nGO\n\nSELECT 3 GO\n")).toEqual([2, 3, 6])
+		expect(lines("-- a\nDELIMITER //\n-- b\nSELECT 1//\nSELECT 2//\n")).toEqual([4, 5])
+		expect(lines("SELECT 1;\nSELEC 2;\n")).toEqual([1, 2])
 	})
 })
 
