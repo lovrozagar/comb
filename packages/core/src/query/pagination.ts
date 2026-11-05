@@ -74,7 +74,7 @@ type ListPagination = {
 	parsedFields: ParsedFields | null
 	/** the order the list was read in, which the next cursor is minted under */
 	parsedSort: readonly SortField[]
-	/** the most rows the built query reads: one past the page, so paginate can tell there is more */
+	/** the most rows the built query reads: one past the page, so paginate can tell there is more, or on a merged page by number each shard's rows to the page's end and one more */
 	window: number
 	/** the cursor for the page after `row`, sealed under the builder's options */
 	mint(row: object): string

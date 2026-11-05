@@ -458,7 +458,7 @@ type FilterGroup = {
 };
 /** A parsed filter, as `parseFilter` and `validateFilter` return it */
 type FilterAST = {
-    /** the top-level group, which joins its terms with `and` */
+    /** the top-level group, joined by its own `logic`; `parseFilter` and `validateFilter` make it an `and` */
     root: FilterGroup;
 };
 /** A sort key's direction */
@@ -753,7 +753,7 @@ type ListPagination = {
     parsedFields: ParsedFields | null;
     /** the order the list was read in, which the next cursor is minted under */
     parsedSort: readonly SortField[];
-    /** the most rows the built query reads: one past the page, so paginate can tell there is more */
+    /** the most rows the built query reads: one past the page, so paginate can tell there is more, or on a merged page by number each shard's rows to the page's end and one more */
     window: number;
     /** the cursor for the page after `row`, sealed under the builder's options */
     mint(row: object): string;
@@ -851,7 +851,7 @@ type OpenedCursor = DecodedCursor & {
 declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
 /** Canonical form of a sort — what a cursor is bound to. */
 declare function sortSignature(parsedSort: readonly SortField[]): string;
-/** A sealed cursor for `payload`, opened only under the same `options` */
+/** A sealed cursor for `payload`, opened only under the same `cursorSecret` and `cursorScope` */
 declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
 /** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
 declare const lossy: (value: unknown) => value is number;

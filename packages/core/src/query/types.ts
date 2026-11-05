@@ -64,7 +64,7 @@ type FilterGroup = {
 
 /** A parsed filter, as `parseFilter` and `validateFilter` return it */
 type FilterAST = {
-	/** the top-level group, which joins its terms with `and` */
+	/** the top-level group, joined by its own `logic`; `parseFilter` and `validateFilter` make it an `and` */
 	root: FilterGroup
 }
 

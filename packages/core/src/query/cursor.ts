@@ -84,7 +84,7 @@ function sortSignature(parsedSort: readonly SortField[]): string {
 		.join(",")
 }
 
-/** A sealed cursor for `payload`, opened only under the same `options` */
+/** A sealed cursor for `payload`, opened only under the same `cursorSecret` and `cursorScope` */
 function encodeCursor(payload: CursorPayload, options: CursorOptions): string {
 	const json = JSON.stringify({ ...payload, i: encodeValue(payload.i), v: payload.v.map(encodeValue) })
 	return seal(new TextEncoder().encode(json), options)
