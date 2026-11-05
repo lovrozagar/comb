@@ -37,6 +37,7 @@ export type ScratchEngine = "libsql" | "runtime"
 /** How a database file, or `:memory:`, opens on an engine */
 type Open = (file: string) => LocalDb
 
+/** The engine's opener; under Node, node:sqlite, a built-in from 22.13 on, so an older Node is refused by its floor */
 async function opener(engine: ScratchEngine): Promise<Open> {
 	if (engine === "libsql") {
 		const { libsqlLocal } = await import("./libsql-local.ts")
@@ -46,6 +47,9 @@ async function opener(engine: ScratchEngine): Promise<Open> {
 		const { bunLocal } = await import("./bun-sqlite.ts")
 		return bunLocal()
 	}
+	const [major = 0, minor = 0] = process.versions.node.split(".").map(Number)
+	if (major < 22 || (major === 22 && minor < 13))
+		throw new Error(`comb needs Node 22.13 or later (node:sqlite); this is ${process.versions.node}`)
 	const { DatabaseSync } = (await import("node:sqlite")) as unknown as {
 		DatabaseSync: new (file: string) => { close(): void; exec(sql: string): void; prepare(sql: string): NodeStatement }
 	}

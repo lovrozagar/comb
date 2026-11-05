@@ -27,6 +27,32 @@ describe("openMemory and openScratch while a signal's stop runs", () => {
 	})
 })
 
+/* openMemory on Node `version`, as process.versions says it */
+const onNode = (version: string) => {
+	Reflect.deleteProperty(process.versions, "bun")
+	Object.defineProperty(process.versions, "node", { configurable: true, enumerable: true, value: version })
+	return local.openMemory()
+}
+
+/* bins.consumer on Node 22.12: node:sqlite is a built-in from 22.13 on, so comb names its floor, not a missing module */
+describe("openMemory below Node 22.13", () => {
+	const nodeVersion = Object.getOwnPropertyDescriptor(process.versions, "node")
+	afterEach(() => {
+		if (nodeVersion !== undefined) Object.defineProperty(process.versions, "node", nodeVersion)
+	})
+	it.each(["22.12.0", "22.5.1", "21.9.0", "20.18.3"])(
+		"refuses on %s, naming the floor and the version",
+		async (version) => {
+			await expect(onNode(version)).rejects.toThrow(`comb needs Node 22.13 or later (node:sqlite); this is ${version}`)
+		},
+	)
+	it.each(["22.13.0", "22.20.1", "23.0.0", "24.11.1"])("opens on %s", async (version) => {
+		const db = await onNode(version)
+		expect(db.all("SELECT 1 AS one")).toEqual([{ one: 1 }])
+		db.close()
+	})
+})
+
 describe("openMemory", () => {
 	it("opens node:sqlite under Node: statements, rows and parameters", async () => {
 		const { openMemory } = await import("./local-db.ts")

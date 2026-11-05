@@ -228,8 +228,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the oldest Node that type-strips (tsx needs no flag there either) and the current one
-        node: ["22.12", "24"]
+        # comb's floor, the first Node with node:sqlite as a built-in (it type-strips, so tsx needs no flag there either), and the current one
+        node: ["22.13", "24"]
     services:
       postgres:
         image: postgres:17
