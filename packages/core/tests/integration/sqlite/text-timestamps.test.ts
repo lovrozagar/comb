@@ -96,24 +96,30 @@ describe("a SQLite timestamp holding a fraction of its unit pages exactly on eve
 })
 
 /*
- * B2-6 of area B: a list that binds a SQLite timestamp key as read carries the epoch number it stores,
- * which readCursor returns as a number, unflagged, as no text was carried; a list that reads the key back
- * from its row carries the Date
+ * B2-6 of area B: a list that binds a SQLite timestamp key as read carries the number it stores, and
+ * readCursor returned that number where the list's row read a Date; it returns the row's Date on every
+ * list, an Invalid Date for a TEXT no Date holds, while the cursor pages by the stored value
  */
-describe("readCursor returns a SQLite timestamp key as its list carried it (B2-6 of area B; sibling: AB3's seconds)", () => {
-	it.each([
-		["anchorless", -1.5],
-		["anchored joined", -1.5],
-		["merged", -1.5],
-		["table", new Date(-1)],
-		["anchored own", new Date(-1)],
-		["listOptions", new Date(-1)],
-	] as Array<[TextShape, Date | number]>)("returns the %s list's key as %o", async (shape, value) => {
-		for (const key of ["m", "s"] as const) {
-			const cursor = await firstCursor(await dbsFor(shape, FRACTION_SEED), { direction: "asc", key, shape })
-			const expected = value instanceof Date && key === "s" ? new Date(-1500) : value
-			expect(cursor.values, key).toEqual([expected])
-			expect(cursor.carried, key).toEqual([false])
-		}
-	})
+describe("readCursor returns a SQLite timestamp key as the row read it (B2-6 of area B; sibling: AB3's seconds)", () => {
+	it.each(["anchorless", "anchored joined", "merged", "table", "anchored own", "listOptions"] as const)(
+		"returns the %s list's key as the Date its row read",
+		async (shape) => {
+			for (const key of ["m", "s"] as const) {
+				const cursor = await firstCursor(await dbsFor(shape, FRACTION_SEED), { direction: "asc", key, shape })
+				expect(cursor.values, key).toEqual([new Date(key === "s" ? -1500 : -1)])
+				expect(cursor.carried, key).toEqual([false])
+			}
+		},
+	)
+
+	it.each(["table", "anchored own", "listOptions"] as const)(
+		"returns the %s list's TEXT key as the Invalid Date its row read",
+		async (shape) => {
+			for (const key of ["m", "s"] as const) {
+				const { values } = await firstCursor(await dbsFor(shape), { direction: "desc", key, shape })
+				expect(values[0], key).toBeInstanceOf(Date)
+				expect((values[0] as Date).getTime(), key).toBeNaN()
+			}
+		},
+	)
 })

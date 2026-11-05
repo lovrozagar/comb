@@ -9,6 +9,7 @@ import { drizzle } from "drizzle-orm/node-postgres"
 import { bigint, doublePrecision, numeric, type PgColumn, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 import type pg from "pg"
 import { describe, expect, it } from "vitest"
+import { type DecodedCursor, readCursor } from "../../../src/query/cursor.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { buildDerivedListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
@@ -253,11 +254,19 @@ type ListShape = "anchored joined" | "anchored own" | "anchorless"
 async function served(
 	client: pg.Client,
 	{
+		cursors,
 		direction,
 		inside = false,
 		key,
 		shape,
-	}: { direction: "asc" | "desc"; inside?: boolean; key: "big" | "t" | "ti" | "tz"; shape: ListShape },
+	}: {
+		/* each page's last row's key, as read, and its next cursor as readCursor opens it */
+		cursors?: Array<[unknown, DecodedCursor]>
+		direction: "asc" | "desc"
+		inside?: boolean
+		key: "big" | "t" | "ti" | "tz"
+		shape: ListShape
+	},
 ): Promise<string[]> {
 	await client.query(`CREATE TEMP TABLE IF NOT EXISTS item (id text PRIMARY KEY, big bigint, t timestamp(6), tz timestamptz(6), ti timestamp);
 	CREATE TEMP TABLE IF NOT EXISTS side (item_id text, big bigint, t timestamp(6), tz timestamptz(6));
@@ -295,6 +304,7 @@ async function served(
 		const [items, meta] = queryHelpers.paginate(rows, built)
 		ids.push(...items.map((row) => row.id))
 		if (meta.nextCursor === null) return ids
+		cursors?.push([items.at(-1)?.k, readCursor(meta.nextCursor, parsed.parsedSort, SEALED)])
 		cursor = meta.nextCursor
 	}
 	return ids
@@ -428,4 +438,41 @@ describe("a time key's carried value reads back as itself in any DateStyle (B2-7
 						).toEqual(SERVED[direction])
 		},
 	)
+})
+
+/* a Date as its time, NaN for an Invalid one, which toEqual compares as itself */
+const timeOf = (value: unknown): unknown => (value instanceof Date ? ["Date", value.getTime()] : value)
+
+/*
+ * B2-6 of area B: a time key a list binds as read carries its stored text, and readCursor returned
+ * that text where the row read a Date; it returns the row's Date, an 'infinity' read as an Invalid
+ * Date included, while the cursor pages by the stored text
+ */
+describe("readCursor returns a time key as the row read it (B2-6 of area B; sibling: QL2's carriage)", () => {
+	const sessions = usePg()
+
+	it.each([
+		["anchorless", "t"],
+		["anchorless", "tz"],
+		["anchorless", "ti"],
+		["anchored joined", "t"],
+		["anchored own", "t"],
+	] as const)("returns the %s list's %s as each page's last row read it", async (shape, key) => {
+		for (const direction of ["asc", "desc"] as const) {
+			const cursors: Array<[unknown, DecodedCursor]> = []
+			expect(await served(sessions.pg(), { cursors, direction, key, shape })).toEqual(SERVED[direction])
+			expect(cursors).toHaveLength(SERVED[direction].length - 1)
+			for (const [read, cursor] of cursors) {
+				expect(read).toBeInstanceOf(Date)
+				expect(timeOf(cursor.values[0])).toEqual(timeOf(read))
+				expect(cursor.carried).toEqual([false])
+			}
+		}
+	})
+
+	it("returns an anchorless list's 'infinity' as the Invalid Date its row read", async () => {
+		const cursors: Array<[unknown, DecodedCursor]> = []
+		await served(sessions.pg(), { cursors, direction: "desc", key: "ti", shape: "anchorless" })
+		expect(timeOf(cursors[0]?.[1].values[0])).toEqual(["Date", Number.NaN])
+	})
 })
