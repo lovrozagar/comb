@@ -65,7 +65,7 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | typescript-best-practices | grunt | TypeScript best practices. Use when reading or editing any .ts or .tsx file, or for /typescript-best-practices. |  |  |  |
 | unslop | grunt | Cut AI tells from any writing. Use for /unslop. |  |  |  |
 | write-plan | grunt | Write a local checklist under .tmp/grunt/plans/. Then /implement-plan {n}. |  |  |  |
-| write-roadmap | grunt | Write an ordered program of plans under .tmp/grunt/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implemen… |  |  |  |
+| write-roadmap | grunt | Write an ordered program of plans under .tmp/grunt/roadmaps/. Use for /write-roadmap. Stops for y, which locks and runs… |  |  |  |
 
 # Refs
 
@@ -73,7 +73,7 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | --- | --- | --- | --- |
 | .rulesync/reference/browser.md | Browser | browser | Zero-config in-tree session rail. Not MCP. Not env. Not raw Playwright. Lightpanda first; swap to Chromium when blocked. |
 | .rulesync/reference/cascade.md | Protocol | cascade | The session agent has tools. Fat Read/Grep/Bash dumps are rewritten to `.rulesync/scripts/grunt-job.mjs` (squeez + stas… |
-| .rulesync/reference/gates.md | Gates |  | Every repo has these `package.json` scripts. Hooks, `verify` and CI call only these names, so a tool change is one line… |
+| .rulesync/reference/gates.md | Gates |  | Every repo has these `package.json` scripts. Hooks and CI call only these names, so a tool change is one line in `~/Dev… |
 | .rulesync/reference/hooks.md | Hooks | hooks | SessionStart carries only the folder map: Claude / Codex run `../../.rulesync/scripts/session-map.mjs`, which injects t… |
 | .rulesync/reference/implementation-format.md | Implementation format (SSOT) |  | Local session journal for `/implement-plan`. Not a plan, handoff, or git commit. |
 | .rulesync/reference/jev.md | Jev | jev | Closed external decision. The source text is already saved. The question is a yes/no or a named choice. One call. Not o… |

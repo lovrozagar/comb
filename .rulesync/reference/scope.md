@@ -24,11 +24,11 @@ Ask only what research cannot settle and what changes the plan's shape: intent, 
 
 ## Plan
 
-`/write-plan`. Format: `.rulesync/reference/plan-format.md`. The plan is the proposal: the chosen approach and its rejected alternative sit in Context or Constraints. A minor open choice is written as the default plus "confirm"; a plan-shaping one goes back to Questions. Before writing, run `node .rulesync/scripts/lessons.mjs match` on the files the plan touches and cite each match in Watch-outs. After saving, run `/review-plan {n}` in a fresh agent, settle each finding, add a `review` entry to `## Previous mistakes` for each one you accept, and bump frontmatter `reviews` in that save. Report the goal, phases, top risks, open assumptions, and path, then stop for approval.
+`/write-plan`. Format: `.rulesync/reference/plan-format.md`. The plan is the proposal: the chosen approach and its rejected alternative sit in Context or Constraints. A minor open choice is written as the default plus "confirm"; a plan-shaping one goes back to Questions. Before writing, run `node .rulesync/scripts/lessons.mjs match` on the files the plan touches and cite each match in Watch-outs. After saving, run `/review-plan {n}` in a fresh agent, settle each finding, add a `review` entry to `## Previous mistakes` for each one you accept, and bump frontmatter `reviews` in that save. Report the goal, phases, top risks, open assumptions, and path, then stop with the closing line `Reply "y" to run plan {n}.`.
 
 ## Approval
 
-Feedback revises the same plan file (a Write of a saved plan updates it in place) and adds a `feedback` entry to `## Previous mistakes`; research again if needed. Run `/review-plan` again on the revision. Stop again until the user approves. A plan with `reviews: 0` cannot move to `in-progress`; run `/review-plan {n}` first. Approval is the user saying go, an explicit "plan and do it" in the request, or `/implement-roadmap` running a roadmap whose status is `locked` or `in-progress`. A plan-shaping question still stops and leaves that roadmap `locked` or `in-progress`.
+Feedback revises the same plan file (a Write of a saved plan updates it in place) and adds a `feedback` entry to `## Previous mistakes`; research again if needed. Run `/review-plan` again on the revision. Stop again until the user approves. A plan with `reviews: 0` cannot move to `in-progress`; run `/review-plan {n}` first. Approval is the user replying `y` to the closing `Reply "y" to run …` line, an explicit "plan and do it" in the request, or `/implement-roadmap` running a roadmap whose status is `locked` or `in-progress`. A plan-shaping question still stops and leaves that roadmap `locked` or `in-progress`.
 
 ## Implement
 

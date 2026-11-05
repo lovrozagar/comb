@@ -3,8 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import { scrubText } from "./scrub-text-lib.mjs";
-import { denyResponse } from "./gate-fat-tools.mjs";
+import { answerDeny, answerRewrite } from "./gate-fat-tools.mjs";
 
 export const MAX_PROMPT_CHARS = 100000;
 export const TRUNCATE_SUFFIX = "…[truncated]";
@@ -33,18 +34,8 @@ export function truncatePrompt(text, _max = MAX_PROMPT_CHARS) {
   return String(text);
 }
 
-export function workspaceRootOf(data) {
-  return (
-    process.env.GROK_WORKSPACE_ROOT ||
-    (data && (data.workspaceRoot || data.workspace_root || data.cwd)) ||
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.cwd() ||
-    ""
-  );
-}
-
 export function spawnCapReason(workspaceRoot) {
-  const root = workspaceRoot || process.cwd() || "";
+  const root = workspaceRoot || resolveRoots().root;
   return (
     `spawn prompt exceeds ${MAX_PROMPT_CHARS} chars after scrub; write it under ${root}/.tmp/grunt/plans/ and re-spawn with that abs path`
   );
@@ -106,30 +97,16 @@ export function processHookPayload(data) {
         ? toolInput.prompt
         : "";
   if (prompt.length > MAX_PROMPT_CHARS) {
-    return denyResponse(spawnCapReason(workspaceRootOf(data)));
+    return answerDeny(data, spawnCapReason(resolveRoots(data).root));
   }
-  return updated;
-}
-
-export function hookResponse(updated) {
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      updatedInput: updated,
-    },
-  };
+  return updated ? answerRewrite(data, updated) : null;
 }
 
 function main() {
   try {
     const data = readJsonValue();
-    const updated = processHookPayload(data);
-    if (!updated) return 0;
-    if (updated.decision === "block") {
-      process.stdout.write(JSON.stringify(updated));
-      return 0;
-    }
-    process.stdout.write(JSON.stringify(hookResponse(updated)));
+    const answer = processHookPayload(data);
+    if (answer) process.stdout.write(JSON.stringify(answer));
     return 0;
   } catch {
     return 0;

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 30
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 30
           }
         ]

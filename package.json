@@ -45,6 +45,7 @@
 		"fmt:check": "oxfmt --check",
 		"grunt:antigravity": "antigravity --dangerously-skip-permissions",
 		"grunt:claude": "claude --dangerously-skip-permissions",
+		"grunt:clean": "node ./.rulesync/scripts/clean.mjs",
 		"grunt:codex": "codex --dangerously-bypass-approvals-and-sandbox",
 		"grunt:doctor": "node ./.rulesync/scripts/doctor.mjs",
 		"grunt:gemini": "gemini --yolo",
@@ -73,17 +74,16 @@
 		"test:e2e": "bun --filter @lovrozagar/comb test:e2e",
 		"test:watch": "bun run --filter @lovrozagar/comb test:watch",
 		"typecheck": "bun run --filter @lovrozagar/comb type:check",
-		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict",
-		"verify": "bun scripts/verify.ts"
+		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict"
 	},
 	"devDependencies": {
 		"@clack/prompts": "^0.11.0",
 		"@commitlint/cli": "21.2.4",
 		"@commitlint/config-conventional": "21.2.4",
-		"@lovrozagar/grunt": "0.15.0",
+		"@lovrozagar/grunt": "0.16.1",
 		"lefthook": "2.2.2",
 		"oxfmt": "0.76.0",
-		"oxlint": "1.90.0",
+		"oxlint": "1.91.0",
 		"rulesync": "16.17.0",
 		"smol-toml": "^1.8.0"
 	},
@@ -97,8 +97,15 @@
 			"test:e2e",
 			"test:consumers"
 		],
-		"env": [
-			"COMB_TEST_PG_URL"
+		"ci": [
+			"fmt:check",
+			"lint",
+			"typecheck",
+			"test:coverage",
+			"typecheck:strict",
+			"test:bun",
+			"test:e2e",
+			"test:consumers"
 		]
 	}
 }

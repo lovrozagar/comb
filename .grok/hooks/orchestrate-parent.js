@@ -11,21 +11,32 @@ import {
   spawnCapReason,
 } from "../../.rulesync/scripts/scrub-spawn-prompt.mjs";
 import {
-  denyResponse,
+  answerDeny,
+  answerRewrite,
   fatHookOutput,
   processFatTools,
   rewriteGruntScratchPath,
   WRITE_PATH_FIELDS,
 } from "../../.rulesync/scripts/gate-fat-tools.mjs";
+import { projectEdit } from "../../.rulesync/scripts/gitignore-guard.mjs";
 import { LESSONS_DIR, matchLessons, persistLesson } from "../../.rulesync/scripts/lessons.mjs";
 import { persistPlan, preparePlanUpdate, validatePlan } from "../../.rulesync/scripts/persist-plan.mjs";
 import { persistRoadmap, prepareRoadmapUpdate, validateRoadmap } from "../../.rulesync/scripts/persist-roadmap.mjs";
 import { persistHandoff } from "../../.rulesync/scripts/persist-handoff.mjs";
 import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../.rulesync/scripts/persist-implementation.mjs";
-import { persistTmp } from "../../.rulesync/scripts/persist-tmp.mjs";
+import {
+  isUnderDir,
+  isUnderHandoffs,
+  isUnderImplementations,
+  isUnderPlans,
+  isUnderRoadmaps,
+  isUnderTmp,
+  persistTmp,
+} from "../../.rulesync/scripts/persist-tmp.mjs";
 import { parseNeed } from "../../.rulesync/scripts/parse-need.mjs";
 import { resolveJobCwd, runJob } from "../../.rulesync/scripts/grunt-job.mjs";
 import { otherLines, recordHook } from "../../.rulesync/scripts/board.mjs";
+import { canonicalPath, resolveRoots, resolveTyped } from "../../.rulesync/scripts/workspace-root.mjs";
 
 export const ORCHESTRATOR_LOGS_DIR = ".tmp/grunt/orchestrator-logs";
 /** One-release dual-read; drop next release. */
@@ -82,15 +93,7 @@ function preToolUse(data) {
   if (SPAWN_TOOLS.has(toolKey)) {
     const updated = rewriteSpawn(toolInput, data);
     if (updated && updated.__denied) return 0;
-    if (updated) {
-      emit({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          updatedInput: updated,
-        },
-      });
-      return 0;
-    }
+    if (updated) emit(answerRewrite(data, updated));
     return 0;
   }
   if (WRITE_TOOLS.has(toolKey)) {
@@ -115,14 +118,15 @@ export function isLessonFile(filePath, workspaceRoot) {
 // Lessons that match a file this session edits, each shown once per session. Fails open.
 function lessonNotice(data, toolInput) {
   try {
-    const ws = workspaceRootOf(data);
+    const roots = resolveRoots(data);
     const target = writeTarget(toolInput);
-    if (!target || isLessonFile(target, ws) || isUnderDir(target, ws, [".tmp", "grunt"])) return;
-    const abs = path.resolve(ws, target);
-    const rows = matchLessons({ workspaceRoot: ws, files: [abs] });
+    if (!target) return;
+    const abs = resolveTyped(roots, target);
+    if (isLessonFile(abs, roots.checkout) || rewriteGruntScratchPath(abs, roots) || isUnderDir(abs, roots.root, [".tmp", "grunt"])) return;
+    const rows = matchLessons({ workspaceRoot: roots.checkout, files: [abs] });
     if (!rows.length) return;
     const sid = sessionIdOf(data);
-    const seenFile = sid ? path.join(ws, ".tmp", "grunt", "sessions", sid, "lessons-seen.json") : "";
+    const seenFile = sid ? path.join(roots.root, ".tmp", "grunt", "sessions", sid, "lessons-seen.json") : "";
     let seen = [];
     if (seenFile) {
       try {
@@ -137,7 +141,7 @@ function lessonNotice(data, toolInput) {
       fs.mkdirSync(path.dirname(seenFile), { recursive: true });
       fs.writeFileSync(seenFile, JSON.stringify([...seen, ...fresh.map((r) => r.file)]));
     }
-    const rel = path.relative(ws, abs).split(path.sep).join("/");
+    const rel = path.relative(roots.checkout, abs).split(path.sep).join("/");
     const lines = fresh.map((r) => `- ${r.file} (hits ${r.hits}): ${r.summary}`);
     emit({
       hookSpecificOutput: {
@@ -151,11 +155,12 @@ function lessonNotice(data, toolInput) {
 }
 
 // A lesson Write is validated, rendered, and reindexed here, and the host saves it; an Edit cannot be reindexed before it lands.
-function lessonWrite(ws, rawPath, toolInput) {
+function lessonWrite(data, ws, rawPath, toolInput) {
   const abs = path.resolve(ws, rawPath);
   if (typeof toolInput.content !== "string") {
     emit(
-      denyResponse(
+      answerDeny(
+        data,
         "Edit is not allowed on lesson files. Write the full lesson (60 lines max) or run node .rulesync/scripts/lessons.mjs hit <slug> --evidence <text>",
       ),
     );
@@ -163,81 +168,18 @@ function lessonWrite(ws, rawPath, toolInput) {
   }
   const result = persistLesson({ workspaceRoot: ws, filePath: abs, content: toolInput.content });
   if (!result.ok) {
-    emit(denyResponse(result.error));
+    emit(answerDeny(data, result.error));
     return 0;
   }
-  emit({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      updatedInput: Object.assign(withPath(toolInput, abs), { content: result.content }),
-    },
-  });
+  emit(answerRewrite(data, Object.assign(withPath(toolInput, abs), { content: result.content })));
   return 0;
 }
 
 function emitFat(data) {
-  const fat = fatHookOutput(processFatTools(data));
+  const fat = fatHookOutput(data, processFatTools(data));
   if (!fat) return null;
   emit(fat);
   return 0;
-}
-
-function workspaceRootOf(data) {
-  return (
-    process.env.GROK_WORKSPACE_ROOT ||
-    (data && (data.workspaceRoot || data.workspace_root)) ||
-    (data && data.cwd) ||
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.cwd() ||
-    ""
-  );
-}
-
-function isUnderDir(filePath, workspaceRoot, segments) {
-  if (!filePath || !workspaceRoot) return false;
-  const abs = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workspaceRoot, filePath);
-  const dir = path.resolve(workspaceRoot, ...segments);
-  const rel = path.relative(dir, abs);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-}
-
-export function isUnderPlans(filePath, workspaceRoot) {
-  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "plans"]);
-}
-
-export function isUnderRoadmaps(filePath, workspaceRoot) {
-  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "roadmaps"]);
-}
-
-export function isUnderHandoffs(filePath, workspaceRoot) {
-  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "handoffs"]);
-}
-
-export function isUnderImplementations(filePath, workspaceRoot) {
-  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "implementations"]);
-}
-
-export const TMP_RESERVED_DIRS = new Set([
-  "plans",
-  "roadmaps",
-  "handoffs",
-  "implementations",
-  "browser",
-  "orchestrator-logs",
-  "stash",
-  "sessions",
-]);
-
-export function isUnderTmp(filePath, workspaceRoot) {
-  if (!filePath || !workspaceRoot) return false;
-  const abs = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workspaceRoot, filePath);
-  const root = path.resolve(workspaceRoot, ".tmp", "grunt");
-  if (path.dirname(abs) !== root) return false;
-  return !TMP_RESERVED_DIRS.has(path.basename(abs));
 }
 
 // Hosts name the target differently; point every key the host sent at the absolute file.
@@ -248,59 +190,50 @@ function withPath(toolInput, abs) {
   return next;
 }
 
-/** Apply the host's search/replace to `text`; null when an old string is missing (the host then fails the edit). */
-export function projectEdit(text, toolInput) {
-  const edits = Array.isArray(toolInput.edits) ? toolInput.edits : [toolInput];
-  let next = text;
-  for (const e of edits) {
-    const oldStr = typeof e.old_string === "string" ? e.old_string : e.oldString;
-    const newStr = typeof e.new_string === "string" ? e.new_string : e.newString;
-    if (typeof oldStr !== "string" || typeof newStr !== "string" || !next.includes(oldStr)) return null;
-    next = e.replace_all || e.replaceAll ? next.split(oldStr).join(newStr) : next.replace(oldStr, () => newStr);
-  }
-  return next;
-}
-
 // An Edit of a saved plan is checked against the text it would produce; a valid one runs as sent.
-function planEdit(abs, toolInput) {
+function planEdit(data, abs, toolInput) {
   const previous = fs.readFileSync(abs, "utf8");
   const next = projectEdit(previous, toolInput);
   if (next == null) return null;
   const errors = validatePlan(path.basename(abs), next, { fresh: false, previous });
   if (!errors.length) return null;
-  emit(denyResponse(errors.join("; ")));
+  emit(answerDeny(data, errors.join("; ")));
   return 0;
 }
 
 // An Edit of a saved roadmap is checked the same way.
-function roadmapEdit(abs, toolInput) {
+function roadmapEdit(data, abs, toolInput) {
   const previous = fs.readFileSync(abs, "utf8");
   const next = projectEdit(previous, toolInput);
   if (next == null) return null;
   const errors = validateRoadmap(path.basename(abs), next, { fresh: false, previous });
   if (!errors.length) return null;
-  emit(denyResponse(errors.join("; ")));
+  emit(answerDeny(data, errors.join("; ")));
   return 0;
 }
 
 function parentWrite(data, toolInput) {
   if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
-    emit(denyResponse(DENY_REASON));
+    emit(answerDeny(data, DENY_REASON));
     return 0;
   }
-  const ws = workspaceRootOf(data);
-  let rawPath =
+  const roots = resolveRoots(data);
+  const ws = roots.root;
+  const typed =
     toolInput.file_path ||
     toolInput.filePath ||
     toolInput.path ||
     toolInput.target_file ||
     "";
-  const rewritten = rewriteGruntScratchPath(rawPath, ws);
-  if (rewritten) rawPath = rewritten;
+  if (!typed) return null;
+  const rawPath = rewriteGruntScratchPath(typed, roots) || path.resolve(roots.cwd, typed);
+  // Classify in the roots' spelling; answers keep the typed spelling, which Claude Code's read-before-write knows.
+  const canon = canonicalPath(rawPath);
   let persist;
+  let approvable = false;
   let invalid = "invalid plan";
-  if (isLessonFile(rawPath, ws)) return lessonWrite(ws, rawPath, toolInput);
-  if (isUnderPlans(rawPath, ws)) {
+  if (isLessonFile(canon, roots.checkout)) return lessonWrite(data, roots.checkout, rawPath, toolInput);
+  if (isUnderPlans(canon, ws)) {
     const abs = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(ws, rawPath);
     let exists = false;
     try {
@@ -308,10 +241,11 @@ function parentWrite(data, toolInput) {
     } catch {
       exists = false;
     }
-    if (exists && typeof toolInput.content !== "string") return planEdit(abs, toolInput);
+    if (exists && typeof toolInput.content !== "string") return approvedEdit(data, abs, planEdit(data, abs, toolInput));
     persist = exists ? (args) => preparePlanUpdate({ ...args, filePath: abs }) : persistPlan;
+    approvable = true;
     invalid = "invalid plan";
-  } else if (isUnderRoadmaps(rawPath, ws)) {
+  } else if (isUnderRoadmaps(canon, ws)) {
     const roadmapPath = path.isAbsolute(rawPath)
       ? path.resolve(rawPath)
       : path.resolve(ws, rawPath);
@@ -321,13 +255,16 @@ function parentWrite(data, toolInput) {
     } catch {
       exists = false;
     }
-    if (exists && typeof toolInput.content !== "string") return roadmapEdit(roadmapPath, toolInput);
+    if (exists && typeof toolInput.content !== "string") {
+      return approvedEdit(data, roadmapPath, roadmapEdit(data, roadmapPath, toolInput));
+    }
     persist = exists ? (args) => prepareRoadmapUpdate({ ...args, filePath: roadmapPath }) : persistRoadmap;
+    approvable = true;
     invalid = "invalid roadmap";
-  } else if (isUnderHandoffs(rawPath, ws)) {
+  } else if (isUnderHandoffs(canon, ws)) {
     persist = persistHandoff;
     invalid = "invalid handoff";
-  } else if (isUnderImplementations(rawPath, ws)) {
+  } else if (isUnderImplementations(canon, ws)) {
     persist = persistImplementation;
     invalid = "invalid implementation";
     const abs = path.isAbsolute(rawPath)
@@ -345,40 +282,201 @@ function parentWrite(data, toolInput) {
       if (!isFullImplementationBody(content)) return null;
       const errors = validateImplementation(path.basename(abs), content);
       if (errors.length) {
-        emit(denyResponse(errors.join("; ") || invalid));
+        emit(answerDeny(data, errors.join("; ") || invalid));
         return 0;
       }
-      const next = Object.assign(withPath(toolInput, abs), { content });
-      emit({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          updatedInput: next,
-        },
-      });
+      emit(answerRewrite(data, Object.assign(withPath(toolInput, abs), { content })));
       return 0;
     }
-  } else if (isUnderTmp(rawPath, ws)) {
+  } else if (isUnderTmp(canon, ws)) {
     persist = persistTmp;
     invalid = "invalid tmp";
   } else {
     return null;
   }
   const content = typeof toolInput.content === "string" ? toolInput.content : "";
-  const result = persist({ workspaceRoot: ws, content });
+  const result = persist({ workspaceRoot: ws, checkout: roots.checkout, content });
   if (!result.ok) {
-    emit(denyResponse(result.error || invalid));
+    emit(answerDeny(data, result.error || invalid));
     return 0;
   }
-  const next = Object.assign(withPath(toolInput, path.resolve(ws, result.path)), {
-    content: result.content,
-  });
-  emit({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      updatedInput: next,
-    },
-  });
+  const saved = path.resolve(ws, result.path);
+  if (approvable) recordApproval(data, saved);
+  emit(answerRewrite(data, Object.assign(withPath(toolInput, saved), { content: result.content })));
   return 0;
+}
+
+// A valid Edit (null) passes through to the host; it still counts as a save.
+function approvedEdit(data, abs, code) {
+  if (code === null) recordApproval(data, abs);
+  return code;
+}
+
+// One closing line asks for approval; a bare `y` approves exactly what it names.
+const CLOSING_RE = /^Reply "y" to run ((?:plan|roadmap) \d+(?:, then (?:plan|roadmap) \d+)*)\.$/;
+const APPROVABLE_STATUS = { plan: new Set(["ready"]), roadmap: new Set(["draft", "locked"]) };
+const TURN_START_STAMP = "turn-start";
+const APPROVAL_BLOCK_STAMP = "approval-block";
+
+export function closingLineOf(msg) {
+  const lines = String(msg || "")
+    .split("\n")
+    .map((l) => l.replace(/^[\s`*_>]+/, "").replace(/[\s`*_]+$/, ""))
+    .filter(Boolean);
+  const m = CLOSING_RE.exec(lines.at(-1) || "");
+  if (!m) return null;
+  return m[1].split(", then ").map((item) => {
+    const [kind, serial] = item.split(" ");
+    return { kind, serial: Number(serial) };
+  });
+}
+
+const itemKey = (item) => `${item.kind} ${item.serial}`;
+const queueText = (items) => items.map(itemKey).join(", then ");
+
+function approvalsFile(data) {
+  const sid = sessionIdOf(data);
+  if (!sid || sid === "default") return null;
+  return path.join(resolveRoots(data).root, ".tmp", "grunt", "sessions", sid, "approvals.txt");
+}
+
+function readLines(file) {
+  try {
+    return fs
+      .readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function recordApproval(data, abs) {
+  const file = approvalsFile(data);
+  if (!file || readLines(file).includes(abs)) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, abs + "\n");
+  } catch {
+    /* fail-open */
+  }
+}
+
+function frontmatterOf(text) {
+  const out = {};
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return out;
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = /^([a-z]+):\s*(.*)$/.exec(line);
+    if (kv) out[kv[1]] = kv[2].trim();
+  }
+  return out;
+}
+
+// True when a roadmap slice's Location names this plan; Windows paths compare case-insensitively.
+export function isSliceOf(planPath, roadmapText, impl = path) {
+  const norm = (p) => {
+    const n = impl.normalize(impl.resolve(p));
+    return impl === path.win32 ? n.toLowerCase() : n;
+  };
+  const target = norm(planPath);
+  for (const m of String(roadmapText).matchAll(/^\s*Location:\s*(.+?)\s*$/gm)) {
+    if (norm(m[1]) === target) return true;
+  }
+  return false;
+}
+
+function inProgressRoadmaps(ws) {
+  const dir = path.join(ws, ".tmp", "grunt", "roadmaps");
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".md"));
+  } catch {
+    return [];
+  }
+  const texts = [];
+  for (const name of names) {
+    try {
+      const text = fs.readFileSync(path.join(dir, name), "utf8");
+      if (frontmatterOf(text).status === "in-progress") texts.push(text);
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  return texts;
+}
+
+// Reviewed plans and roadmaps this session saved that still wait for a `y`, in first-save order.
+function approvableItems(data) {
+  const file = approvalsFile(data);
+  if (!file) return [];
+  const ws = resolveRoots(data).root;
+  const running = inProgressRoadmaps(ws);
+  const items = [];
+  for (const abs of readLines(file)) {
+    const kind = isUnderPlans(abs, ws) ? "plan" : isUnderRoadmaps(abs, ws) ? "roadmap" : null;
+    if (!kind) continue;
+    let text;
+    let mtime;
+    try {
+      text = fs.readFileSync(abs, "utf8");
+      mtime = fs.statSync(abs).mtimeMs;
+    } catch {
+      continue;
+    }
+    const fm = frontmatterOf(text);
+    if (!APPROVABLE_STATUS[kind].has(fm.status) || !(Number(fm.reviews) >= 1)) continue;
+    if (kind === "plan" && running.some((t) => isSliceOf(abs, t))) continue;
+    items.push({ kind, serial: Number(fm.serial), path: abs, mtime });
+  }
+  return items;
+}
+
+function stampMtime(data, prefix) {
+  const p = resolveStamp(data, prefix);
+  if (!p) return null;
+  try {
+    return fs.statSync(p).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// Stop reason when this turn saved a reviewed item and the reply does not end with a closing line covering it.
+function approvalBlockReason(data, msg) {
+  if (!approvalsFile(data) || resolveStamp(data, APPROVAL_BLOCK_STAMP)) return null;
+  const turnStart = stampMtime(data, TURN_START_STAMP);
+  if (turnStart == null) return null;
+  const items = approvableItems(data);
+  const pending = items.filter((i) => i.mtime >= turnStart);
+  if (!pending.length) return null;
+  const named = closingLineOf(msg);
+  const known = new Set(items.map(itemKey));
+  const covered =
+    named &&
+    pending.every((p) => named.some((n) => itemKey(n) === itemKey(p))) &&
+    named.every((n) => known.has(itemKey(n)));
+  if (covered) return null;
+  return `end with: Reply "y" to run ${queueText(items)}.`;
+}
+
+// Context for a bare `y` that answers the previous reply's closing line.
+function approvalContext(data, prompt) {
+  if (String(prompt).trim().toLowerCase() !== "y") return "";
+  const tp = data.transcript_path || data.transcriptPath;
+  if (!tp) return "";
+  const named = closingLineOf(lastAssistantFromTranscript(tp));
+  if (!named) return "";
+  const items = approvableItems(data);
+  const resolved = named.map((n) => items.find((i) => itemKey(i) === itemKey(n)));
+  if (resolved.some((i) => !i)) return "";
+  const steps = resolved.map((i) =>
+    i.kind === "plan"
+      ? `plan ${i.serial}: run /implement-plan ${i.serial} (${i.path})`
+      : `roadmap ${i.serial}: set status locked, then run /implement-roadmap ${i.serial} (${i.path})`,
+  );
+  return `y approves ${queueText(named)}: ${steps.join("; ")}`;
 }
 
 function rewriteSpawn(toolInput, data) {
@@ -390,7 +488,7 @@ function rewriteSpawn(toolInput, data) {
         ? toolInput.prompt
         : "";
   if (prompt.length > MAX_PROMPT_CHARS) {
-    emit(denyResponse(spawnCapReason(workspaceRootOf(data))));
+    emit(answerDeny(data, spawnCapReason(resolveRoots(data).root)));
     return { __denied: true };
   }
   return updated;
@@ -425,7 +523,7 @@ function sessionReceiptContext(data) {
   const sid = sessionIdOf(data);
   if (!sid || sid === "default") return "";
   const dir = path.join(
-    workspaceRootOf(data),
+    resolveRoots(data).root,
     ".tmp",
     "grunt",
     "sessions",
@@ -441,7 +539,7 @@ function writeSessionReceipt(data, msg) {
   const sid = sessionIdOf(data);
   if (!sid || sid === "default") return;
   const dir = path.join(
-    workspaceRootOf(data),
+    resolveRoots(data).root,
     ".tmp",
     "grunt",
     "sessions",
@@ -471,8 +569,14 @@ function userPromptSubmit(data) {
   const prompt = userPromptOf(data);
   if (isHostStopBanner(prompt)) return 0;
   unlinkStamp(data, "stop-block");
+  const approval = approvalContext(data, prompt);
+  if (approvalsFile(data)) {
+    writeStamp(data, TURN_START_STAMP, String(Date.now()));
+    unlinkStamp(data, APPROVAL_BLOCK_STAMP);
+  }
   applySessionGateSlash(data, prompt);
   let ctx = effectiveGruntContext(data);
+  if (approval) ctx = ctx ? `${ctx}\n${approval}` : approval;
   try {
     recordHook(data, process.env);
     const others = otherLines(data, process.env);
@@ -499,7 +603,7 @@ export function isWaitGruntExact(msg) {
 }
 
 export function hasStepAsk(msg) {
-  if (isWaitGruntExact(msg)) return true;
+  if (isWaitGruntExact(msg) || closingLineOf(msg)) return true;
   return String(msg || "")
     .split("\n")
     .map((l) => l.replace(/^[\s`*_>]+/, "").trim())
@@ -610,6 +714,12 @@ function stop(data) {
   }
   writeSessionReceipt(data, msg);
   if (isWaitGruntExact(msg)) return 0;
+  const approvalReason = approvalBlockReason(data, msg);
+  if (approvalReason) {
+    writeStamp(data, APPROVAL_BLOCK_STAMP, "1");
+    emit({ decision: "block", reason: approvalReason });
+    return 0;
+  }
   if (sessionGateOf(data) === "ask" && !hasStepAsk(msg)) {
     let n = readStampInt(data, "stop-block");
     if (n >= MAX_STOP) return 0;
@@ -621,7 +731,7 @@ function stop(data) {
 }
 
 function interceptNeed(data, hookEventName) {
-  const ws = workspaceRootOf(data);
+  const roots = resolveRoots(data);
   if (data.stopHookActive || data.stop_hook_active) {
     return 0;
   }
@@ -643,7 +753,7 @@ function interceptNeed(data, hookEventName) {
     return 0;
   }
 
-  const cwd = ws || process.cwd();
+  const cwd = roots.cwd;
   const parts = [];
   for (const job of jobs) {
     let result;
@@ -656,6 +766,7 @@ function interceptNeed(data, hookEventName) {
           job: job.job,
           query: job.query,
           cwd: jobCwd || cwd,
+          root: roots.root,
           path: job.path,
           glob: job.glob,
           stash: job.stash,
@@ -684,14 +795,14 @@ function interceptNeed(data, hookEventName) {
 }
 
 function stampPath(data, prefix) {
-  const root = workspaceRootOf(data);
+  const root = resolveRoots(data).root;
   const sid = sessionIdOf(data) || "default";
   if (!root) return null;
   return path.join(root, ORCHESTRATOR_LOGS_DIR, prefix + "-" + sid);
 }
 
 function legacyStampPath(data, prefix) {
-  const root = workspaceRootOf(data);
+  const root = resolveRoots(data).root;
   const sid = sessionIdOf(data) || "default";
   if (!root) return null;
   return path.join(root, LEGACY_ORCHESTRATOR_LOGS_DIR, prefix + "-" + sid);
@@ -744,7 +855,7 @@ function unlinkStamp(data, prefix) {
 }
 
 function sessionGateStampPath(data, prefix) {
-  const root = workspaceRootOf(data);
+  const root = resolveRoots(data).root;
   const sid = sessionIdOf(data);
   if (!root || !sid || sid === "default") return null;
   return path.join(root, ORCHESTRATOR_LOGS_DIR, prefix + "-" + sid);
@@ -755,7 +866,7 @@ function resolveSessionGateStamp(data) {
     const neu = sessionGateStampPath(data, prefix);
     if (neu && fs.existsSync(neu)) return neu;
     const old = path.join(
-      workspaceRootOf(data),
+      resolveRoots(data).root,
       LEGACY_ORCHESTRATOR_LOGS_DIR,
       prefix + "-" + sessionIdOf(data),
     );

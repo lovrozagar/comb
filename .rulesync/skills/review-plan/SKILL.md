@@ -21,5 +21,6 @@ Scripts already enforce the format, the append-only `## Previous mistakes`, and 
 5. Check the type row in `.rulesync/reference/scope.md` ## Types: a missing failing-test leaf, a missing Read leaf, or a named check dropped without a reason.
 6. Flag a leaf that needs more planning before someone can do it: an open choice, a vague target, or a path that does not exist.
 7. Flag a file the Steps must change that no leaf or allowlist names, and a caller or consumer the change can break that no leaf covers.
+8. Compare `## Usage` with Steps. Flag each new or changed command, flag, output, error message, or file a person or agent touches that Usage does not show, a changed one shown without its before, and a `No visible change:` line on a plan that changes one.
 
 Reply with at most 10 findings, most severe first, one line each: `{leaf id or section}: {problem}; {fix}`. With nothing to flag, reply `no findings`. No praise and no summary.

@@ -3,15 +3,74 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import {
   DATETIME_RE,
   compactCreatedStamp,
-  ensureGitignore,
   slugify,
   utcDateTime,
 } from "./persist-plan.mjs";
 
 export const TMP_DIR = ".tmp/grunt";
+/** Top-level names under `.tmp/grunt/` that grunt owns; anything else at that level is a `/tmp` artifact or scratch. */
+export const TMP_RESERVED_DIRS = new Set([
+  "plans",
+  "roadmaps",
+  "handoffs",
+  "implementations",
+  "browser",
+  "orchestrator-logs",
+  "stash",
+  "sessions",
+  "listen",
+  "speak",
+]);
+export function isUnderDir(filePath, workspaceRoot, segments) {
+  if (!filePath || !workspaceRoot) return false;
+  const abs = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(workspaceRoot, filePath);
+  const dir = path.resolve(workspaceRoot, ...segments);
+  const rel = path.relative(dir, abs);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+export function isUnderPlans(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "plans"]);
+}
+
+export function isUnderRoadmaps(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "roadmaps"]);
+}
+
+export function isUnderHandoffs(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "handoffs"]);
+}
+
+export function isUnderImplementations(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "implementations"]);
+}
+
+export function isUnderTmp(filePath, workspaceRoot) {
+  if (!filePath || !workspaceRoot) return false;
+  const abs = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(workspaceRoot, filePath);
+  const root = path.resolve(workspaceRoot, ".tmp", "grunt");
+  if (path.dirname(abs) !== root) return false;
+  return !TMP_RESERVED_DIRS.has(path.basename(abs));
+}
+
+/** Which persist owns a Write to `absPath`, given the scratch root; null for none. */
+export function persistOwner(absPath, root) {
+  if (isUnderPlans(absPath, root)) return "plans";
+  if (isUnderRoadmaps(absPath, root)) return "roadmaps";
+  if (isUnderHandoffs(absPath, root)) return "handoffs";
+  if (isUnderImplementations(absPath, root)) return "implementations";
+  if (isUnderTmp(absPath, root)) return "tmp";
+  return null;
+}
+
 /** `{serial}-{slug}-{YYYYMMDDTHHMMSSZ}.{ext}`; stamp required. */
 export const FILENAME_RE =
   /^[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*-\d{8}T\d{6}Z\.[a-z0-9]+$/;
@@ -61,7 +120,7 @@ function nextTmpSerial(dir) {
 }
 
 export function persistTmp({ workspaceRoot, content, created } = {}) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const raw = String(content || "");
   if (raw.includes("\0")) return { ok: false, error: "binary" };
   const name = extractTmpName(raw);
@@ -87,7 +146,6 @@ export function persistTmp({ workspaceRoot, content, created } = {}) {
   }
   if (fs.existsSync(dest)) return { ok: false, error: "serial collision" };
   if (!FILENAME_RE.test(filename)) return { ok: false, error: "filename" };
-  ensureGitignore(ws);
   fs.writeFileSync(dest, body);
   return {
     ok: true,
@@ -103,7 +161,7 @@ export function persistTmp({ workspaceRoot, content, created } = {}) {
 function main() {
   try {
     const wsIdx = process.argv.indexOf("--workspace");
-    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : process.cwd();
+    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : resolveRoots().root;
     const content = fs.readFileSync(0, "utf8");
     const result = persistTmp({ workspaceRoot, content });
     if (!result.ok) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Unified prereq doctor. Print-only install hints. Never runs installs. */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,10 @@ import {
   runScriptLine,
 } from "./package-manager.mjs";
 import { selectedPacks } from "./feature-packs.mjs";
+import { nestedHolds, nestedTmpDirs } from "./clean.mjs";
+import { redundantIgnoreLines } from "./gitignore-guard.mjs";
+import { canonicalPath, gitRevParse, resolveRoots } from "./workspace-root.mjs";
+import { listWorktrees } from "./worktree.mjs";
 
 export const CHROMIUM_BINS = [
   "chromium",
@@ -314,6 +318,85 @@ export function mapsRequired(cwd) {
   return isDir(path.join(rs, "reference")) || isDir(path.join(rs, "skills"));
 }
 
+function gitOut(cwd, args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : null;
+}
+
+function ignoreLines(file) {
+  try {
+    return fs.readFileSync(file, "utf8").split(/\r?\n/).map((l) => l.trimEnd());
+  } catch {
+    return [];
+  }
+}
+
+const byPath = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+
+/**
+ * Workspace leftovers (roadmap D9), each with the command that clears exactly it. Reads only; deletes nothing.
+ * @returns {Array<{ kind: string, path: string, detail: string, clear: string }>}
+ */
+export function workspaceIssues({ root, checkout }) {
+  // resolveRoots already asked git about this dir; the memo saves a spawn.
+  const facts = gitRevParse(checkout);
+  if (!facts) return [];
+  const top = canonicalPath(path.resolve(facts.top));
+  const item = (kind, p, detail, clear) => ({ kind, path: p, detail, clear });
+
+  const stray = nestedTmpDirs(root).map((dir) => {
+    const holds = nestedHolds(dir);
+    return item("stray .tmp/grunt", dir, holds ? `holds ${holds}` : "", `rm -r ${dir}`);
+  });
+
+  const listed = gitOut(top, ["ls-files", "-co", "--exclude-standard", "-z", "--", ":(glob)**/.gitignore"]) ?? "";
+  const redundant = [];
+  for (const rel of new Set(listed.split("\0").filter((r) => r && r !== ".gitignore"))) {
+    const file = path.join(top, ...rel.split("/"));
+    const lines = ignoreLines(file).filter((l) => l && !l.startsWith("#"));
+    const hits = lines.length ? redundantIgnoreLines(file, lines) : [];
+    if (!hits.length) continue;
+    const tracked = gitOut(top, ["ls-files", "--error-unmatch", "--", rel]) !== null;
+    const detail = hits.map((h) => `"${h.line}" ignored by ${h.rule}`).join(", ");
+    redundant.push(item("redundant .gitignore", file, detail, tracked ? `git -C ${top} rm -q ${rel}` : `rm ${file}`));
+  }
+
+  const rootIgnore = path.join(top, ".gitignore");
+  const lines = ignoreLines(rootIgnore);
+  const duplicate = [];
+  lines.forEach((line, i) => {
+    if (!line.endsWith("/") || line.startsWith("!") || line.length < 2) return;
+    const bare = lines.indexOf(line.slice(0, -1));
+    if (bare === -1) return;
+    duplicate.push(
+      item("duplicate .gitignore line", `${rootIgnore}:${i + 1} "${line}"`, `"${lines[bare]}" on line ${bare + 1} covers it`, `delete line ${i + 1} of ${rootIgnore}`),
+    );
+  });
+
+  const worktrees = listWorktrees(root);
+  const label = (w) => w.branch || "detached";
+  const missing = worktrees.filter((w) => w.state === "missing");
+  const outside = worktrees.filter((w) => w.state !== "missing" && !w.managed);
+  const merged = worktrees.filter((w) => w.state === "clean" && w.managed && w.merged);
+  const script = path.join(checkout, ".rulesync", "scripts", "worktree.mjs");
+  return [
+    ...stray.sort(byPath),
+    ...redundant.sort(byPath),
+    ...duplicate,
+    ...missing.map((w) => item("missing worktree", w.path, label(w), `git -C ${root} worktree prune`)).sort(byPath),
+    ...outside.map((w) => item("worktree outside .worktrees", w.path, label(w), `git -C ${root} worktree remove ${w.path}`)).sort(byPath),
+    ...merged.map((w) => item("merged worktree", w.path, label(w), `node ${script} prune`)).sort(byPath),
+  ];
+}
+
+export function workspaceLines(items) {
+  if (!items.length) return [row("workspace", "ok")];
+  return [
+    row("workspace", `${items.length} to clear`, "report only; nothing was deleted"),
+    ...items.map((i) => `- ${i.kind} ${i.path}${i.detail ? ` (${i.detail})` : ""}: ${i.clear}`),
+  ];
+}
+
 export function runDoctor({
   cwd = process.cwd(),
   pathEnv = process.env.PATH,
@@ -462,6 +545,8 @@ export function runDoctor({
       lines.push(formatSkillConflictWarn(c.name));
     }
   }
+
+  lines.push(...workspaceLines(workspaceIssues(resolveRoots({}, { env, cwd }))));
 
   lines.push("");
   lines.push(`rulesync schema doctor: ${runScriptLine(detectedPm.manager, "rulesync:doctor")}`);

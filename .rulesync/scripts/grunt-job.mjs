@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { canonicalPath, resolveRoots } from "./workspace-root.mjs";
 
 export const FALLBACK = "FALLBACK";
 export const SHELL_META = /[|&;`$(){}<>\n\r]/;
@@ -119,9 +120,9 @@ export function parseArgv(argv) {
 }
 
 export function resolveUnder(root, rel) {
-  const base = path.resolve(root || process.cwd());
+  const base = canonicalPath(path.resolve(root || process.cwd()));
   if (rel == null || rel === "") return base;
-  const abs = path.isAbsolute(rel) ? path.resolve(rel) : path.resolve(base, rel);
+  const abs = canonicalPath(path.resolve(base, rel));
   const prefix = base.endsWith(path.sep) ? base : base + path.sep;
   if (abs !== base && !abs.startsWith(prefix)) return null;
   return abs;
@@ -262,9 +263,17 @@ function stashId() {
   return s;
 }
 
-export function writeStash(cwd, kind, raw) {
-  const root = cwd || process.cwd();
-  const dir = path.join(root, ".tmp", "grunt", "stash");
+function stashDir(root) {
+  return path.join(root, ...STASH_REL.split("/"));
+}
+
+/** The stash path to print: relative from the root, absolute from anywhere else. */
+function stashRef({ root, cwd }, name) {
+  return path.resolve(cwd) === path.resolve(root) ? `${STASH_REL}/${name}` : path.join(stashDir(root), name);
+}
+
+export function writeStash({ cwd = process.cwd(), root = resolveRoots({}, { cwd }).root } = {}, kind, raw) {
+  const dir = stashDir(root);
   fs.mkdirSync(dir, { recursive: true });
   const name = `${kind}-${stashId()}.txt`;
   let body = String(raw || "");
@@ -272,27 +281,20 @@ export function writeStash(cwd, kind, raw) {
   if (buf.length > STASH_CAP) body = buf.subarray(0, STASH_CAP).toString("utf8");
   if (!body.endsWith("\n")) body += "\n";
   fs.writeFileSync(path.join(dir, name), body);
-  return `${STASH_REL}/${name}`;
+  return stashRef({ root, cwd }, name);
 }
 
-function relStash(abs, cwd) {
-  const root = cwd || process.cwd();
-  return path.relative(root, abs).replace(/\\/g, "/");
-}
-
-export function resolveStashFile(cwd, stash) {
+/** A bare id or name, `.tmp/grunt/stash/<name>`, or that file's absolute path, all in the root stash. */
+export function resolveStashFile({ cwd = process.cwd(), root = resolveRoots({}, { cwd }).root } = {}, stash) {
   const id = String(stash || "").trim();
-  if (!id || id.includes("..") || path.isAbsolute(id) || /[\\/]/.test(id)) {
-    if (id && !id.includes("..") && !path.isAbsolute(id)) {
-      const under = String(id).replace(/\\/g, "/");
-      if (under.startsWith(".tmp/grunt/stash/") && !under.includes("..")) {
-        const abs = resolveUnder(cwd || process.cwd(), under);
-        if (abs && fs.existsSync(abs) && fs.statSync(abs).isFile()) return abs;
-      }
-    }
-    if (!id || id.includes("..") || path.isAbsolute(id)) return null;
+  if (!id) return null;
+  const dir = canonicalPath(stashDir(root));
+  const named = path.isAbsolute(id) ? id : id.replace(/\\/g, "/").startsWith(`${STASH_REL}/`) ? path.join(root, id) : null;
+  if (named) {
+    const abs = canonicalPath(path.resolve(named));
+    return path.dirname(abs) === dir && fs.existsSync(abs) && fs.statSync(abs).isFile() ? abs : null;
   }
-  const dir = path.join(cwd || process.cwd(), ".tmp", "grunt", "stash");
+  if (id.includes("..") || /[\\/]/.test(id)) return null;
   if (!fs.existsSync(dir)) return null;
   const names = fs.readdirSync(dir);
   const exact = names.find((n) => n === id || n === `${id}.txt`);
@@ -307,6 +309,7 @@ function verdictFromLines({
   raw,
   query,
   cwd,
+  root,
   failed = false,
   errors,
   truncated = false,
@@ -316,7 +319,7 @@ function verdictFromLines({
   let stash = "";
   const rawText = raw != null ? String(raw) : lines.join("\n");
   if (n > MAX_FACTS || Buffer.byteLength(rawText, "utf8") > MAX_STDOUT) {
-    stash = writeStash(cwd, kind, rawText);
+    stash = writeStash({ cwd, root }, kind, rawText);
   }
   if (failed) {
     const err = (errors && errors.length ? errors : shown).slice(0, 3);
@@ -477,14 +480,14 @@ function nodeSearch(query, { cwd, start, glob } = {}) {
   return { n, facts, truncated: n >= MAX_HITS || bytes >= STASH_CAP };
 }
 
-export function runSearch(query, { cwd, path: searchPath, glob } = {}) {
-  const root = cwd || process.cwd();
-  const start = searchPath ? resolveUnder(root, searchPath) : root;
+export function runSearch(query, { cwd, root, path: searchPath, glob } = {}) {
+  const base = cwd || process.cwd();
+  const start = searchPath ? resolveUnder(base, searchPath) : base;
   if (!start) {
     return { fallback: true, text: FALLBACK + "\n", code: 2 };
   }
   const globs = Array.isArray(glob) ? glob.filter(Boolean) : glob ? [String(glob)] : [];
-  const relStart = path.relative(root, start) || ".";
+  const relStart = path.relative(base, start) || ".";
   // --hidden: grunt code (.rulesync/scripts) and rulesync SSOT live in dot dirs; .gitignore still applies.
   const rgArgs = [
     "-n",
@@ -510,7 +513,7 @@ export function runSearch(query, { cwd, path: searchPath, glob } = {}) {
     rgArgs.push("-g", g);
   }
   rgArgs.push("-e", query, relStart);
-  const r = runCmd("rg", rgArgs, root);
+  const r = runCmd("rg", rgArgs, base);
   if (!(r.error && r.error.code === "ENOENT")) {
     const stdout = String(r.stdout || "");
     const stderr = String(r.stderr || "");
@@ -532,7 +535,8 @@ export function runSearch(query, { cwd, path: searchPath, glob } = {}) {
         lines: parsed.facts,
         raw: parsed.raw,
         query,
-        cwd: root,
+        cwd: base,
+        root,
         truncated,
       });
     }
@@ -553,13 +557,14 @@ export function runSearch(query, { cwd, path: searchPath, glob } = {}) {
     }
   }
 
-  const node = nodeSearch(query, { cwd: root, start, glob: globs });
+  const node = nodeSearch(query, { cwd: base, start, glob: globs });
   return verdictFromLines({
     kind: "search",
     lines: node.facts,
     raw: node.facts.join("\n"),
     query,
-    cwd: root,
+    cwd: base,
+    root,
     truncated: node.truncated,
   });
 }
@@ -569,7 +574,7 @@ function alreadyRtk(query) {
   return first === "rtk" || first.endsWith("/rtk");
 }
 
-export function runExec(query, { cwd } = {}) {
+export function runExec(query, { cwd, root } = {}) {
   const q = String(query).trim();
   if (SHELL_META.test(q)) {
     return { fallback: true, text: FALLBACK + "\n", code: 2 };
@@ -623,6 +628,7 @@ export function runExec(query, { cwd } = {}) {
       raw,
       query: q,
       cwd,
+      root,
       failed: true,
       errors: lines,
     });
@@ -645,11 +651,12 @@ export function runExec(query, { cwd } = {}) {
     raw: stdout || stderr,
     query: q,
     cwd,
+    root,
   });
 }
 
-export function runSlice({ stash, path: filter, from, to, cwd } = {}) {
-  const abs = resolveStashFile(cwd, stash);
+export function runSlice({ stash, path: filter, from, to, cwd = process.cwd(), root = resolveRoots({}, { cwd }).root } = {}) {
+  const abs = resolveStashFile({ cwd, root }, stash);
   if (!abs) {
     return {
       fallback: false,
@@ -699,7 +706,6 @@ export function runSlice({ stash, path: filter, from, to, cwd } = {}) {
   const factLines = picked.map(
     (x) => `stash:${x.n} — ${x.l.trim().slice(0, 120)}`,
   );
-  const rel = relStash(abs, cwd);
   if (picked.length <= MAX_FACTS) {
     return {
       fallback: false,
@@ -714,7 +720,7 @@ export function runSlice({ stash, path: filter, from, to, cwd } = {}) {
       kind: "exec",
       n: picked.length,
       facts: shown,
-      stash: rel,
+      stash: stashRef({ root, cwd }, path.basename(abs)),
     }),
     code: 0,
   };
@@ -736,7 +742,7 @@ function stripHtml(html) {
   return { title: String(title).replace(/\s+/g, " ").trim(), text };
 }
 
-export function runFetch(query, { cwd } = {}) {
+export function runFetch(query, { cwd, root } = {}) {
   const url = String(query || "").trim();
   if (!/^https?:\/\//i.test(url)) {
     return { fallback: true, text: FALLBACK + "\n", code: 2 };
@@ -791,6 +797,7 @@ export function runFetch(query, { cwd } = {}) {
     raw,
     query: url,
     cwd,
+    root,
     truncated: Buffer.byteLength(raw, "utf8") >= STASH_CAP,
   });
 }
@@ -803,6 +810,7 @@ export function runJob({
   job,
   query,
   cwd,
+  root,
   path: searchPath,
   glob,
   stash,
@@ -812,13 +820,14 @@ export function runJob({
 } = {}) {
   if (unknown) return fallbackResult();
   if (shouldFallback(job, query, { stash })) return fallbackResult();
-  const root = cwd || process.cwd();
-  if (job === "search") return runSearch(query, { cwd: root, path: searchPath, glob });
+  const at = cwd || process.cwd();
+  const stashRoot = root || resolveRoots({}, { cwd: at }).root;
+  if (job === "search") return runSearch(query, { cwd: at, root: stashRoot, path: searchPath, glob });
   if (job === "slice") {
-    return runSlice({ stash, path: searchPath, from, to, cwd: root });
+    return runSlice({ stash, path: searchPath, from, to, cwd: at, root: stashRoot });
   }
-  if (job === "fetch") return runFetch(query, { cwd: root });
-  return runExec(query, { cwd: root });
+  if (job === "fetch") return runFetch(query, { cwd: at, root: stashRoot });
+  return runExec(query, { cwd: at, root: stashRoot });
 }
 
 function main() {
@@ -828,8 +837,8 @@ function main() {
       process.stdout.write(FALLBACK + "\n");
       return 2;
     }
-    const ws = process.cwd();
-    const cwd = parsed.cwd ? resolveJobCwd(parsed.cwd, ws) : ws;
+    const roots = resolveRoots();
+    const cwd = parsed.cwd ? resolveJobCwd(parsed.cwd, roots.cwd) : roots.cwd;
     if (!cwd) {
       process.stdout.write(FALLBACK + "\n");
       return 2;
@@ -838,6 +847,7 @@ function main() {
       job: parsed.job,
       query: parsed.query,
       cwd,
+      root: roots.root,
       path: parsed.path,
       glob: parsed.glob,
       stash: parsed.stash,

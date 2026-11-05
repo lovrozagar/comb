@@ -32,13 +32,14 @@ source: "<≤120 chars>"
 
 ## Body headings (this order only)
 
-`# {slug}`, `## Goal`, `## Context`, `## Decisions`, `## Order`, `## Watch-outs`, `## Verify`, `## Previous mistakes`
+`# {slug}`, `## Goal`, `## Usage`, `## Context`, `## Decisions`, `## Order`, `## Watch-outs`, `## Verify`, `## Previous mistakes`
 
-No other `##` headings. No Type key. No Commit key. A roadmap saved before `## Previous mistakes` existed stays valid without it.
+No other `##` headings. No Type key. No Commit key. A roadmap saved before `## Usage` or `## Previous mistakes` existed stays valid without them; a fresh save needs both. Lines inside a code fence are never headings.
 
 | Section | Amount |
 |---|---|
 | Goal | 1–3 sentences. Program done-when. |
+| Usage | What a person or agent types and sees once the whole program lands: each new or changed command, flag, output, error message, or file, in fenced blocks, with the before for each changed one; or one line: `No visible change:` and why. |
 | Context / Decisions / Watch-outs | bullets. Decisions: each choice plus the rejected alternative. Watch-outs may be `(none)`. |
 | Order | one checkbox per slice, `N [ ] Title: {2–6 words}` |
 | Verify | 1–5 runnable program gates, same `N.M [ ]` grammar as plans |

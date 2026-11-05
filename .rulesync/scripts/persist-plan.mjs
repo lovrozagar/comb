@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { canonicalPath, resolveRoots } from "./workspace-root.mjs";
 import { matchLessons } from "./lessons.mjs";
 
 export const PLAN_DIR = ".tmp/grunt/plans";
@@ -11,7 +12,7 @@ export const LEGACY_PLAN_DIR = ".tmp/plans";
 
 /** If `.tmp/plans` exists and `.tmp/grunt/plans` is missing, rename. Both exist: leave old. */
 export function migrateLegacyPlansDir(workspaceRoot) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const legacy = path.join(ws, LEGACY_PLAN_DIR);
   const next = path.join(ws, PLAN_DIR);
   if (fs.existsSync(legacy) && !fs.existsSync(next)) {
@@ -109,20 +110,6 @@ export function nextSerial(plansDir) {
   return next;
 }
 
-export function ensureGitignore(workspaceRoot) {
-  const p = path.join(workspaceRoot, ".gitignore");
-  let cur = "";
-  try {
-    cur = fs.readFileSync(p, "utf8");
-  } catch {
-    fs.writeFileSync(p, ".tmp/\n");
-    return;
-  }
-  if (/(?:^|\n)\.tmp\/(?:\n|$)/.test(cur)) return;
-  const next = cur.endsWith("\n") || !cur ? cur : cur + "\n";
-  fs.writeFileSync(p, next + ".tmp/\n");
-}
-
 function stripFrontmatter(text) {
   const s = String(text).replace(/^\uFEFF/, "");
   if (!s.startsWith("---\n")) return s;
@@ -176,18 +163,78 @@ ${commitLine}---
 ${rest}`;
 }
 
-function sectionBodies(text) {
-  const h2 = [...text.matchAll(/^## (.+)$/gm)].map((m) => ({
-    title: m[1].trim(),
-    index: m.index,
-  }));
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+
+/**
+ * Lines inside CommonMark code fences, fence lines included. A fence closes only on the same
+ * character, at least as long, with nothing after it. `unclosed` is the 1-based line of a fence
+ * that never closes, else null.
+ */
+export function fencedLineSet(lines) {
+  const fenced = new Set();
+  let open = null;
+  lines.forEach((line, i) => {
+    if (open) {
+      fenced.add(i);
+      const m = FENCE_CLOSE_RE.exec(line);
+      if (m && m[1][0] === open.char && m[1].length >= open.length) open = null;
+      return;
+    }
+    const m = FENCE_OPEN_RE.exec(line);
+    if (!m || (m[1][0] === "`" && line.slice(line.indexOf(m[1]) + m[1].length).includes("`"))) return;
+    fenced.add(i);
+    open = { char: m[1][0], length: m[1].length, line: i + 1 };
+  });
+  return { fenced, unclosed: open ? open.line : null };
+}
+
+export function unclosedFenceErrors(text) {
+  const { unclosed } = fencedLineSet(String(text).split("\n"));
+  return unclosed ? [`unclosed code fence at line ${unclosed}: close it with the same fence`] : [];
+}
+
+/** `## ` sections outside code fences, in order, with each body. */
+export function sectionBodies(text) {
+  const lines = text.split("\n");
+  const { fenced } = fencedLineSet(lines);
+  const h2 = [];
+  let offset = 0;
+  lines.forEach((line, i) => {
+    const m = !fenced.has(i) && /^## (.+)$/.exec(line);
+    if (m) h2.push({ title: m[1].trim(), index: offset, end: offset + line.length + 1 });
+    offset += line.length + 1;
+  });
   const bodies = {};
   for (let i = 0; i < h2.length; i++) {
-    const start = h2[i].index + h2[i].title.length + 4;
     const end = i + 1 < h2.length ? h2[i + 1].index : text.length;
-    bodies[h2[i].title] = text.slice(start, end);
+    bodies[h2[i].title] = text.slice(h2[i].end, end);
   }
   return { order: h2.map((h) => h.title), bodies };
+}
+
+export const USAGE_H2 = "Usage";
+
+/**
+ * `## Usage` shows what a person or agent types and sees: required right after Goal on a fresh
+ * save, optional on an update to a file saved without it, and never prose alone.
+ */
+export function usageErrors(order, bodies, { fresh }) {
+  const at = order.indexOf(USAGE_H2);
+  if (at === -1) {
+    return fresh
+      ? ['missing ## Usage after ## Goal: show what a person types and sees, before and after, in fenced blocks, or one "No visible change:" line']
+      : [];
+  }
+  const errors = [];
+  if (order[at - 1] !== "Goal") errors.push("## Usage must come right after ## Goal");
+  const body = bodies[USAGE_H2] || "";
+  const lines = body.split("\n");
+  const hasFence = fencedLineSet(lines).fenced.size > 0;
+  if (!hasFence && !lines.some((l) => l.startsWith("No visible change:"))) {
+    errors.push('## Usage needs a fenced example or a "No visible change:" line');
+  }
+  return errors;
 }
 
 function parseFrontmatter(text) {
@@ -338,6 +385,8 @@ export function validatePlan(filename, text, { fresh = true, previous } = {}) {
   if (fileSerial && map.serial && Number(map.serial) !== Number(fileSerial[1])) {
     errors.push("serial/filename");
   }
+  const fence = unclosedFenceErrors(text);
+  if (fence.length) return [...errors, ...fence];
   const { order: allOrder, bodies } = sectionBodies(body);
   errors.push(
     ...mistakeLogErrors(allOrder, bodies, {
@@ -347,7 +396,8 @@ export function validatePlan(filename, text, { fresh = true, previous } = {}) {
       kind: "plan",
     }),
   );
-  const order = allOrder.filter((h) => h !== MISTAKES_H2);
+  errors.push(...usageErrors(allOrder, bodies, { fresh }));
+  const order = allOrder.filter((h) => h !== MISTAKES_H2 && h !== USAGE_H2);
   const firstSix = order.slice(0, REQUIRED_H2.length);
   if (REQUIRED_H2.some((h, i) => firstSix[i] !== h)) errors.push("heading order");
   const extra = order.filter((h) => !REQUIRED_H2.includes(h));
@@ -361,7 +411,10 @@ export function validatePlan(filename, text, { fresh = true, previous } = {}) {
     else if (!/^(?:[-*] |\(none\))/m.test(b)) errors.push(`${h} bullets`);
   }
   const boxes = [];
-  for (const line of text.split("\n")) {
+  const textLines = text.split("\n");
+  const { fenced } = fencedLineSet(textLines);
+  for (const [i, line] of textLines.entries()) {
+    if (fenced.has(i)) continue;
     const m = line.match(BOX_RE);
     if (!m) continue;
     if (fresh && m[3] !== " ") errors.push("fresh [x]");
@@ -384,16 +437,17 @@ export function validatePlan(filename, text, { fresh = true, previous } = {}) {
 
 /** Lessons matching workspace files a new plan names (absolute paths) that Watch-outs does not cite. */
 /**
- * Absolute paths under `ws` that `text` names, written with either separator (case-insensitive on
- * Windows). A sibling dir that shares the prefix does not count.
+ * Absolute paths under `ws` that `text` names, as written: either separator, any case on Windows, and any
+ * spelling (symlink, 8.3 name) of `ws`. A sibling dir that shares the prefix does not count.
  */
 export function workspacePaths(ws, text, p = path) {
-  const segs = p.resolve(ws).split(/[\\/]/).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const re = new RegExp(
-    `(?<![\\w.\\\\/-])${segs.join("[\\\\/]")}[\\\\/][^\\s\`'"()<>,;]+`,
-    p.sep === "\\" ? "gi" : "g",
-  );
-  return [...new Set((String(text).match(re) || []).map((m) => m.replace(/[.:]+$/, "")))];
+  const top = canonicalPath(p.resolve(ws), p);
+  const under = (m) => {
+    const rel = p.relative(top, canonicalPath(m, p));
+    return rel && !rel.startsWith("..") && !p.isAbsolute(rel);
+  };
+  const found = String(text).match(/(?<![\w.:\\/-])(?:[A-Za-z]:[\\/]|\/)[^\s`'"()<>,;]+/g) || [];
+  return [...new Set(found.map((m) => m.replace(/[.:]+$/, "")).filter(under))];
 }
 
 function uncitedLessons(ws, text) {
@@ -427,11 +481,13 @@ function withSavedFrontmatter(previous, raw) {
  * Write as modified since read.
  */
 export function preparePlanUpdate({ workspaceRoot, filePath, content }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const abs = path.resolve(ws, filePath);
   const filename = path.basename(abs);
   const previous = fs.readFileSync(abs, "utf8");
   const text = String(content || "").replace(/^﻿/, "");
+  const fence = unclosedFenceErrors(text);
+  if (fence.length) return { ok: false, error: fence.join("; "), errors: fence };
   const full = text.startsWith("---\n") ? text : withSavedFrontmatter(previous, text);
   const errors = validatePlan(filename, full, { fresh: false, previous });
   if (errors.length) {
@@ -449,12 +505,18 @@ export function preparePlanUpdate({ workspaceRoot, filePath, content }) {
 
 export function persistPlan({
   workspaceRoot,
+  checkout,
   content,
   source,
   created,
 } = {}) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
+  // Lesson citations read tracked lessons, which live in the checkout the agent works in.
+  const lessonsRoot = checkout || workspaceRoot || resolveRoots().checkout;
   const raw = String(content || "");
+  // Line numbers in this deny count from what the caller sent.
+  const fence = unclosedFenceErrors(raw);
+  if (fence.length) return { ok: false, error: fence.join("; "), errors: fence };
   const planName = extractPlanName(raw) || extractH1(stripFrontmatter(stripPlanName(raw)));
   const slug = slugify(planName);
   const src =
@@ -496,13 +558,12 @@ export function persistPlan({
     commit,
   });
   const errors = validatePlan(filename, full);
-  for (const r of uncitedLessons(ws, full)) {
+  for (const r of uncitedLessons(lessonsRoot, full)) {
     errors.push(`cite this matched lesson in Watch-outs: ${r.file} (${r.summary})`);
   }
   if (errors.length) {
     return { ok: false, error: errors.join("; "), errors };
   }
-  ensureGitignore(ws);
   fs.writeFileSync(dest, full);
   return {
     ok: true,
@@ -518,7 +579,7 @@ function main() {
   try {
     const wsIdx = process.argv.indexOf("--workspace");
     const workspaceRoot =
-      wsIdx >= 0 ? process.argv[wsIdx + 1] : process.cwd();
+      wsIdx >= 0 ? process.argv[wsIdx + 1] : resolveRoots().root;
     const content = fs.readFileSync(0, "utf8");
     const result = persistPlan({ workspaceRoot, content });
     if (!result.ok) {

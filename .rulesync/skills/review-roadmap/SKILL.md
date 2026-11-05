@@ -22,5 +22,6 @@ Scripts already enforce the format and the append-only `## Previous mistakes`. D
 6. Flag a Decision with no rejected alternative, and a slice Goal or Why that contradicts a Decision.
 7. Flag a Verify gate no one can run, and a program Goal no Verify gate proves.
 8. Flag a slice Goal too vague to write a plan from: an open choice, a vague target, or a path that does not exist.
+9. Compare `## Usage` with the slices in Order. Flag each new or changed command, flag, output, error message, or file a person or agent touches that Usage does not show, a changed one shown without its before, and a `No visible change:` line on a roadmap that changes one.
 
 Reply with at most 10 findings, most severe first, one line each: `{slice number or section}: {problem}; {fix}`. With nothing to flag, reply `no findings`. No praise and no summary.

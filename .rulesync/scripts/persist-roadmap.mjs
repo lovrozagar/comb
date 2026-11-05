@@ -3,16 +3,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import {
   compactCreatedStamp,
-  ensureGitignore,
   FILENAME_RE,
   MISTAKES_H2,
   mistakeLogErrors,
   PLAN_DIR,
   PLAN_MISTAKE_SOURCES,
   reviewErrors,
+  sectionBodies,
   slugify,
+  unclosedFenceErrors,
+  USAGE_H2,
+  usageErrors,
   utcDateTime,
 } from "./persist-plan.mjs";
 
@@ -103,19 +107,6 @@ function preamble(raw) {
   };
 }
 
-function sectionBodies(text) {
-  const h2 = [...text.matchAll(/^## (.+)$/gm)].map((m) => ({
-    title: m[1].trim(),
-    index: m.index,
-  }));
-  const bodies = {};
-  for (let i = 0; i < h2.length; i++) {
-    const start = h2[i].index + h2[i].title.length + 4;
-    const end = i + 1 < h2.length ? h2[i + 1].index : text.length;
-    bodies[h2[i].title] = text.slice(start, end);
-  }
-  return { order: h2.map((h) => h.title), bodies };
-}
 
 function parseSlices(orderBody) {
   const slices = [];
@@ -169,6 +160,8 @@ export function validateRoadmap(filename, text, { fresh = false, previous } = {}
     .replace(/-\d{8}T\d{6}Z$/, "");
   if (map.name && map.name !== slug) errors.push("name");
   if (!body.trim().startsWith(`# ${slug}`)) errors.push("h1");
+  const fence = unclosedFenceErrors(text);
+  if (fence.length) return [...new Set([...errors, ...fence])];
   const { order: allOrder, bodies } = sectionBodies(body);
   errors.push(
     ...mistakeLogErrors(allOrder, bodies, {
@@ -178,7 +171,8 @@ export function validateRoadmap(filename, text, { fresh = false, previous } = {}
       kind: "roadmap",
     }),
   );
-  const order = allOrder.filter((h) => h !== MISTAKES_H2);
+  errors.push(...usageErrors(allOrder, bodies, { fresh }));
+  const order = allOrder.filter((h) => h !== MISTAKES_H2 && h !== USAGE_H2);
   if (REQUIRED_H2.some((h, i) => order[i] !== h)) errors.push("heading order");
   if (order.some((h) => !REQUIRED_H2.includes(h))) errors.push("extra h2");
   const goalN = sentences(bodies.Goal || "");
@@ -245,10 +239,12 @@ function sourceOf(pre, slug) {
  * Write as modified since read.
  */
 export function prepareRoadmapUpdate({ workspaceRoot, filePath, content }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const abs = path.resolve(ws, filePath);
   const filename = path.basename(abs);
   const previous = fs.readFileSync(abs, "utf8");
+  const fence = unclosedFenceErrors(String(content || ""));
+  if (fence.length) return { ok: false, error: fence.join("; "), errors: fence };
   const pre = preamble(String(content || ""));
   const prev = stripFrontmatter(previous).map;
   const serial = parseInt(filename.split("-")[0], 10);
@@ -268,9 +264,11 @@ export function prepareRoadmapUpdate({ workspaceRoot, filePath, content }) {
 }
 
 export function persistRoadmap({ workspaceRoot, content, created } = {}) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const dir = path.join(ws, ROADMAP_DIR);
   fs.mkdirSync(dir, { recursive: true });
+  const fence = unclosedFenceErrors(String(content || ""));
+  if (fence.length) return { ok: false, error: fence.join("; "), errors: fence };
   const pre = preamble(String(content || ""));
   const slug = slugify(pre.name);
   const createdAt = created && DATETIME_RE.test(created) ? created : utcDateTime();
@@ -288,7 +286,6 @@ export function persistRoadmap({ workspaceRoot, content, created } = {}) {
   const full = render(serial, slug, pre.status || "draft", 0, createdAt, sourceOf(pre, slug), pre.body);
   const errors = validateRoadmap(filename, full, { fresh: true });
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
-  ensureGitignore(ws);
   fs.writeFileSync(dest, full);
   return {
     ok: true,
@@ -321,7 +318,7 @@ function nextSerial(dir) {
 function main() {
   try {
     const wsIdx = process.argv.indexOf("--workspace");
-    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : process.cwd();
+    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : resolveRoots().root;
     const content = fs.readFileSync(0, "utf8");
     const result = persistRoadmap({ workspaceRoot, content });
     if (!result.ok) {

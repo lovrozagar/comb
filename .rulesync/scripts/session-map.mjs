@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import { recordHook } from "./board.mjs";
 import { folderMap } from "./folder-map.mjs";
 
@@ -29,17 +30,6 @@ function readStdin() {
   }
 }
 
-function workspaceRootOf(data) {
-  return (
-    process.env.GROK_WORKSPACE_ROOT ||
-    data.workspaceRoot ||
-    data.workspace_root ||
-    data.cwd ||
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.cwd()
-  );
-}
-
 function logSize(root, data, out) {
   const sid = String(data.session_id || data.sessionId || "").replace(/[^\w-]/g, "");
   if (!sid) return;
@@ -53,11 +43,11 @@ function main() {
   const data = readStdin();
   recordHook(data, process.env);
   try {
-    const root = workspaceRootOf(data);
-    const out = folderMap({ root, maxChars: HOOK_CONTEXT_CHARS - RESERVE });
+    const roots = resolveRoots(data);
+    const out = folderMap({ root: roots.checkout, maxChars: HOOK_CONTEXT_CHARS - RESERVE });
     if (!out || !out.text) return 0;
     try {
-      logSize(root, data, out);
+      logSize(roots.root, data, out);
     } catch {
       // Logging is best-effort; the map still ships.
     }

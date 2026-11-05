@@ -3,8 +3,8 @@
 #
 # pre-commit: fixers first, the formatter last so it has the final word (oxlint autofixes emit their own style),
 # `stage_fixed` restages what they changed; then the same checks CI runs, on the staged files, and the type check.
-# pre-push: fmt and lint over the whole tree (catches commits made without hooks), the standards drift check, and the
-# verify stamp on each pushed tip.
+# pre-push: fmt and lint over the whole tree (catches commits made without hooks) and the standards drift check. The
+# full gates run in CI on the pushed tip, never here: `bun scripts/ci-wait.ts` waits for that run and reports it.
 min_version: 2.2.2
 # `**/` matches any depth, the repo root included.
 glob_matcher: doublestar
@@ -43,6 +43,3 @@ pre-push:
       run: bun run lint
     - name: standards
       run: bun scripts/standards-check.ts
-    - name: verified
-      run: bun scripts/pre-push.ts {1}
-      use_stdin: true

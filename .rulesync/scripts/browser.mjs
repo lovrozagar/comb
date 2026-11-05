@@ -7,6 +7,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import { writeStash } from "./grunt-job.mjs";
 import {
   CHROMIUM_BINS,
@@ -41,7 +42,7 @@ const PDF_B64 =
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 export function sessionDir(cwd) {
-  return path.join(cwd || process.cwd(), SESSION_REL);
+  return path.join(resolveRoots({}, { cwd: cwd || process.cwd() }).root, SESSION_REL);
 }
 
 export function sessionFile(cwd) {
@@ -713,7 +714,7 @@ export async function runBrowser(argv, opts = {}) {
         .filter((l) => /^#{1,6}\s/.test(l));
       const shown = [...headings.slice(0, 6), ...lines.slice(0, 24)];
       if (raw.length > 32 * 1024 || lines.length > 6) {
-        const stash = writeStash(cwd, "snap", raw);
+        const stash = writeStash({ cwd }, "snap", raw);
         return ok(
           `engine: ${session.engine}\nurl: ${session.lastURL}\n${shown.length} shown. stash=${stash}\n${shown.join("\n")}`,
         );

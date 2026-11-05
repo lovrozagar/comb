@@ -57,9 +57,9 @@ On default + clear bump:
 
 1. Set `package.json` `version` to `X.Y.Z` (keep lockfile in sync if it records version).
 2. Commit the bump with the same subject rules (`chore(release): vX.Y.Z` unless the user gave a subject).
-3. Push the branch per **Branch**.
+3. Push the branch per **Branch**. Wait until the `ci` run on the pushed commit (`gh run list --commit "$(git rev-parse HEAD)" --workflow ci`; a short SHA matches nothing) passes, every job; CI is the only Windows check. A failed run means no tag: read its log (`gh api --allow-escape-sequences repos/{owner}/{repo}/actions/jobs/<job id>/logs`), fix the cause with a failing test first, push, and wait again.
 4. `git tag vX.Y.Z` then `git push origin vX.Y.Z`.
-5. Watch the runs for the pushed commit and tag until every one completes (`gh run list`, then poll `gh run view <id> --json status,conclusion,jobs` every 30s or use a monitor). A pushed tag is not a release: report the outcome only after the publish job finishes. On a failed job, read its log (`gh api --allow-escape-sequences repos/{owner}/{repo}/actions/jobs/<job id>/logs`), fix the cause with a failing test first, and release the next patch. Never retag.
+5. Watch the runs for the tag until every one completes (`gh run list`, then poll `gh run view <id> --json status,conclusion,jobs` every 30s or use a monitor). A pushed tag is not a release: report the outcome only after the publish job finishes. On a failed job after the tag, read its log, fix the cause with a failing test first, and release the next patch. Never retag.
 
 Do not `npm publish`. Do not `npm pack` as publish. Do not `gh release create`. CI publishes from the tag.
 

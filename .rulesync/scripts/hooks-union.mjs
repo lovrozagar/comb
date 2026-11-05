@@ -11,7 +11,9 @@
  *
  * Consumer extras (if those scripts exist): SessionStart, check-behind,
  * validate+sim. Path deny from consumer `.rulesync/permissions.json`.
- * Gemini: SessionStart + AfterTool only; check-behind / path deny stay caveats.
+ * Gemini: BeforeTool gate (+ check-behind), SessionStart, AfterTool, timeouts in ms; path deny stays a caveat.
+ * Claude WorktreeCreate / WorktreeRemove come from hooks.jsonc's claudecode block; --check needs them when worktree.mjs ships.
+ * Every hook command is rootCmd(): the script in the project dir, else at its git top level.
  *
  *   node .rulesync/scripts/hooks-union.mjs           apply then check
  *   node .rulesync/scripts/hooks-union.mjs --check   keep-list only
@@ -19,21 +21,27 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { stripJsonc } from "./jsonc.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-export const PULL = "node scripts/daily-pull-check.mjs";
-export const RTK = "node scripts/rtk-check.mjs";
-export const FLEET = "node scripts/daily-fleet-check.mjs";
-export const BEHIND = "node scripts/check-behind.mjs --hook";
-export const VALIDATE = "node scripts/validate.mjs --hook";
-export const SIM = "node scripts/sim.mjs --hook";
-export const SCRUB =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/scrub-spawn-prompt.mjs"';
-export const GATE_FAT =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/gate-fat-tools.mjs"';
-export const MAP =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/session-map.mjs"';
+export const ROOT_PREFIX = 'd="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}"; [ -e "$d/';
+
+/** Hook command for `rel`: the script in the project dir, else at that dir's git top level, else in the hook cwd. */
+export function rootCmd(rel, args) {
+  const cmd = `${ROOT_PREFIX}${rel}" ] || d="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "$d")"; node "$d/${rel}"`;
+  return args ? `${cmd} ${args}` : cmd;
+}
+
+export const PULL = rootCmd("scripts/daily-pull-check.mjs");
+export const RTK = rootCmd("scripts/rtk-check.mjs");
+export const FLEET = rootCmd("scripts/daily-fleet-check.mjs");
+export const BEHIND = rootCmd("scripts/check-behind.mjs", "--hook");
+export const VALIDATE = rootCmd("scripts/validate.mjs", "--hook");
+export const SIM = rootCmd("scripts/sim.mjs", "--hook");
+export const SCRUB = rootCmd(".rulesync/scripts/scrub-spawn-prompt.mjs");
+export const GATE_FAT = rootCmd(".rulesync/scripts/gate-fat-tools.mjs");
+export const MAP = rootCmd(".rulesync/scripts/session-map.mjs");
 const MAP_NEEDLE = "session-map.mjs";
 
 export const AUTORUN_NEEDLES = [
@@ -52,9 +60,11 @@ export const GIT_HOOKS = [
   "scripts/git-hooks/pre-push.mjs",
 ];
 export const POST_WRITE_MATCHER = "Write|Edit|write|search_replace";
+/** Every read, search, shell, write and edit tool the gate answers: Claude, Grok, Codex and Antigravity names. */
+export const GATE_MATCHER =
+  "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace|apply_patch|write_to_file|replace_file_content|multi_replace_file_content|run_command";
+export const GEMINI_GATE_MATCHER = "write_file|replace|run_shell_command|read_file";
 
-const CAVEAT_BEHIND =
-  "NOT ported: PreToolUse check-behind.mjs. Gemini has no confirmed before-tool deny event.";
 const CAVEAT_PERMS =
   "path-scoped permissions.deny not ported; Gemini is name-scoped";
 
@@ -118,7 +128,7 @@ function gruntPreToolUse() {
       hooks: [hookCmd(SCRUB, 5)],
     },
     {
-      matcher: "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace",
+      matcher: GATE_MATCHER,
       hooks: [hookCmd(GATE_FAT, 5)],
     },
   ];
@@ -226,7 +236,7 @@ function consumerNamed(root) {
   };
   named["gate-fat-tools"] = {
     event: "PreToolUse",
-    matcher: "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace",
+    matcher: GATE_MATCHER,
     command: GATE_FAT,
     timeout: 5,
   };
@@ -238,6 +248,8 @@ function consumerNamed(root) {
   }
   return named;
 }
+
+const WORKTREE_NEEDLE = "worktree.mjs";
 
 function applyClaude(root) {
   const abs = path.join(root, ".claude/settings.json");
@@ -292,20 +304,29 @@ function applyAgents(root) {
   saveJson(abs, { ...live, ...named, rulesync });
 }
 
+/** Gemini reads hook timeouts in milliseconds. */
+function inMs(groups) {
+  return groups.map((g) => ({
+    ...g,
+    hooks: g.hooks.map((h) => (h.timeout == null ? h : { ...h, timeout: h.timeout * 1000 })),
+  }));
+}
+
 function applyGemini(root) {
-  if (!presentAutorun(root).length) return;
   const abs = path.join(root, ".gemini/settings.json");
-  const live = loadJson(abs);
+  const { _caveat_check_behind, ...live } = loadJson(abs);
+  const before = [{ matcher: GEMINI_GATE_MATCHER, hooks: [hookCmd(GATE_FAT, 5)] }];
+  if (hasScript(root, "check-behind.mjs")) before.push({ matcher: "write_file|replace", hooks: [hookCmd(BEHIND)] });
   const session = desiredSession(root);
   const post = desiredPost(root);
   const hooks = isPlainObject(live.hooks) ? { ...live.hooks } : {};
-  if (session) hooks.SessionStart = session;
+  hooks.BeforeTool = upsertGroups(hooks.BeforeTool, inMs(before));
+  if (session) hooks.SessionStart = inMs(session);
   if (post) {
-    hooks.AfterTool = [{ matcher: "write_file|replace", hooks: post[0].hooks }];
+    hooks.AfterTool = inMs([{ matcher: "write_file|replace", hooks: post[0].hooks }]);
   }
   saveJson(abs, {
     ...live,
-    _caveat_check_behind: CAVEAT_BEHIND,
     _caveat_permissions: CAVEAT_PERMS,
     hooks,
   });
@@ -328,15 +349,62 @@ export function applyUnion(opts = {}) {
   return { ok: true, check: false };
 }
 
+/** Hook files whose grunt and autorun commands must be `rootCmd` strings. */
+const COMMAND_FILES = [
+  ["claude", ".claude/settings.json"],
+  ["codex", ".codex/hooks.json"],
+  ["agents", ".agents/hooks.json"],
+  ["gemini", ".gemini/settings.json"],
+  ["rulesync", ".rulesync/hooks.jsonc"],
+  ["grok", ".grok/hooks/orchestrate-parent.json"],
+  ["grok", ".grok/hooks/rtk.json"],
+];
+const ROOT_SCRIPTS = [...GRUNT_NEEDLES, MAP_NEEDLE, WORKTREE_NEEDLE, ...AUTORUN_NEEDLES, "orchestrate-parent.js", "rtk-grok.js"];
+
+function allCommands(value, out = []) {
+  if (Array.isArray(value)) for (const v of value) allCommands(v, out);
+  else if (isPlainObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      if (k === "command" && typeof v === "string") out.push(v);
+      else allCommands(v, out);
+    }
+  }
+  return out;
+}
+
+function isRootCmd(command) {
+  if (!command.startsWith(ROOT_PREFIX)) return false;
+  const rel = command.slice(ROOT_PREFIX.length).split('"')[0];
+  const exact = rootCmd(rel);
+  return command === exact || command.startsWith(`${exact} `);
+}
+
+function staleCommands(root) {
+  const failures = [];
+  for (const [id, rel] of COMMAND_FILES) {
+    const p = path.join(root, rel);
+    if (!fs.existsSync(p)) continue;
+    const data = JSON.parse(stripJsonc(fs.readFileSync(p, "utf8")));
+    for (const command of allCommands(data)) {
+      const script = ROOT_SCRIPTS.find((n) => command.includes(n));
+      if (script && !isRootCmd(command)) {
+        failures.push(`${id}: ${script} hook command does not find its script from the repo root: run grunt upgrade`);
+      }
+    }
+  }
+  return failures;
+}
+
 export function checkUnion(opts = {}) {
   const root = resolveRoot(opts);
   const failures = [];
   const autorun = presentAutorun(root);
+  const worktree = hasGruntScript(root, WORKTREE_NEEDLE) ? [WORKTREE_NEEDLE] : [];
   const files = [
     {
       id: "claude",
       path: ".claude/settings.json",
-      needles: [...GRUNT_NEEDLES, ...mapNeedles(root), ...autorun, ...loadConsumerDeny(root)],
+      needles: [...GRUNT_NEEDLES, ...mapNeedles(root), ...worktree, ...autorun, ...loadConsumerDeny(root)],
     },
     {
       id: "codex",
@@ -348,18 +416,13 @@ export function checkUnion(opts = {}) {
       path: ".agents/hooks.json",
       needles: [...GRUNT_NEEDLES, ...autorun],
     },
-  ];
-  if (autorun.length) {
-    files.push({
+    {
       id: "gemini",
       path: ".gemini/settings.json",
-      needles: [
-        ...autorun.filter((n) => n !== "check-behind.mjs"),
-        "_caveat_check_behind",
-        "_caveat_permissions",
-      ],
-    });
-  }
+      needles: ["gate-fat-tools.mjs", ...mapNeedles(root), ...autorun, "_caveat_permissions"],
+    },
+  ];
+  failures.push(...staleCommands(root));
   for (const spec of files) {
     const p = path.join(root, spec.path);
     if (!fs.existsSync(p)) {

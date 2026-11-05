@@ -6,17 +6,19 @@ paths:
 
 ## Tests are the truth
 
-Every change starts with a test: a bug, a reported issue, a review finding, a feature, a refactor. Red: write the test and run it to show it fails. Fix: the smallest change that makes it pass. Green: run it again, then every gate. A fix without a test that failed first is not done. Detail: `.rulesync/reference/tdd.md`.
+Every change starts with a test: a bug, a reported issue, a review finding, a feature, a refactor. Red: write the test and run it to show it fails. Fix: the smallest change that makes it pass. Green: run it again, then the tests the change reaches. A fix without a test that failed first is not done. Detail: `.rulesync/reference/tdd.md`.
 
 ## Every gate passes before moving on
 
-`bun run verify` runs every gate in order, stops at the first failure, and stamps the commit when all pass. For comb: `fmt:check`, `lint`, `typecheck`, `test:coverage`, then:
+Locally, a commit runs the tests its change reaches: the touched test files and the tests of the code it changed. Never the full suites; those are CI's.
+
+CI on the pushed tip is the full gate. After a push, `bun scripts/ci-wait.ts` waits for the run and names any failed job and its log. While CI is red, the only work is fixing it. For comb, CI runs `fmt:check`, `lint`, `typecheck`, `test:coverage`, then:
 - `typecheck:strict`
 - `test:bun`
 - `test:e2e`
 - `test:consumers`
 
-Hooks enforce it. pre-commit fixes, formats and lints the staged files and type-checks. pre-push checks fmt and lint over the whole tree, checks the repo is in sync with `~/Development/standards`, and refuses a push whose tip has no verify stamp; the commits under the tip ride on its verify. Never use `--no-verify`, never stamp by hand. CI runs the same scripts on every push to `main`. While any gate is red, locally or in CI, the only work is fixing it. A failure is never skipped, retried away, or called flaky. Detail: `.rulesync/reference/gates.md`.
+Hooks enforce the fast checks. pre-commit fixes, formats and lints the staged files and type-checks. pre-push checks fmt and lint over the whole tree and checks the repo is in sync with `~/Development/standards`. Never use `--no-verify`. A failure is never skipped, retried away, or called flaky. Detail: `.rulesync/reference/gates.md`.
 
 ## Managed files
 

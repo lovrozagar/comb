@@ -1,3 +1,29 @@
 {
-  "mcpServers": {}
+  "mcpServers": {},
+  "_caveat_permissions": "path-scoped permissions.deny not ported; Gemini is name-scoped",
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "write_file|replace|run_shell_command|read_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/gate-fat-tools.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/gate-fat-tools.mjs\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/session-map.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/session-map.mjs\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
 }

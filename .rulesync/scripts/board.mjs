@@ -25,6 +25,36 @@ function oneLine(value, cap) {
   return cut || "-";
 }
 
+// Harness-injected blocks use hyphenated or underscored tags; the typed slash command is the only one kept.
+const STRIP_BLOCKS = [
+  /<\/?(?:command-name|command-args)>/g,
+  /<([a-z]+(?:[-_][a-z]+)+)\b(?:[^>]*>[\s\S]*?(?:<\/\1[^>]*>|$)|[^>]*$)/g,
+  /\[Image #\d+\]/g,
+  /\[Pasted text #\d+[^\]]*\]/g,
+];
+const SECRET_AFTER_KEY = [
+  /\b(password|passwd|bearer)(\s*[:=]\s*|\s+)\S+/gi,
+  /\b(pwd|token|secret|api[-_]?key|apikey)(\s*[:=]\s*)\S+/gi,
+];
+const SECRET_PREFIX = /\b(?:sk-|ghp_|gho_|github_pat_|xox[abpr]-|AKIA|AIza|glpat-)[A-Za-z0-9_-]{16,}/g;
+
+function isOpaqueToken(token) {
+  return token.length >= 24 && !/[/.-]/.test(token) && /[A-Z]/.test(token) && /[a-z]/.test(token) && /\d/.test(token);
+}
+
+/** The user's own words from a prompt or label: pasted blocks stripped, secrets redacted, capped. "" when nothing is left. */
+export function workLabel(text) {
+  let s = String(text ?? "");
+  for (const re of STRIP_BLOCKS) s = s.replace(re, " ");
+  for (const re of SECRET_AFTER_KEY) s = s.replace(re, (_, key, sep) => `${key}${sep}[redacted]`);
+  s = s.replace(SECRET_PREFIX, "[redacted]");
+  s = s
+    .split(/\s+/)
+    .map((token) => (isOpaqueToken(token) ? "[redacted]" : token))
+    .join(" ");
+  return s.replace(/\s+/g, " ").trim().slice(0, WORK_CAP).trim();
+}
+
 function commBase(comm) {
   const base = String(comm || "").split(/[/\\]/).pop() || "";
   return base.replace(/\.exe$/i, "").toLowerCase();
@@ -42,7 +72,7 @@ export function formatLine(row) {
     field(row.effort),
     field(row.session),
     oneLine(row.cwd),
-    oneLine(row.work, WORK_CAP),
+    workLabel(row.work) || "-",
   ].join(" ");
 }
 
@@ -197,9 +227,10 @@ export function sweep({ home, boot, probe = probeProcess } = {}) {
 }
 
 function nextWork(prev, opts) {
-  if (opts.forceWork) return { work: oneLine(opts.work, WORK_CAP), sticky: true };
+  const label = workLabel(opts.work);
+  if (opts.forceWork) return { work: label || "-", sticky: true };
   if (prev?.sticky && prev.work) return { work: String(prev.work), sticky: true };
-  if (opts.work != null && String(opts.work).trim()) return { work: oneLine(opts.work, WORK_CAP), sticky: false };
+  if (label) return { work: label, sticky: false };
   if (prev?.work) return { work: String(prev.work), sticky: false };
   return { work: "active", sticky: false };
 }

@@ -3,14 +3,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoots } from "./workspace-root.mjs";
 import {
   CREATED_RE,
   DATETIME_RE,
   SERIAL_LINE_RE,
   compactCreatedStamp,
-  ensureGitignore,
   nextSerial,
+  sectionBodies,
   slugify,
+  unclosedFenceErrors,
   utcDateTime,
 } from "./persist-plan.mjs";
 
@@ -71,19 +73,6 @@ source: ${JSON.stringify(src)}
 ${rest}`;
 }
 
-function sectionBodies(text) {
-  const h2 = [...text.matchAll(/^## (.+)$/gm)].map((m) => ({
-    title: m[1].trim(),
-    index: m.index,
-  }));
-  const bodies = {};
-  for (let i = 0; i < h2.length; i++) {
-    const start = h2[i].index + h2[i].title.length + 4;
-    const end = i + 1 < h2.length ? h2[i + 1].index : text.length;
-    bodies[h2[i].title] = text.slice(start, end);
-  }
-  return { order: h2.map((h) => h.title), bodies };
-}
 
 function parseFrontmatter(text) {
   if (!text.startsWith("---\n")) return { error: "missing frontmatter" };
@@ -129,6 +118,8 @@ export function validateHandoff(filename, text) {
   const slug = map.name;
   if (slug && slugFromFilename(filename) !== slug) errors.push("name/filename slug");
   if (!body.trim().startsWith(`# ${slug}`)) errors.push("h1 slug");
+  const fence = unclosedFenceErrors(text);
+  if (fence.length) return [...new Set([...errors, ...fence])];
   const { order, bodies } = sectionBodies(body);
   const firstFive = order.slice(0, REQUIRED_H2.length);
   if (REQUIRED_H2.some((h, i) => firstFive[i] !== h)) errors.push("heading order");
@@ -159,8 +150,10 @@ export function validateHandoff(filename, text) {
 }
 
 export function persistHandoff({ workspaceRoot, content, source, created } = {}) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().root;
   const raw = String(content || "");
+  const fence = unclosedFenceErrors(raw);
+  if (fence.length) return { ok: false, error: fence.join("; "), errors: fence };
   const name =
     extractHandoffName(raw) || extractH1(stripFrontmatter(stripHandoffName(raw)));
   const slug = slugify(name);
@@ -195,7 +188,6 @@ export function persistHandoff({ workspaceRoot, content, source, created } = {})
   });
   const errors = validateHandoff(filename, full);
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
-  ensureGitignore(ws);
   fs.writeFileSync(dest, full);
   return {
     ok: true,
@@ -210,7 +202,7 @@ export function persistHandoff({ workspaceRoot, content, source, created } = {})
 function main() {
   try {
     const wsIdx = process.argv.indexOf("--workspace");
-    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : process.cwd();
+    const workspaceRoot = wsIdx >= 0 ? process.argv[wsIdx + 1] : resolveRoots().root;
     const content = fs.readFileSync(0, "utf8");
     const result = persistHandoff({ workspaceRoot, content });
     if (!result.ok) {

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { canonicalPath, resolveRoots } from "./workspace-root.mjs";
 
 export const LESSONS_DIR = ".rulesync/lessons";
 export const INDEX_NAME = "INDEX.md";
@@ -264,7 +265,7 @@ function parseIndex(text) {
 
 /** Derived from the lesson files only, so any writer rerunning it converges; temp file then rename. */
 export function writeIndex({ workspaceRoot, pending }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().checkout;
   const dir = lessonsDir(ws);
   fs.mkdirSync(dir, { recursive: true });
   const text = renderIndex(indexRows(ws, pending));
@@ -277,7 +278,7 @@ export function writeIndex({ workspaceRoot, pending }) {
 
 /** Index rows whose globs match any of `files`, by hits then name. Reads INDEX.md only. */
 export function matchLessons({ workspaceRoot, files, cap = DEFAULT_CAP }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = canonicalPath(path.resolve(workspaceRoot || resolveRoots().checkout));
   let text;
   try {
     text = fs.readFileSync(path.join(lessonsDir(ws), INDEX_NAME), "utf8");
@@ -285,7 +286,7 @@ export function matchLessons({ workspaceRoot, files, cap = DEFAULT_CAP }) {
     return [];
   }
   const rel = (files || [])
-    .map((f) => path.relative(ws, path.resolve(ws, f)))
+    .map((f) => path.relative(ws, canonicalPath(path.resolve(ws, f))))
     .filter((r) => r && !r.startsWith("..") && !path.isAbsolute(r))
     .map(toPosix);
   if (!rel.length) return [];
@@ -306,7 +307,7 @@ function writeLesson(ws, slug, text) {
  * the pending text. The host writes the lesson: a write here first makes Claude Code refuse the Write.
  */
 export function persistLesson({ workspaceRoot, filePath, content, today = utcDate() }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().checkout;
   const abs = path.resolve(ws, filePath);
   const name = path.basename(abs);
   if (path.dirname(abs) !== lessonsDir(ws) || name === INDEX_NAME || !name.endsWith(".md")) {
@@ -325,7 +326,7 @@ export function persistLesson({ workspaceRoot, filePath, content, today = utcDat
 
 /** Another occurrence. The same evidence twice counts once, so a retried hit converges. */
 export function hitLesson({ workspaceRoot, slug, evidence, today = utcDate() }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().checkout;
   const file = lessonPath(ws, slug);
   if (!fs.existsSync(file)) return { ok: false, error: `no lesson ${slug}; write ${LESSONS_DIR}/${slug}.md first` };
   const parsed = parseLesson(fs.readFileSync(file, "utf8"));
@@ -343,7 +344,7 @@ export function hitLesson({ workspaceRoot, slug, evidence, today = utcDate() }) 
 }
 
 export function removeLesson({ workspaceRoot, slug }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().checkout;
   const file = lessonPath(ws, slug);
   if (!fs.existsSync(file)) return { ok: false, error: `no lesson ${slug}` };
   fs.rmSync(file);
@@ -352,7 +353,7 @@ export function removeLesson({ workspaceRoot, slug }) {
 }
 
 export function checkLessons({ workspaceRoot }) {
-  const ws = workspaceRoot || process.cwd();
+  const ws = workspaceRoot || resolveRoots().checkout;
   const dir = lessonsDir(ws);
   if (!fs.existsSync(dir)) return [];
   const errors = [];
@@ -380,11 +381,12 @@ function fail(msg) {
 }
 
 function main(argv) {
-  const ws = process.cwd();
+  const roots = resolveRoots();
+  const ws = roots.checkout;
   const [cmd, ...rest] = argv;
   if (cmd === "match") {
     if (!rest.length) return fail(USAGE);
-    for (const r of matchLessons({ workspaceRoot: ws, files: rest })) {
+    for (const r of matchLessons({ workspaceRoot: ws, files: rest.map((f) => path.resolve(roots.cwd, f)) })) {
       process.stdout.write(`${r.file} (hits ${r.hits}): ${r.summary}\n`);
     }
     return 0;

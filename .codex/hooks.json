@@ -6,17 +6,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/scrub-spawn-prompt.mjs\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/scrub-spawn-prompt.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/scrub-spawn-prompt.mjs\"",
             "timeout": 5
           }
         ]
       },
       {
-        "matcher": "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace",
+        "matcher": "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace|apply_patch|write_to_file|replace_file_content|multi_replace_file_content|run_command",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/gate-fat-tools.mjs\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/gate-fat-tools.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/gate-fat-tools.mjs\"",
             "timeout": 5
           }
         ]
@@ -26,7 +26,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/session-map.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/session-map.mjs\"",
             "timeout": 5
           }
         ]
@@ -37,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 5
           }
         ]
@@ -48,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 30
           }
         ]
@@ -59,19 +70,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+            "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
             "timeout": 30
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/session-map.mjs\"",
-            "timeout": 5
           }
         ]
       }

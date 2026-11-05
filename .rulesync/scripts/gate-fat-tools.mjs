@@ -3,6 +3,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { patchIgnoreEdits, redundantIgnoreReason, shellIgnoreEdits, writeIgnoreEdits } from "./gitignore-guard.mjs";
+import { persistOwner } from "./persist-tmp.mjs";
+import { resolveRoots, resolveTyped } from "./workspace-root.mjs";
+import { worktreeAddReason } from "./worktree.mjs";
 
 /** Session Grep head_limit when the model omits one. */
 export const DEFAULT_GREP_HEAD_LIMIT = 50;
@@ -38,17 +42,54 @@ export const REASON_BASH_DUMP = REASON_IMPLEMENTER_BASH;
 export const REASON_REREAD =
   "already wrote this session; Read with offset+limit";
 
-const READ_TOOLS = new Set(["read", "readfile"]);
-const GREP_TOOLS = new Set(["grep", "grepsearch"]);
-const GLOB_TOOLS = new Set(["glob", "listdir"]);
-const BASH_TOOLS = new Set(["bash", "runterminalcommand"]);
-const WRITE_TOOLS = new Set(["write", "edit", "searchreplace"]);
+const SHELL = { kind: "bash", command: "command" };
+// orchestrate-parent persists these itself, so the gate leaves their persist-owned redirects to it.
+const SHARED_WRITE = { kind: "write", persistShared: true };
+const WRITE = { kind: "write" };
+
+/**
+ * The tools each harness sends, keyed by eventKey of the tool name. A harness only gets the kinds whose
+ * fields it uses; anything else gets no answer. Claude also covers Grok, which sends the same shape.
+ */
+const TOOLS = {
+  claude: new Map([
+    ["write", SHARED_WRITE],
+    ["edit", SHARED_WRITE],
+    ["searchreplace", SHARED_WRITE],
+    ["replacefilecontent", SHARED_WRITE],
+    ["bash", SHELL],
+    ["runterminalcommand", SHELL],
+    ["read", { kind: "read" }],
+    ["readfile", { kind: "read" }],
+    ["grep", { kind: "grep" }],
+    ["grepsearch", { kind: "grep" }],
+    ["glob", { kind: "glob" }],
+    ["listdir", { kind: "glob" }],
+  ]),
+  codex: new Map([
+    ["applypatch", { kind: "patch" }],
+    ["bash", SHELL],
+  ]),
+  gemini: new Map([
+    ["writefile", WRITE],
+    ["replace", WRITE],
+    ["runshellcommand", { kind: "bash", command: "command", cwd: "dir_path" }],
+    ["readfile", { kind: "read" }],
+  ]),
+  antigravity: new Map([
+    ["writetofile", WRITE],
+    ["replacefilecontent", WRITE],
+    ["multireplacefilecontent", WRITE],
+    ["runcommand", { kind: "bash", command: "CommandLine", cwd: "Cwd" }],
+  ]),
+};
 export const WRITE_PATH_FIELDS = [
   "path",
   "file_path",
   "filePath",
   "target_file",
   "targetFile",
+  "TargetFile",
 ];
 const PATH_FIELDS = [
   "path",
@@ -171,14 +212,27 @@ export function isParentOrchestrator(data) {
   return !subagentTypeOf(data) && !hasChildAgentMarker(data);
 }
 
-export function toolInputOf(data) {
-  if (!data || typeof data !== "object") return null;
-  let toolInput = data.toolInput;
-  if (toolInput == null) toolInput = data.tool_input;
-  if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
-    return null;
-  }
-  return toolInput;
+function isPlainObject(v) {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** @returns {"claude" | "codex" | "gemini" | "antigravity"} which wire shape the hook payload came in */
+export function harnessOf(data) {
+  if (isPlainObject(data.toolCall)) return "antigravity";
+  if (data.hook_event_name === "BeforeTool") return "gemini";
+  // Codex sends both on every tool hook; Claude would read Codex's `allow` as skipping its permission prompt.
+  if (typeof data.turn_id === "string" && typeof data.model === "string") return "codex";
+  return "claude";
+}
+
+/** The call in one shape for every harness: its tool key and args (null when absent or not an object). */
+export function toolCallOf(data) {
+  const harness = harnessOf(data);
+  const call = harness === "antigravity" ? data.toolCall : null;
+  const name = call ? call.name : data.toolName || data.tool_name;
+  let args = call ? call.args : data.toolInput;
+  if (!call && args == null) args = data.tool_input;
+  return { harness, key: eventKey(name), args: isPlainObject(args) ? args : null };
 }
 
 export function pathIsDenied(p) {
@@ -191,7 +245,7 @@ export function pathIsDenied(p) {
 }
 
 /** Top-level "block" is the only legacy deny Claude/Codex validate; allow = empty stdout. */
-export function denyResponse(reason) {
+function preToolUseDeny(reason) {
   return {
     decision: "block",
     reason,
@@ -203,37 +257,66 @@ export function denyResponse(reason) {
   };
 }
 
-export function hookResponse(updated) {
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      updatedInput: updated,
-    },
-  };
+/**
+ * How each harness takes a deny and a rewrite. Codex drops `updatedInput` without `allow`, while Claude
+ * reads `allow` as approve-without-prompt, so only Codex gets it. Antigravity merges `overwrite` into its args.
+ */
+const ANSWERS = {
+  claude: {
+    deny: preToolUseDeny,
+    rewrite: (args, next) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: next } }),
+  },
+  codex: {
+    deny: preToolUseDeny,
+    rewrite: (args, next) => ({
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: next },
+    }),
+  },
+  gemini: {
+    deny: (reason) => ({ decision: "deny", reason }),
+    rewrite: (args, next) => ({ hookSpecificOutput: { hookEventName: "BeforeTool", tool_input: next } }),
+  },
+  antigravity: {
+    deny: (reason) => ({ decision: "deny", reason }),
+    rewrite: (args, next) => ({
+      decision: "allow",
+      overwrite: Object.fromEntries(Object.entries(next).filter(([k, v]) => !args || args[k] !== v)),
+    }),
+  },
+};
+
+export function answerDeny(data, reason) {
+  return ANSWERS[harnessOf(data)].deny(reason);
 }
 
-export function rewriteGruntScratchPath(filePath, workspaceRoot) {
-  if (filePath == null) return null;
+export function answerRewrite(data, next) {
+  return ANSWERS[harnessOf(data)].rewrite(toolCallOf(data).args, next);
+}
+
+/**
+ * A Write aimed at any `.tmp/grunt/` other than the root's goes to `<root>/.tmp/grunt/<rest>`.
+ * Relative paths resolve against the hook cwd. Null when it is already root scratch or not scratch.
+ */
+export function rewriteGruntScratchPath(filePath, roots, p = path) {
+  if (filePath == null || !roots) return null;
   const raw = String(filePath);
-  if (!raw || !workspaceRoot) return null;
-  const posix = raw.replace(/\\/g, "/");
-  const marker = ".tmp/grunt/";
-  const idx = posix.indexOf(marker);
-  if (idx === -1) return null;
+  if (!raw) return null;
+  const destRoot = p.resolve(roots.root, ".tmp", "grunt");
+  const absIn = resolveTyped(roots, raw, p);
+  const inRoot = p.relative(destRoot, absIn);
+  if (!inRoot.startsWith("..") && !p.isAbsolute(inRoot)) return null;
 
-  const wsRoot = path.resolve(workspaceRoot);
-  const absIn = path.isAbsolute(raw)
-    ? path.resolve(raw)
-    : path.resolve(wsRoot, raw);
-  const relWs = path.relative(wsRoot, absIn);
-  if (relWs !== "" && !relWs.startsWith("..") && !path.isAbsolute(relWs)) {
-    return null;
-  }
+  // Inside the root, look below it, so a root that itself sits under some `.tmp/grunt` is not matched.
+  const fromRoot = p.relative(roots.root, absIn);
+  const inside = !fromRoot.startsWith("..") && !p.isAbsolute(fromRoot);
+  const posix = (inside ? fromRoot : raw).replace(/\\/g, "/");
+  const marker = /(^|\/)\.tmp\/grunt\//.exec(posix);
+  if (!marker) return null;
 
-  const rel = posix.slice(idx + marker.length);
+  const rel = posix.slice(marker.index + marker[0].length);
   if (!rel) return null;
-  if (path.posix.isAbsolute(rel) || rel.startsWith("/")) return null;
-  const relNorm = path.posix.normalize(rel);
+  if (p.posix.isAbsolute(rel) || rel.startsWith("/")) return null;
+  const relNorm = p.posix.normalize(rel);
   if (
     !relNorm ||
     relNorm === "." ||
@@ -244,12 +327,11 @@ export function rewriteGruntScratchPath(filePath, workspaceRoot) {
   ) {
     return null;
   }
-  if (path.posix.isAbsolute(relNorm)) return null;
+  if (p.posix.isAbsolute(relNorm)) return null;
 
-  const destRoot = path.resolve(wsRoot, ".tmp", "grunt");
-  const dest = path.resolve(destRoot, relNorm);
-  const check = path.relative(destRoot, dest);
-  if (!check || check.startsWith("..") || path.isAbsolute(check)) return null;
+  const dest = p.resolve(destRoot, relNorm);
+  const check = p.relative(destRoot, dest);
+  if (!check || check.startsWith("..") || p.isAbsolute(check)) return null;
   return dest;
 }
 
@@ -266,14 +348,22 @@ export function wroteListPath(workspaceRoot, sid) {
   return path.join(workspaceRoot, ".tmp", "grunt", "sessions", sid, "wrote.txt");
 }
 
-export function recordWrote(workspaceRoot, sid, filePath) {
-  if (!workspaceRoot || !sid || !filePath) return;
-  const abs = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workspaceRoot, filePath);
-  const rel = path.relative(workspaceRoot, abs).replace(/\\/g, "/");
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return;
-  const dest = wroteListPath(workspaceRoot, sid);
+/** Absolute posix key for a file this session wrote, or "" when it is outside the root and checkout. */
+function wroteKey(roots, filePath) {
+  const abs = resolveTyped(roots, filePath);
+  const inside = (base) => {
+    const rel = path.relative(base, abs);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  };
+  if (!inside(roots.root) && !inside(roots.checkout)) return "";
+  return abs.replace(/\\/g, "/");
+}
+
+export function recordWrote(roots, sid, filePath) {
+  if (!roots || !sid || !filePath) return;
+  const key = wroteKey(roots, filePath);
+  if (!key) return;
+  const dest = wroteListPath(roots.root, sid);
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
   } catch {
@@ -286,39 +376,35 @@ export function recordWrote(workspaceRoot, sid, filePath) {
     cur = "";
   }
   const lines = cur.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.includes(rel)) return;
-  lines.push(rel);
+  if (lines.includes(key)) return;
+  lines.push(key);
   fs.writeFileSync(dest, lines.join("\n") + "\n");
 }
 
-export function wasWroteThisSession(workspaceRoot, sid, filePath) {
-  if (!workspaceRoot || !sid || !filePath) return false;
-  const dest = wroteListPath(workspaceRoot, sid);
+export function wasWroteThisSession(roots, sid, filePath) {
+  if (!roots || !sid || !filePath) return false;
   let cur = "";
   try {
-    cur = fs.readFileSync(dest, "utf8");
+    cur = fs.readFileSync(wroteListPath(roots.root, sid), "utf8");
   } catch {
     return false;
   }
-  const abs = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workspaceRoot, filePath);
-  const rel = path.relative(workspaceRoot, abs).replace(/\\/g, "/");
-  return cur.split(/\n/).some((l) => l.trim() === rel);
+  const key = wroteKey(roots, filePath);
+  return Boolean(key) && cur.split(/\n/).some((l) => l.trim() === key);
 }
 
 const SCRATCH_ROOT_RE = /^(dump|scratch|notes|output)(\.|$)/i;
 
-export function rewriteScratchWrite(filePath, workspaceRoot) {
-  const existing = rewriteGruntScratchPath(filePath, workspaceRoot);
+/** Stray scratch names and `tmp/` dirs at the checkout top go under the root's `.tmp/grunt`. */
+export function rewriteScratchWrite(filePath, roots, p = path) {
+  const existing = rewriteGruntScratchPath(filePath, roots, p);
   if (existing) return existing;
-  if (filePath == null || !workspaceRoot) return null;
-  const wsRoot = path.resolve(workspaceRoot);
-  const abs = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(wsRoot, filePath);
-  const rel = path.relative(wsRoot, abs).replace(/\\/g, "/");
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  if (filePath == null || !roots) return null;
+  const wsRoot = p.resolve(roots.checkout);
+  const scratch = p.resolve(roots.root, ".tmp", "grunt");
+  const abs = resolveTyped(roots, filePath, p);
+  const rel = p.relative(wsRoot, abs).replace(/\\/g, "/");
+  if (!rel || rel.startsWith("..") || p.isAbsolute(rel)) return null;
   const segs = rel.split("/");
   const base = segs[segs.length - 1] || "";
   if (PRODUCT_ROOT_NAMES.has(base) && segs.length === 1) return null;
@@ -326,9 +412,9 @@ export function rewriteScratchWrite(filePath, workspaceRoot) {
   if (rel.startsWith(".tmp/grunt/")) return null;
   if (segs[0] === "tmp" || (segs[0] === ".tmp" && segs[1] !== "grunt")) {
     const rest = segs[0] === "tmp" ? segs.slice(1) : segs.slice(2);
-    const dest = path.resolve(wsRoot, ".tmp", "grunt", ...rest);
-    const check = path.relative(path.resolve(wsRoot, ".tmp", "grunt"), dest);
-    if (!check || check.startsWith("..") || path.isAbsolute(check)) return null;
+    const dest = p.resolve(scratch, ...rest);
+    const check = p.relative(scratch, dest);
+    if (!check || check.startsWith("..") || p.isAbsolute(check)) return null;
     return dest;
   }
   if (
@@ -337,9 +423,36 @@ export function rewriteScratchWrite(filePath, workspaceRoot) {
       /\.tmp$/i.test(base) ||
       SCRATCH_ROOT_RE.test(base))
   ) {
-    return path.resolve(wsRoot, ".tmp", "grunt", base);
+    return p.resolve(scratch, base);
   }
   return null;
+}
+
+const PATCH_PATH_RE = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/gm;
+const PATCH_HEREDOC_RE = /^\s*apply_patch\s*<<\s*(['"]?)(\w+)\1[ \t]*\n([\s\S]*?)\n\2\s*$/;
+
+/** The patch inside a Codex `apply_patch <<'EOF' … EOF` shell command, else null. */
+export function patchOfCommand(command) {
+  const m = PATCH_HEREDOC_RE.exec(String(command || ""));
+  return m ? m[3] : null;
+}
+
+/**
+ * Add and Move headers whose path is scratch get the root scratch path, the same rule a Write gets.
+ * Update and Delete headers stay, since they act on a file that exists where it is.
+ * @returns {{ patch: string | null, paths: string[] }} the rewritten patch (null when nothing moved) and every final path
+ */
+export function rewritePatch(patch, roots, p = path) {
+  const paths = [];
+  let changed = false;
+  const next = String(patch).replace(PATCH_PATH_RE, (line, op, target) => {
+    const dest = op === "Add File" || op === "Move to" ? rewriteScratchWrite(target, roots, p) : null;
+    if (op !== "Delete File") paths.push(dest || resolveTyped(roots, target, p));
+    if (!dest) return line;
+    changed = true;
+    return `*** ${op}: ${dest}`;
+  });
+  return { patch: changed ? next : null, paths };
 }
 
 /** POSIX single-quote so `, $, and \ stay literal. */
@@ -350,14 +463,6 @@ export function quoteQuery(q) {
 export function gruntJobCommand(workspaceRoot, args) {
   const script = path.join(workspaceRoot, ".rulesync", "scripts", "grunt-job.mjs");
   return `node ${script} ${args}`;
-}
-
-export function workspaceRootOf(data) {
-  return (
-    (data && (data.workspaceRoot || data.workspace_root || data.cwd)) ||
-    process.env.GROK_WORKSPACE_ROOT ||
-    process.cwd()
-  );
 }
 
 function asNumber(v) {
@@ -424,10 +529,9 @@ function readFilePath(input) {
   );
 }
 
-export function resolveReadPath(filePath, data) {
+export function resolveReadPath(filePath, roots) {
   if (!filePath || typeof filePath !== "string") return null;
-  if (path.isAbsolute(filePath)) return filePath;
-  return path.resolve(workspaceRootOf(data), filePath);
+  return resolveTyped(roots, filePath);
 }
 
 export function fileSizeBytes(absPath) {
@@ -483,9 +587,10 @@ export function stripFlagValue(cmd, flag) {
     .replace(new RegExp(`${f}\\s+${val}`, "g"), `${flag} _`);
 }
 
-function gruntJobRest(command, workspaceRoot) {
+/** Args after `node <checkout>/.rulesync/scripts/grunt-job.mjs`; a relative script path resolves against the hook cwd. */
+function gruntJobRest(command, roots) {
   const cmd = String(command || "").trim();
-  if (!cmd || !workspaceRoot) return null;
+  if (!cmd || !roots) return null;
   const parts = cmd.split(/\s+/).filter(Boolean);
   let i = 0;
   const first = parts[0] || "";
@@ -495,24 +600,22 @@ function gruntJobRest(command, workspaceRoot) {
   i += 1;
   const scriptArg = parts[i];
   if (!scriptArg) return null;
-  const abs = path.isAbsolute(scriptArg)
-    ? path.resolve(scriptArg)
-    : path.resolve(workspaceRoot, scriptArg);
-  const expected = path.resolve(workspaceRoot, ".rulesync", "scripts", "grunt-job.mjs");
+  const abs = resolveTyped(roots, scriptArg);
+  const expected = path.resolve(roots.checkout, ".rulesync", "scripts", "grunt-job.mjs");
   if (abs !== expected) return null;
   return parts.slice(i + 1);
 }
 
 /** True when argv targets workspace .rulesync/scripts/grunt-job.mjs (flags may be messy). */
-export function isWorkspaceGruntJobScript(command, workspaceRoot) {
-  return gruntJobRest(command, workspaceRoot) != null;
+export function isWorkspaceGruntJobScript(command, roots) {
+  return gruntJobRest(command, roots) != null;
 }
 
-export function parseGruntJobCommand(command, workspaceRoot) {
+export function parseGruntJobCommand(command, roots) {
   const cmd = String(command || "").trim();
-  if (!cmd || !workspaceRoot) return null;
+  if (!cmd || !roots) return null;
   if (SHELL_META.test(stripFlagValue(cmd, "--query"))) return null;
-  const rest = gruntJobRest(cmd, workspaceRoot);
+  const rest = gruntJobRest(cmd, roots);
   if (!rest) return null;
   let job = "";
   let hasQuery = false;
@@ -538,8 +641,8 @@ export function parseGruntJobCommand(command, workspaceRoot) {
   return { job, hasQuery, hasStash };
 }
 
-export function isWorkspaceGruntJob(command, workspaceRoot, allowedJobs) {
-  const parsed = parseGruntJobCommand(command, workspaceRoot);
+export function isWorkspaceGruntJob(command, roots, allowedJobs) {
+  const parsed = parseGruntJobCommand(command, roots);
   if (!parsed) return false;
   const allow = allowedJobs || ["search", "exec", "test", "slice", "fetch"];
   if (!allow.includes(parsed.job)) return false;
@@ -547,14 +650,14 @@ export function isWorkspaceGruntJob(command, workspaceRoot, allowedJobs) {
   return parsed.hasQuery;
 }
 
-export function implementerBashReason(command, workspaceRoot) {
+export function implementerBashReason(command, roots) {
   const cmd = String(command || "");
   if (bashTargetsDenylist(cmd)) return REASON_DENYLIST;
   if (alreadyRtk(cmd)) return null;
-  if (isWorkspaceGruntJob(cmd, workspaceRoot, ["search", "exec", "test", "slice", "fetch"])) {
+  if (isWorkspaceGruntJob(cmd, roots, ["search", "exec", "test", "slice", "fetch"])) {
     return null;
   }
-  const wsGrunt = isWorkspaceGruntJobScript(cmd, workspaceRoot);
+  const wsGrunt = isWorkspaceGruntJobScript(cmd, roots);
   if (BASH_WEB.test(cmd)) return REASON_IMPLEMENTER_BASH;
   if (!wsGrunt && (BASH_SEARCH.test(cmd) || BASH_TEST.test(cmd))) {
     return REASON_IMPLEMENTER_BASH;
@@ -566,41 +669,62 @@ export function implementerBashReason(command, workspaceRoot) {
  * @returns {null | { type: "deny", reason: string } | { type: "rewrite", updatedInput: object }}
  */
 export function processFatTools(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const toolKey = eventKey(data.toolName || data.tool_name || "");
-  const input = toolInputOf(data);
-  if (!input) return null;
-  const isWrite = WRITE_TOOLS.has(toolKey);
-  if (isWrite) {
-    const ws = workspaceRootOf(data);
+  if (!isPlainObject(data)) return null;
+  const { harness, key, args: input } = toolCallOf(data);
+  const tool = TOOLS[harness].get(key);
+  if (!tool || !input) return null;
+  const roots = resolveRoots(data);
+  const sid = sessionIdOf(data);
+  // A Codex patch is a write, whether sent as the apply_patch tool or as a shell heredoc.
+  const field = tool.kind === "patch" ? "command" : tool.command;
+  const text = field && typeof input[field] === "string" ? input[field] : "";
+  const patch = tool.kind === "patch" ? text : tool.kind === "bash" ? patchOfCommand(text) : null;
+  const shellCwd = tool.cwd && typeof input[tool.cwd] === "string" ? resolveTyped(roots, input[tool.cwd]) : roots.cwd;
+  // Ahead of every early return, so grunt subagents are held to it too.
+  const redundant = redundantIgnoreReason(
+    tool.kind === "write"
+      ? writeIgnoreEdits(input, roots.cwd, WRITE_PATH_FIELDS)
+      : patch
+        ? patchIgnoreEdits(patch, shellCwd)
+        : tool.kind === "bash" && text.includes(".gitignore")
+          ? shellIgnoreEdits(text, shellCwd)
+          : [],
+  );
+  if (redundant) return { type: "deny", reason: redundant };
+  const stray = tool.kind === "bash" && text.includes("worktree") ? worktreeAddReason(text, roots, shellCwd) : null;
+  if (stray) return { type: "deny", reason: stray };
+  if (tool.kind === "write") {
     const next = Object.assign({}, input);
+    const wrote = [];
     let changed = false;
     for (const key of WRITE_PATH_FIELDS) {
       if (typeof next[key] !== "string" || !next[key]) continue;
-      const dest = rewriteScratchWrite(next[key], ws);
-      if (dest && dest !== next[key]) {
-        next[key] = dest;
-        changed = true;
-      }
+      const dest = rewriteScratchWrite(next[key], roots);
+      wrote.push(dest || next[key]);
+      if (!dest || dest === next[key]) continue;
+      // orchestrate-parent redirects the same `.tmp/grunt` path, persists it, and answers the Write itself.
+      if (tool.persistShared && dest === rewriteGruntScratchPath(next[key], roots) && persistOwner(dest, roots.root)) continue;
+      next[key] = dest;
+      changed = true;
     }
-    const sid = sessionIdOf(data);
-    if (sid) {
-      for (const key of WRITE_PATH_FIELDS) {
-        if (typeof next[key] === "string" && next[key]) {
-          recordWrote(ws, sid, next[key]);
-        }
-      }
-    }
+    if (sid) for (const p of wrote) recordWrote(roots, sid, p);
     return changed ? { type: "rewrite", updatedInput: next } : null;
   }
+  if (patch) {
+    const out = rewritePatch(patch, roots);
+    if (sid) for (const p of out.paths) recordWrote(roots, sid, p);
+    if (!out.patch) return null;
+    return { type: "rewrite", updatedInput: { ...input, [field]: text.replace(patch, () => out.patch) } };
+  }
+  if (tool.kind === "patch") return null;
   const sub = subagentTypeOf(data);
   if (sub === "grunt") return null;
 
   const parent = isParentOrchestrator(data);
-  const isRead = READ_TOOLS.has(toolKey);
-  const isGrep = GREP_TOOLS.has(toolKey);
-  const isGlob = GLOB_TOOLS.has(toolKey);
-  const isBash = BASH_TOOLS.has(toolKey);
+  const isRead = tool.kind === "read";
+  const isGrep = tool.kind === "grep";
+  const isGlob = tool.kind === "glob";
+  const isBash = tool.kind === "bash";
 
   if (isRead || isGrep || isGlob) {
     for (const v of collectPathValues(input)) {
@@ -615,7 +739,7 @@ export function processFatTools(data) {
       if (raw) {
         const abs = path.isAbsolute(raw)
           ? raw
-          : path.resolve(workspaceRootOf(data), raw);
+          : path.resolve(roots.cwd, raw);
         if (pathIsDenied(abs) || pathIsDenied(path.basename(abs))) {
           return { type: "deny", reason: REASON_DENYLIST };
         }
@@ -623,12 +747,11 @@ export function processFatTools(data) {
     }
 
     if (isRead) {
-      const abs = resolveReadPath(readFilePath(input), data);
+      const abs = resolveReadPath(readFilePath(input), roots);
       const size = fileSizeBytes(abs);
       if (size != null && size > DENY_FILE_BYTES) {
         return { type: "deny", reason: REASON_FILE_SIZE };
       }
-      const sid = sessionIdOf(data);
       const hasSlice =
         hasLimitField(input, "offset", "offset") ||
         hasLimitField(input, "limit", "limit");
@@ -636,7 +759,7 @@ export function processFatTools(data) {
         sid &&
         abs &&
         !hasSlice &&
-        wasWroteThisSession(workspaceRootOf(data), sid, abs)
+        wasWroteThisSession(roots, sid, abs)
       ) {
         return { type: "deny", reason: REASON_REREAD };
       }
@@ -686,18 +809,17 @@ export function processFatTools(data) {
   }
 
   if (isBash) {
-    const cmd = typeof input.command === "string" ? input.command : "";
+    const cmd = text;
     if (bashTargetsDenylist(cmd)) {
       return { type: "deny", reason: REASON_DENYLIST };
     }
-    const ws = workspaceRootOf(data);
-    if (isWorkspaceGruntJobScript(cmd, ws)) return null;
+    if (isWorkspaceGruntJobScript(cmd, roots)) return null;
     const next = Object.assign({}, input);
     if (BASH_WEB.test(cmd)) {
       const url = (cmd.match(/https?:\/\/\S+/) || [])[0] || "";
       if (url) {
-        next.command = gruntJobCommand(
-          ws,
+        next[field] = gruntJobCommand(
+          roots.checkout,
           `--job fetch --query ${quoteQuery(url)}`,
         );
         return { type: "rewrite", updatedInput: next };
@@ -709,15 +831,15 @@ export function processFatTools(data) {
     if (BASH_DUMP_CMDS.test(cmd) && !alreadyRtk(cmd) && !compound) {
       const job = BASH_SEARCH.test(cmd) ? "search" : "exec";
       const q = cmd.replace(/^\s*(rtk\s+)?/, "").trim();
-      next.command = gruntJobCommand(ws, `--job ${job} --query ${quoteQuery(q)}`);
+      next[field] = gruntJobCommand(roots.checkout, `--job ${job} --query ${quoteQuery(q)}`);
       return { type: "rewrite", updatedInput: next };
     }
     if (BASH_TREE.test(cmd) && !alreadyRtk(cmd) && !compound) {
-      next.command = `rtk ${cmd.trim()}`;
+      next[field] = `rtk ${cmd.trim()}`;
       return { type: "rewrite", updatedInput: next };
     }
     if (sub === "implementer") {
-      const reason = implementerBashReason(cmd, ws);
+      const reason = implementerBashReason(cmd, roots);
       if (reason) return { type: "deny", reason };
     }
     return null;
@@ -726,15 +848,16 @@ export function processFatTools(data) {
   return null;
 }
 
-export function fatHookOutput(result) {
+/** The hook answer for a gate result, in the shape the payload's harness takes. */
+export function fatHookOutput(data, result) {
   if (!result) return null;
-  if (result.type === "deny") return denyResponse(result.reason);
-  if (result.type === "rewrite") return hookResponse(result.updatedInput);
+  if (result.type === "deny") return answerDeny(data, result.reason);
+  if (result.type === "rewrite") return answerRewrite(data, result.updatedInput);
   return null;
 }
 
 export function processHookPayload(data) {
-  return fatHookOutput(processFatTools(data));
+  return fatHookOutput(data, processFatTools(data));
 }
 
 function main() {

@@ -78,32 +78,38 @@ Never allocate a new serial to log a leaf. Append Log, update Files/Done, flip t
 
 ## Worked example
 
-File: `.tmp/grunt/implementations/1-add-tmp-ignore-20260826T143000Z.md`
+File: `.tmp/grunt/implementations/1-notes-export-json-20260826T143000Z.md`
 
 ```markdown
 ---
 serial: 1
-plan: 6
-name: add-tmp-ignore
+plan: 1
+name: notes-export-json
 status: in-progress
 created: 2026-08-26T14:30:00Z
-source: "gitignore .tmp so local plans stay untracked"
+source: "add --json to notes export"
 ---
 
-# add-tmp-ignore
+# notes-export-json
 
 ## Done
-- Repo `.gitignore` ignores `.tmp/` so plans stay untracked
+- `notes export --json` prints every note as one JSON array; the text table stays the default
 
 ## Issue
 (none)
 
 ## Files
-- .gitignore
+- src/cli.ts
+- src/export.ts
+- src/export.test.ts
 
 ## Log
-1.1 [x] read existing gitignore
-1.2 [x] appended .tmp/
+1.1 [x] read principle-test-behavior-not-implementation
+2.1 [x] export tests for two notes and for none
+2.2 [x] new cases fail on the unknown flag
+3.1 [x] parse --json in cli.ts
+3.2 [x] print JSON.stringify of the notes in export.ts
+3.3 [x] export tests pass
 
 ## Blockers
 (none)

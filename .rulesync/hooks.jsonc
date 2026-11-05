@@ -3,25 +3,26 @@
   "hooks": {
     // Claude / Codex / Antigravity only (generate -t omits grokcli for hooks).
     // Grok spawn/fat SSOT is hand-placed .grok/hooks/orchestrate-parent.js + orchestrate-parent.json.
+    // Every command is rootCmd() from .rulesync/scripts/hooks-union.mjs; hooks:check fails any other form.
     "preToolUse": [
       {
         "matcher": "spawn_subagent|Task|Agent|spawn_agent",
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/scrub-spawn-prompt.mjs\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/scrub-spawn-prompt.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/scrub-spawn-prompt.mjs\"",
         "timeout": 5
       },
       {
         // Fat Read/Grep/Glob/Bash + Write/Edit scratch rewrite (never deny writes).
-        "matcher": "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace",
+        "matcher": "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace|apply_patch|write_to_file|replace_file_content|multi_replace_file_content|run_command",
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/gate-fat-tools.mjs\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/gate-fat-tools.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/gate-fat-tools.mjs\"",
         "timeout": 5
       },
       {
         // Persist rewrite + fat-gate for session writes/reads. Grok json stays no-matcher (Read included).
         "matcher": "Write|Edit|write|search_replace|Bash|run_terminal_command|Skill|skill|replace_file_content|run_command|Read|read_file|Grep|grep|Glob|list_dir",
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
         "timeout": 5
       }
     ],
@@ -29,30 +30,37 @@
       {
         // Code-only folder map as additionalContext (hooks-union keeps it first).
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/session-map.mjs\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/session-map.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/session-map.mjs\"",
         "timeout": 5
       }
     ],
     "beforeSubmitPrompt": [
       {
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
         "timeout": 5
       }
     ],
     "stop": [
       {
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
         "timeout": 30
       }
     ],
     "subagentStop": [
       {
         "type": "command",
-        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.grok/hooks/orchestrate-parent.js\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.grok/hooks/orchestrate-parent.js\"",
         "timeout": 30
       }
     ]
+  },
+  "claudecode": {
+    // Claude Code only: claude -w, EnterWorktree and worktree subagents land in .worktrees/<name> on wt/<name>.
+    "hooks": {
+      "worktreeCreate": [{ "type": "command", "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/worktree.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/worktree.mjs\" hook", "timeout": 60 }],
+      "worktreeRemove": [{ "type": "command", "command": "d=\"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\"; [ -e \"$d/.rulesync/scripts/worktree.mjs\" ] || d=\"$(git -C \"$d\" rev-parse --show-toplevel 2>/dev/null || echo \"$d\")\"; node \"$d/.rulesync/scripts/worktree.mjs\" hook", "timeout": 60 }]
+    }
   }
 }
