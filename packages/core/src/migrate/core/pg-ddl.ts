@@ -20,6 +20,7 @@ import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { partitionedKeyRecipe } from "./pg-partitioned.ts"
 import { retypeFindings } from "./pg-retype.ts"
+import { staysPut } from "./pg-storage.ts"
 import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
 import { type Facts, flag, names, type Node, nodesOf, num, tableOf, written } from "./pg-nodes.ts"
 
@@ -170,9 +171,9 @@ function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined
 	return subtype === "AT_AddConstraint" ? addConstraint(cmd, table, on) : COMMAND_RULES[subtype]?.(cmd, table, on)
 }
 
-/** One ALTER TABLE command's findings, on `table` as written */
+/** One ALTER TABLE command's findings, on `table` as written: none for a move to where the history left it (PA17 of r22b) */
 const commandFindings = (cmd: Node, table: string, on: On): Finding[] =>
-	columnFindings(cmd, table, on) ?? tableFindings(cmd, table)
+	staysPut(cmd, on.facts.storage.get(on.key)) ? [] : (columnFindings(cmd, table, on) ?? tableFindings(cmd, table))
 
 // lookup-table: the relations a move to another tablespace rewrites, besides a table: an index, a materialized view (P11 of r18)
 const MOVED = /* @__PURE__ */ new Set(["OBJECT_INDEX", "OBJECT_MATVIEW"])
@@ -195,12 +196,13 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 			? [{ level: "unsafe" }]
 			: []
 	/* a partitioned index has no storage: its move changes only where its partitions' indexes go next (P19 of r19) */
-	const storageless =
-		objtype === "OBJECT_INDEX" &&
-		facts.partitioned.has(facts.indexes.get(tableOf(node["relation"], facts.schema).key)?.table ?? "")
-	return MOVED.has(String(objtype)) && !storageless && cmds.some((cmd) => REWRITE_COMMANDS.has(String(cmd["subtype"])))
-		? [{ level: "lock", note: REWRITES }]
-		: []
+	const key = tableOf(node["relation"], facts.schema).key
+	const index = objtype === "OBJECT_INDEX" ? facts.indexes.get(key) : undefined
+	const storageless = facts.partitioned.has(index?.table ?? "")
+	/* a move to where the history left it rewrites nothing (PA17 of r22b) */
+	const where = objtype === "OBJECT_INDEX" ? index : facts.storage.get(key)
+	const rewrites = (cmd: Node) => REWRITE_COMMANDS.has(String(cmd["subtype"])) && !staysPut(cmd, where)
+	return MOVED.has(String(objtype)) && !storageless && cmds.some(rewrites) ? [{ level: "lock", note: REWRITES }] : []
 }
 
 /** An ALTER … ALL IN TABLESPACE: every relation of its kind there moves, and each is rewritten (P11 of r18) */

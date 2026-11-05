@@ -31,8 +31,9 @@ type IndexShape = {
 
 /**
  * An index, by key in Facts.indexes: its table, its kind, its shape, its columns as the index names
- * them (which a clone copies, and a column's RENAME leaves alone), and the partitioned index it is
- * attached to
+ * them (which a clone copies, and a column's RENAME leaves alone), the partitioned index it is
+ * attached to, and the tablespace the history put it in, undefined where it left that to the target
+ * (PA17 of r22b)
  */
 type IndexFact = {
 	columns: string[]
@@ -40,6 +41,7 @@ type IndexFact = {
 	parent?: IndexFact | undefined
 	shape: IndexShape
 	table: string
+	tablespace?: string | undefined
 }
 
 /** An index a statement asks for: its fact, its name when the statement gives one, and what makes it the same as another */
@@ -166,7 +168,13 @@ function indexWanted(table: string, node: Node): Wanted {
 		where: located(node["whereClause"]),
 	}
 	const written = [...params, ...include].map((elem) => (elem["indexcolname"] ?? elem["name"]) as string | undefined)
-	const fact: IndexFact = { columns: columnNames(written), kind: "index", shape, table }
+	const fact: IndexFact = {
+		columns: columnNames(written),
+		kind: "index",
+		shape,
+		table,
+		tablespace: node["tableSpace"] as string | undefined,
+	}
 	return { dedup: "", fact, name: node["idxname"] as string | undefined }
 }
 

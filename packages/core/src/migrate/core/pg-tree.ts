@@ -32,6 +32,7 @@ import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
+import { staysPut } from "./pg-storage.ts"
 import { flag } from "./pg-nodes.ts"
 
 type Node = Record<string, unknown>
@@ -166,19 +167,23 @@ const UNGUARDING: Readonly<Record<string, (table: string) => string>> = {
 	AT_SetUnLogged: (table) => `makes ${table} unlogged: an unlogged table is emptied after a crash and not replicated`,
 }
 
-/** An ALTER TABLE that turns off a table's foreign keys or durability (M40, M41): its finding */
-function unguardingFinding(node: Node, schema: string): Finding | undefined {
-	const table = tableOf(node["relation"], schema).key
+/**
+ * An ALTER TABLE that turns off a table's foreign keys or durability (M40, M41): its finding; none
+ * for a SET UNLOGGED of a table the history left unlogged, which Postgres skips (PA17 of r22b)
+ */
+function unguardingFinding(node: Node, facts: Facts): Finding | undefined {
+	const table = tableOf(node["relation"], facts.schema).key
 	for (const each of node["cmds"] as Node[]) {
-		const note = UNGUARDING[String((each["AlterTableCmd"] as Node)["subtype"])]
-		if (note !== undefined) return { level: "unsafe", note: note(table) }
+		const cmd = each["AlterTableCmd"] as Node
+		const note = UNGUARDING[String(cmd["subtype"])]
+		if (note !== undefined && !staysPut(cmd, facts.storage.get(table))) return { level: "unsafe", note: note(table) }
 	}
 	return undefined
 }
 
 /** A node that runs code comb does not read, changes what later names resolve to, or shadows a table: its finding */
 function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | undefined {
-	if (type === "AlterTableStmt") return unguardingFinding(node, ctx.facts.schema)
+	if (type === "AlterTableStmt") return unguardingFinding(node, ctx.facts)
 	if (type === "DoStmt") return { level: "unsafe", note: "runs a DO block, whose body comb does not read" }
 	if (type === "CreateFunctionStmt") return routineFinding(node, ctx)
 	if (type === "CreateTrigStmt")

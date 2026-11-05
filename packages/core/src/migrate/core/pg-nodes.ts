@@ -27,6 +27,14 @@ type Domain = {
 	over: ColumnType
 }
 
+/**
+ * Where a table or materialized view keeps its rows, as far as the history shows it (PA17 of r22b):
+ * whether it is logged, and its access method and tablespace, each undefined where the history
+ * leaves it to the target (a temporary table, one made without USING or TABLESPACE, SET ACCESS
+ * METHOD DEFAULT)
+ */
+type Storage = { accessMethod: string | undefined; logged: boolean | undefined; tablespace: string | undefined }
+
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
 /**
  * What a view's or materialized view's query reads: the relations and functions it names, by key,
@@ -58,6 +66,7 @@ const emptyFacts = (schema: string): Facts => ({
 	reads: new Map(),
 	routines: new Map(),
 	schema,
+	storage: new Map(),
 	tables: new Map(),
 	triggers: new Map(),
 	views: new Map(),
@@ -147,6 +156,8 @@ type Facts = {
 	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; fn: string; name: string; type: number }>>
 	/** what each view and materialized view reads, by its key, for a CASCADE drop to follow (P4 of r18) */
 	reads: Map<string, Reads>
+	/** where each table and materialized view keeps its rows, by its key (PA17 of r22b) */
+	storage: Map<string, Storage>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */
@@ -237,6 +248,7 @@ export {
 	names,
 	type Node,
 	nodesOf,
+	type Storage,
 	num,
 	type Reads,
 	type Routines,

@@ -18,7 +18,16 @@ const EVENTS: ReadonlyArray<[number, TriggerEvent]> = [
 
 /** A table's facts moved to its new key: a rename, or a move to another schema */
 function moveTable(facts: Facts, from: string, to: string): void {
-	const maps = [facts.code, facts.columnTypes, facts.parents, facts.reads, facts.tables, facts.triggers, facts.views]
+	const maps = [
+		facts.code,
+		facts.columnTypes,
+		facts.parents,
+		facts.reads,
+		facts.storage,
+		facts.tables,
+		facts.triggers,
+		facts.views,
+	]
 	for (const map of maps as Array<Map<string, unknown>>) {
 		if (!map.has(from)) continue
 		map.set(to, map.get(from))
@@ -62,6 +71,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.parents,
 		facts.indexes,
 		facts.reads,
+		facts.storage,
 		facts.tables,
 		facts.triggers,
 		facts.views,
@@ -194,6 +204,7 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.tables.delete(table)
 		facts.views.delete(table)
 		facts.reads.delete(table)
+		facts.storage.delete(table)
 		facts.defaultPartitions.delete(table)
 		for (const [parent, partition] of Array.from(facts.defaultPartitions))
 			if (partition === table) facts.defaultPartitions.delete(parent)

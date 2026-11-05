@@ -333,7 +333,8 @@ describe("Postgres ALTER TABLE actions that drop integrity or durability", () =>
 	it.each([
 		"ALTER TABLE users DISABLE TRIGGER USER;",
 		"ALTER TABLE users DISABLE TRIGGER logged_audit;",
-		"ALTER TABLE users SET LOGGED;",
+		/* a table the history leaves logged skips SET LOGGED (PA17 of r22b, classify.pg-moves.test.ts) */
+		"ALTER TABLE elsewhere SET LOGGED;",
 	])("leaves %s cautious", (sql) => {
 		expect(rate(sql).safety).toBe("cautious")
 	})

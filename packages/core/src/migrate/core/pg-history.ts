@@ -19,6 +19,7 @@ import { followForeign } from "./pg-foreign.ts"
 import { followIndexes } from "./pg-indexes.ts"
 import { followPartitioned } from "./pg-partitioned.ts"
 import { followRoutine } from "./pg-routines.ts"
+import { followStorage } from "./pg-storage.ts"
 import {
 	columnTypeOf,
 	emptyFacts,
@@ -236,6 +237,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 		followIndexes(type, node, facts)
 		followForeign(type, node, facts)
 		followRoutine(type, node, facts)
+		followStorage(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followEventTrigger(type, node, facts) || followNames(type, node, facts)) continue
 		else if (type === "CreateStmt") followCreate(node, facts)
