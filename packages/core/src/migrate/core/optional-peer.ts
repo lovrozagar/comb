@@ -14,8 +14,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { refuseCompiled } from "./compiled.ts"
-import { ATLAS, type BinNeed, type Command, type Need, needsOf, type Provider } from "./peer-needs.ts"
+import { childRefusal, compiledRefusal, refuseCompiled } from "./compiled.ts"
+import { ATLAS, type BinNeed, type Command, type Need, needsOf, type Provider, type Requirement } from "./peer-needs.ts"
 import { admits, installedVersion, manifestOf } from "./peer-version.ts"
 import { ATLAS_INSTALL, ATLAS_RANGE, type BinPeer, type ProjectBin, type RunResult } from "./process.ts"
 
@@ -101,14 +101,6 @@ function refuseOutOfRange(need: Need, entry: string): void {
 	const problem = outOfRange(need, entry)
 	if (problem !== undefined) throw new MissingPeerError(refusal([problem]))
 }
-
-/**
- * What comb says when a Bun single-file executable runs a command that loads `peers` from the
- * project: the executable embeds comb's modules, from which no installed package resolves or loads
- * (D4-5 and D5-2 of the area D reviews)
- */
-const compiledRefusal = (peers: readonly string[]): string =>
-	`comb loads ${peers.join(" and ")} from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`
 
 /** The entry of `peer` as comb's own imports resolve it */
 const resolved = (peer: OptionalPeer): string => import.meta.resolve(peer)
@@ -196,6 +188,15 @@ function projectBin(need: BinNeed, cwd: string): ProjectBin {
 	)
 }
 
+/** Refuses `command`'s `needs` in a compiled executable: for the tables file's child process, else naming each peer loaded rather than spawned */
+function refuseCompiledNeeds(command: Command, needs: readonly Requirement[], moduleUrl: string): void {
+	if (needs.some((need) => need.child === true)) refuseCompiled(moduleUrl, childRefusal(command))
+	const loaded = needs.flatMap((need) =>
+		need.peer === "atlas" || need.optional === true || isBinPeer(need.peer) ? [] : [need.peer],
+	)
+	if (loaded.length > 0) refuseCompiled(moduleUrl, compiledRefusal(loaded))
+}
+
 /**
  * Where requirePeers looks: `atlas` reads `atlas version`, `locate` finds an npm peer's entry, `fts`
  * says a SQLite diff declares FTS, and `moduleUrl` (comb's own) tells a compiled executable
@@ -213,8 +214,8 @@ type Finders = {
  * one that is not in one refusal, with one install, and gives each bin peer it found. `locate`
  * finds a peer's entry: by default a bin peer in the project from `cwd` up, any other as comb's
  * own imports resolve it. Atlas is read once, by `atlas`, where the command runs it. A compiled
- * executable is refused first, naming each peer the command loads rather than spawns, which none
- * there can.
+ * executable is refused first: for the child process a tables file loads in, or naming each peer
+ * the command loads rather than spawns, which none there can.
  */
 async function requirePeers(
 	command: Command,
@@ -222,10 +223,7 @@ async function requirePeers(
 	{ atlas, cwd, fts = false, locate, moduleUrl = import.meta.url }: Finders,
 ): Promise<Peers> {
 	const needs = needsOf(command, provider, fts)
-	const loaded = needs.flatMap((need) =>
-		need.peer === "atlas" || need.optional === true || isBinPeer(need.peer) ? [] : [need.peer],
-	)
-	if (loaded.length > 0) refuseCompiled(moduleUrl, compiledRefusal(loaded))
+	refuseCompiledNeeds(command, needs, moduleUrl)
 	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
 	const peers: { [P in BinPeer]?: ProjectBin | undefined } = {}

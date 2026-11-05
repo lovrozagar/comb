@@ -58,7 +58,12 @@ describe("in a Bun single-file executable, a peer comb loads from the project", 
 		await expect(requirePeers("apply", "turso", finders)).rejects.toThrow(refused("@libsql/client"))
 		await expect(requirePeers("baseline", "postgres", finders)).rejects.toThrow(refused("libpg-query and postgres"))
 		await expect(requirePeers("diff", "postgres", finders)).rejects.toThrow(refused("libpg-query"))
-		await expect(requirePeers("diff", "libsql", { ...finders, fts: true })).rejects.toThrow(refused("ts-morph"))
+		/* D6-2 of the area D round-six review: the FTS tables file loads in a child process, as codegen loads it */
+		await expect(requirePeers("diff", "libsql", { ...finders, fts: true })).rejects.toThrow(
+			new Error(
+				"comb migrate diff loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable",
+			),
+		)
 		expect(reads()).toBe(0)
 	})
 

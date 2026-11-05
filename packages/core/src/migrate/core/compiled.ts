@@ -12,3 +12,19 @@ const EMBEDDED = /\/\$bunfs\/|\/~BUN\//
 export function refuseCompiled(moduleUrl: string, refusal: string): void {
 	if (EMBEDDED.test(moduleUrl)) throw new Error(refusal)
 }
+
+/**
+ * What comb says when a Bun single-file executable runs a command that loads `peers` from the
+ * project: the executable embeds comb's modules, from which no installed package resolves or loads
+ * (D4-5 and D5-2 of the area D reviews)
+ */
+export const compiledRefusal = (peers: readonly string[]): string =>
+	`comb loads ${peers.join(" and ")} from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`
+
+/**
+ * What comb says when a Bun single-file executable runs `command`, whose tables file loads in a
+ * child process: the child is the executable itself, as codegen says of its own load (D6-2 of the
+ * area D round-six review)
+ */
+export const childRefusal = (command: string): string =>
+	`comb migrate ${command} loads the tables file in a child process, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable`

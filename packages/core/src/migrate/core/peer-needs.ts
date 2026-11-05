@@ -8,11 +8,14 @@ import type { ProviderConfig } from "../types.ts"
 import type { OptionalPeer } from "./optional-peer.ts"
 import type { BinPeer } from "./process.ts"
 
-/** An npm peer comb needs, and why; an `optional` one a command runs without, saying what it left out */
-type Need = { optional?: true | undefined; peer: OptionalPeer; why: string }
+/**
+ * An npm peer comb needs, and why; an `optional` one a command runs without, saying what it left
+ * out; a `child` one that the tables file's load in a child process needs, as codegen/runtime/load.ts runs it
+ */
+type Need = { child?: true | undefined; optional?: true | undefined; peer: OptionalPeer; why: string }
 
-/** Atlas, as a command needs it: never optional */
-type AtlasNeed = { optional?: undefined; peer: "atlas"; why: string }
+/** Atlas, as a command needs it: never optional, and run by comb itself */
+type AtlasNeed = { child?: undefined; optional?: undefined; peer: "atlas"; why: string }
 
 /** What a command needs: an npm peer or Atlas */
 type Requirement = AtlasNeed | Need
@@ -26,7 +29,7 @@ type BinNeed = Need & { peer: BinPeer }
 const ATLAS: AtlasNeed = { peer: "atlas", why: "hash, diff and apply migrations" }
 const DIFF: BinNeed = { peer: "drizzle-kit", why: "export the drizzle schema for comb migrate diff" }
 /* the FTS part of a SQLite diff is built from the tables file, whose imports ts-morph resolves (codegen/runtime/load.ts) */
-const FTS: Need = { peer: "ts-morph", why: "read the tables file whose FTS comb.config.ts declares" }
+const FTS: Need = { child: true, peer: "ts-morph", why: "read the tables file whose FTS comb.config.ts declares" }
 const LIBSQL: Need = { peer: "@libsql/client", why: "open a libsql or Turso database" }
 const PARSE: Need = { peer: "libpg-query", why: "read Postgres migrations" }
 const WRANGLER: BinNeed = { peer: "wrangler", why: "migrate a D1 database" }
