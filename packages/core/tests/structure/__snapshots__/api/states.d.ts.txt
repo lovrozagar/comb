@@ -28,12 +28,17 @@ type StateMachine<TState extends string = string> = {
  * field may only name a declared value, and a typo is a type error.
  */
 declare function defineStateMachine<const TState extends string>(machine: {
+    /** Every legal value, in declaration order; the machine's states are inferred from it alone */
     values: readonly TState[];
+    /** The value a row starts at, when there is exactly one; it must be one of `values` */
     initial?: NoInfer<TState> | undefined;
+    /** The values no transition may leave; each must be one of `values` */
     terminal?: readonly NoInfer<TState>[] | undefined;
+    /** Each state's legal next states, keyed and listed by `values` alone; a state left out may move to any state */
     transitions?: {
         readonly [K in NoInfer<TState>]?: readonly NoInfer<TState>[] | undefined;
     } | undefined;
+    /** The column the machine governs, named in `assertTransition`'s error; `status` when omitted */
     column?: string | undefined;
 }): StateMachine<TState>;
 /** Whether a value is one the machine declares. */
