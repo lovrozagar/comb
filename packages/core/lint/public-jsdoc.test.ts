@@ -245,6 +245,20 @@ describe("comb/public-jsdoc: internal references", () => {
 		["a three-digit milestone", "/** The size M123 set. */\nexport const size = 1\n"],
 		["an id beside a look-alike", "/** The size D1 keeps (K7). */\nexport const size = 1\n"],
 		["a tag's text", "/** The most that fits.\n * @see QL5\n */\nexport const size = 1\n"],
+		["a lowercase finding id", "/** The size, upgrade item qe8. */\nexport const size = 1\n"],
+		["a lowercase two-digit finding id", "/** The size, per pa10. */\nexport const size = 1\n"],
+		["a lowercase lettered finding id", "/** The size sl3n settled. */\nexport const size = 1\n"],
+		["a lowercase id in parentheses", "/** The size (cd11). */\nexport const size = 1\n"],
+		["a release's review", "/** The size, as the 0.14.1 review asked. */\nexport const size = 1\n"],
+		["a release's review, unprefixed", "/** The size each 0.9.1 review keeps. */\nexport const size = 1\n"],
+		["a named review", "/** The size the 0.13.0 consumers review fixed. */\nexport const size = 1\n"],
+		["a round's review", "/** The size the round-two review fixed. */\nexport const size = 1\n"],
+		["a round", "/** The size, settled in round five. */\nexport const size = 1\n"],
+		["a numbered round", "/** The size, settled in round 4. */\nexport const size = 1\n"],
+		["an area's review", "/** The size the area D review asked for. */\nexport const size = 1\n"],
+		["an area", "/** The size area B chose. */\nexport const size = 1\n"],
+		["a session", "/** The size comb-9d ruled on. */\nexport const size = 1\n"],
+		["a scratch log", "/** The size, probed in .tmp/grunt/size.log. */\nexport const size = 1\n"],
 	])("rejects %s", (_, code) => {
 		expect(messages(code)).toEqual([internal("size")])
 	})
@@ -258,6 +272,14 @@ describe("comb/public-jsdoc: internal references", () => {
 		["an SQLSTATE", "/** The size past which Postgres raises XX000. */\nexport const size = 1\n"],
 		["a language target", "/** The size ES2022 allows. */\nexport const size = 1\n"],
 		["a hash name", "/** The size of a HS256 key. */\nexport const size = 1\n"],
+		["an encoding", "/** The size of the value in utf8. */\nexport const size = 1\n"],
+		["a lowercase language target", "/** The size es2022 allows. */\nexport const size = 1\n"],
+		["a codec", "/** The size of an h264 frame. */\nexport const size = 1\n"],
+		["a one-letter lowercase name", "/** The size of v1, read from r2. */\nexport const size = 1\n"],
+		["an id-shaped name in a code span", "/** The size `pa1` holds. */\nexport const size = 1\n"],
+		["an id-shaped path segment", "/** The size sl3/probe.ts and qe8-shape.ts read. */\nexport const size = 1\n"],
+		["a round trip", "/** The size, kept over a round trip, round to 4 places. */\nexport const size = 1\n"],
+		["a key named after comb", "/** The size `x-comb-text` and x-comb-text name. */\nexport const size = 1\n"],
 	])("accepts %s", (_, code) => {
 		expect(messages(code)).toEqual([])
 	})
