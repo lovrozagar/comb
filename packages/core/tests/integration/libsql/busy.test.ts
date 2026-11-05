@@ -5,7 +5,8 @@
  * makes this one skip it, never apply it twice nor fail on its record.
  */
 import { afterEach, describe, expect, it } from "vitest"
-import { ADD, APP_WRITE, holdLock, otherRun, TABLE } from "../../support/busy.ts"
+import { runCli } from "../../../src/cli/index.ts"
+import { ADD, APP_WRITE, holdExclusive, holdLock, otherRun, TABLE } from "../../support/busy.ts"
 import { migrate, type ScopeProject, scopeProject } from "../../../src/migrate/__fixtures__/pragma-scope.ts"
 import { sqliteRows } from "../support/migrate-project.ts"
 
@@ -43,5 +44,18 @@ describe("migrate apply on a libsql file another process holds the write lock of
 		expect(run.code, run.text).toBe(0)
 		expect(run.text).toContain("Skip (applied by another run): 0002_add.sql")
 		expect(await history(made.db)).toEqual([["0001_t.sql"], ["0002_add.sql"]])
+	})
+})
+
+/* AD7-8 of the area D round-seven review: status opens the file through the provider, not apply's own open */
+describe("migrate status on a libsql file another process holds the exclusive lock of", () => {
+	it("waits for the lock, then lists what is applied and pending", async () => {
+		const made = await applied()
+		const holder = await holdExclusive(made.db, 1000)
+		const lines: string[] = []
+		const out = (line: string) => lines.push(line)
+		const code = await runCli(["migrate", "status", "core"], { cwd: made.dir, err: out, out })
+		expect(await holder.done).toBe(0)
+		expect([code, lines.join("\n")]).toEqual([0, expect.stringMatching(/0001_t\.sql[\s\S]*0002_add\.sql/)])
 	})
 })

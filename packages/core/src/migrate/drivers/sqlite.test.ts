@@ -262,6 +262,21 @@ describe("libsql for a reader (M18)", () => {
 	})
 })
 
+/* AD7-8 of the area D round-seven review: the file connection check, status and API callers get waits out a lock */
+describe("libsql on a file", () => {
+	it.each([false, true])("waits up to 5 s for a lock another process holds, read-only %s", async (readonly) => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-busy-"))
+		const path = join(dir, "a.db")
+		writeFileSync(path, "")
+		const provider = { type: "libsql" as const, url: `file:${path}` }
+		const conn = await createLibsqlProvider(provider).connect({ migrationsDir: "m", name: "core", provider, readonly })
+		const { rows } = await conn.execute("PRAGMA busy_timeout")
+		await conn.close()
+		rmSync(dir, { force: true, recursive: true })
+		expect(rows).toEqual([[5000]])
+	})
+})
+
 /* M80 of the 0.13.0 round: libsql percent-decodes a file: URL's path, so the read-only guard checks the path libsql opens */
 /** A read-only libsql connection to `url`, as check and status open one */
 function readOnlyAt(url: string) {

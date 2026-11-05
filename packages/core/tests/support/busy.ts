@@ -7,15 +7,24 @@ import { spawn } from "node:child_process"
 import { generateMigrationHash } from "../../src/migrate/core/parse.ts"
 
 const HOLDER = `const Database = typeof Bun === "undefined" ? require("node:sqlite").DatabaseSync : require("bun:sqlite").Database
-const db = new Database(process.argv.at(-3))
-db.exec("BEGIN IMMEDIATE")
+const db = new Database(process.argv.at(-4))
+db.exec(\`BEGIN \${process.argv.at(-3)}\`)
 db.exec(process.argv.at(-2))
 console.log("locked")
 setTimeout(() => { db.exec("COMMIT"); db.close() }, Number(process.argv.at(-1)))`
 
+type Held = { done: Promise<number | null> }
+
 /** A process holding the write lock on `file` for `ms`, having run `sql` under it; resolves once it holds it, with its exit */
-export async function holdLock(file: string, sql: string, ms: number): Promise<{ done: Promise<number | null> }> {
-	const holder = spawn(process.execPath, ["-e", HOLDER, file, sql, String(ms)], {
+export const holdLock = (file: string, sql: string, ms: number): Promise<Held> =>
+	hold([file, "IMMEDIATE", sql, String(ms)])
+
+/** A process holding `file`'s exclusive lock for `ms`, which keeps a reader out too, as a writer's commit does */
+export const holdExclusive = (file: string, ms: number): Promise<Held> =>
+	hold([file, "EXCLUSIVE", "SELECT 1", String(ms)])
+
+async function hold(args: string[]): Promise<Held> {
+	const holder = spawn(process.execPath, ["-e", HOLDER, ...args], {
 		stdio: ["ignore", "pipe", "inherit"],
 	})
 	const done = new Promise<number | null>((resolve) => holder.once("exit", resolve))
