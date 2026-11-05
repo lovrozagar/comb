@@ -45,9 +45,15 @@ type PlanOptions = {
 	kind?: TargetKind | undefined
 	/** the tables the target's migration history lives in, which an empty target may hold (default: comb's and wrangler's) */
 	historyTables?: readonly string[] | undefined
-	/** the target's own engine, run after the proof: it runs the pending files as the target would, and throws what it refuses (D1, SD1 of r22) */
+	/**
+	 * the target's own engine, run after the proof: it runs the pending files as the target would, throws what it
+	 * refuses (D1, SD1 of r22), and answers each file it could not prove and why, which leaves that file cautious
+	 */
 	engine?:
-		| ((files: ReadonlyArray<{ name: string; sql: string }>, live: readonly LiveObject[]) => Promise<void>)
+		| ((
+				files: ReadonlyArray<{ name: string; sql: string }>,
+				live: readonly LiveObject[],
+		  ) => Promise<ReadonlyArray<{ name: string; why: string }>>)
 		| undefined
 	/** the SQLite the proof copy runs on: libsql's for a libsql or Turso target, which applies its files there (SL3 of r22); default the runtime's */
 	proofEngine?: ScratchEngine | undefined
@@ -188,7 +194,8 @@ async function proveLive(
 ): Promise<Map<string, Proof>> {
 	const live = creatable(await liveObjects(conn, notEngineTables(conn)))
 	const proofs = await provePending(conn, classified, { engine: options.proofEngine, live })
-	await options.engine?.(classified, live)
+	for (const { name, why } of (await options.engine?.(classified, live)) ?? [])
+		(proofs.get(name) as Proof).cautious.push(`unproven on D1's engine: ${why}`)
 	return proofs
 }
 

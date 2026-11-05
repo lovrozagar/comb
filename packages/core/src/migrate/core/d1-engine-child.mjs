@@ -25,7 +25,6 @@ import { pathToFileURL } from "node:url"
  * @typedef {{ sql: string; table: string; type: string }} SchemaObject
  * @typedef {import("./d1-engine-child.d.mts").ProofInput} ProofInput
  * @typedef {import("./d1-engine-child.d.mts").ProofResult} ProofResult
- * @typedef {{ db: D1Database; shadows: ProofInput["shadows"] }} Scratch
  */
 
 /**
@@ -120,49 +119,135 @@ async function probes(db, shadows, before) {
 }
 
 /**
- * Runs `file` on the scratch D1 as wrangler sends it, then its probes; what D1 refuses, naming D1's
- * error, or undefined
- * @param {Scratch} scratch
- * @param {Wrangler} wrangler
- * @param {{ name: string; query: string }} file
- * @returns {Promise<string | undefined>}
+ * The scratch D1 a proof runs on: what it holds is replayed on a fresh one when workerd crashes,
+ * which a disconnect shows ("other side closed"), not a D1 error
  */
-async function proveFile({ db, shadows }, wrangler, file) {
-	const before = await master(db, shadows)
-	try {
-		await run(db, wrangler.unstable_splitSqlQuery(file.query))
-	} catch (error) {
-		return `${file.name}: D1 refuses this file on its own engine, as wrangler's apply would: ${d1Error(error)}; leave out what D1 does not run`
+class Scratch {
+	/**
+	 * @param {Wrangler} wrangler
+	 * @param {ProofInput} input
+	 * @param {PlatformProxy} proxy
+	 */
+	constructor(wrangler, input, proxy) {
+		this.wrangler = wrangler
+		this.configPath = input.configPath
+		this.shadows = input.shadows
+		this.proxy = proxy
+		/** @type {string[][]} each batch the scratch D1 has run: the seed, then each file's */
+		this.ran = [input.seed]
 	}
-	for (const probe of await probes(db, shadows, before)) {
+
+	get db() {
+		return /** @type {D1Database} */ (this.proxy.env["DB"])
+	}
+
+	/** A fresh scratch D1 in place of this one, running each batch this one ran */
+	async reopen() {
+		await this.proxy.dispose()
+		this.proxy = await this.wrangler.getPlatformProxy({ configPath: this.configPath, persist: false })
+		for (const batch of this.ran) await run(this.db, batch)
+	}
+}
+
+/**
+ * Whether the scratch D1 still answers: a failure it does not survive is workerd crashing
+ * @param {D1Database} db
+ */
+async function answers(db) {
+	try {
+		await db.prepare("SELECT 1").all()
+		return true
+	} catch {
+		// reason: any failure of SELECT 1 means the scratch D1 is gone, whatever its words
+		return false
+	}
+}
+
+/**
+ * D1's error compiling `probe`, or undefined; crashed when workerd crashes on it, and again compiling
+ * it alone on a fresh copy, which then replaces it
+ * @param {Scratch} scratch
+ * @param {string} probe
+ * @returns {Promise<{ crashed: true } | { error: string } | undefined>}
+ */
+async function compile(scratch, probe) {
+	for (const fresh of [false, true]) {
+		if (fresh) await scratch.reopen()
 		try {
-			await run(db, [probe])
+			await run(scratch.db, [probe])
+			return undefined
 		} catch (error) {
-			return `${file.name}: D1 applies this file, then refuses ${probe.replace(/^EXPLAIN /, "")}: ${d1Error(error)}, so it would fail on the live database once applied; leave out what D1 does not run`
+			// reason: a D1 that no longer answers crashed, so its error says nothing of the probe; the loop retries it fresh
+			if (await answers(scratch.db)) return { error: d1Error(error) }
 		}
 	}
-	return undefined
+	await scratch.reopen()
+	return { crashed: true }
+}
+
+/**
+ * Runs `file` on the scratch D1 as wrangler sends it, then its probes: what D1 refuses, naming D1's
+ * error, or why the probes prove nothing when workerd crashes on them
+ * @param {Scratch} scratch
+ * @param {{ name: string; query: string }} file
+ * @returns {Promise<{ refused?: string; unproven?: string }>}
+ */
+async function proveFile(scratch, file) {
+	const before = await master(scratch.db, scratch.shadows)
+	/** @type {string[]} */
+	let statements
+	try {
+		/* wrangler's split refuses a file it would rewrite, as its apply does */
+		statements = scratch.wrangler.unstable_splitSqlQuery(file.query)
+		await run(scratch.db, statements)
+	} catch (error) {
+		return {
+			refused: `${file.name}: D1 refuses this file on its own engine, as wrangler's apply would: ${d1Error(error)}; leave out what D1 does not run`,
+		}
+	}
+	scratch.ran.push(statements)
+	/** @type {string[]} */
+	const crashed = []
+	for (const probe of await probes(scratch.db, scratch.shadows, before)) {
+		const compiled = await compile(scratch, probe)
+		const what = probe.replace(/^EXPLAIN /, "")
+		if (compiled !== undefined && "error" in compiled)
+			return {
+				refused: `${file.name}: D1 applies this file, then refuses ${what}: ${compiled.error}, so it would fail on the live database once applied; leave out what D1 does not run`,
+			}
+		if (compiled !== undefined) crashed.push(what)
+	}
+	if (crashed.length === 0) return {}
+	return {
+		unproven: `comb's local D1 (wrangler's workerd) crashed compiling ${crashed.join(", ")} once this file applied, and again on a fresh copy, so D1's engine proves nothing of it; wrangler's apply compiles no such statement, so this does not show the live database refuses the file`,
+	}
 }
 
 /**
  * Proves `files`, in order, on a scratch D1 of the wrangler at `wrangler` seeded by `seed`: the
- * first refusal, or none
+ * first refusal, or the files D1's engine could not prove, if any
  * @param {ProofInput} input
  * @returns {Promise<ProofResult>}
  */
-export async function prove({ configPath, files, seed, shadows, wrangler: entry }) {
-	const wrangler = /** @type {Wrangler} */ (await import(pathToFileURL(entry).href))
-	const proxy = await wrangler.getPlatformProxy({ configPath, persist: false })
+export async function prove(input) {
+	const wrangler = /** @type {Wrangler} */ (await import(pathToFileURL(input.wrangler).href))
+	const scratch = new Scratch(
+		wrangler,
+		input,
+		await wrangler.getPlatformProxy({ configPath: input.configPath, persist: false }),
+	)
 	try {
-		const db = /** @type {D1Database} */ (proxy.env["DB"])
-		await run(db, seed)
-		for (const file of files) {
-			const refused = await proveFile({ db, shadows }, wrangler, file)
+		await run(scratch.db, input.seed)
+		/** @type {Array<{ name: string; why: string }>} */
+		const unproven = []
+		for (const file of input.files) {
+			const { refused, unproven: why } = await proveFile(scratch, file)
 			if (refused !== undefined) return { refused }
+			if (why !== undefined) unproven.push({ name: file.name, why })
 		}
-		return {}
+		return unproven.length === 0 ? {} : { unproven }
 	} finally {
-		await proxy.dispose()
+		await scratch.proxy.dispose()
 	}
 }
 

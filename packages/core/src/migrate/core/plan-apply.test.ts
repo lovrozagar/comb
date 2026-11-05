@@ -9,6 +9,9 @@ import { provePending } from "./proof-run.ts"
 import { guardRebuilds } from "./rebuild-guard.ts"
 import { extractSchema } from "./schema.ts"
 
+/** A D1 engine that could not prove 1_a.sql */
+const unproving = () => Promise.resolve([{ name: "1_a.sql", why: "comb's local D1 crashed" }])
+
 describe("wranglerOrder", () => {
 	it("orders by leading number, then by name, files without a number last", () => {
 		expect(wranglerOrder(["20250101000000_b.sql", "notes.sql", "20261020_a.sql", "9_z.sql", "9_y.sql"])).toEqual([
@@ -218,13 +221,39 @@ describe("planApply's target engine", () => {
 		const runs: Array<[string[], string[]]> = []
 		const engine = (files: ReadonlyArray<{ name: string }>, live: ReadonlyArray<{ name: string }>) => {
 			runs.push([files.map(({ name }) => name), live.map(({ name }) => name)])
-			return Promise.resolve()
+			return Promise.resolve([])
 		}
 		const files = { "1_a.sql": "CREATE TABLE t (id TEXT);", "2_b.sql": "CREATE TABLE u (id TEXT);" }
 		await plan(files, { applied: (name) => name === "1_a.sql", conn, engine }).run()
 		expect(runs).toEqual([[["2_b.sql"], ["t"]]])
 		await plan(files, { applied: () => true, conn, engine }).run()
 		expect(runs).toHaveLength(1)
+		await conn.close()
+	})
+
+	/* AC2-2 of area C round 2: comb's local D1 crashing on a probe proves nothing, either way */
+	it("rates a file the engine could not prove cautious, which an approval lets through, and not unsafe", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE kept (id TEXT);")
+		const files = { "1_a.sql": "CREATE TABLE t (id TEXT);" }
+		const pending = await plan(files, { conn, engine: unproving }).run()
+		expect(pending[0]?.migration.classification).toMatchObject({
+			cautiousStatements: ["proof run: unproven on D1's engine: comb's local D1 crashed"],
+			safety: "cautious",
+		})
+		await expect(
+			plan(files, {
+				approve: (migration) => approveMigration(migration, { target: "core", yes: false }),
+				conn,
+				engine: unproving,
+			}).run(),
+		).rejects.toThrow(/^1_a\.sql is cautious/)
+		const yes = plan(files, {
+			approve: (migration) => approveMigration(migration, { target: "core", yes: true }),
+			conn,
+			engine: unproving,
+		})
+		await expect(yes.run()).resolves.toHaveLength(1)
 		await conn.close()
 	})
 })

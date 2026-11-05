@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import { wranglerBin } from "../../cli/__fixtures__/d1.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
@@ -87,7 +88,7 @@ describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runt
 			runtimes.push(`${cmd} ${options?.peer}`)
 			return run(cmd, args, options)
 		}
-		expect(await proven([{ name: "1_a.sql", sql: "CREATE TABLE a (x);" }], { exec })).toBeUndefined()
+		expect(await proven([{ name: "1_a.sql", sql: "CREATE TABLE a (x);" }], { exec })).toEqual([])
 		expect(runtimes).toEqual(["node wrangler"])
 	}, 120_000)
 
@@ -116,6 +117,15 @@ describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runt
 		expect(failure.message).toBe(
 			`check could not prove the pending files on D1's engine: the proof on node ended with code ${said}`,
 		)
+	})
+
+	it("answers each file the child could not prove, and why, for the caller to rate", async () => {
+		const unproven = [{ name: "1_a.sql", why: "comb's local D1 crashed" }]
+		const exec: Run = async (_, args) => {
+			writeFileSync(args.at(-1) as string, JSON.stringify({ unproven }))
+			return { code: 0, stderr: "", stdout: "" }
+		}
+		expect(await proven([{ name: "1_a.sql", sql: "CREATE TABLE a (x);" }], { exec })).toEqual(unproven)
 	})
 
 	it("refuses a file wrangler would rewrite before it opens D1", async () => {

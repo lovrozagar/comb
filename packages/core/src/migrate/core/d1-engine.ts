@@ -93,7 +93,8 @@ async function proofInput(
 /**
  * Proves `files`, in order, on a scratch D1 of the checked wrangler `bin` holding the copy of the live
  * schema `live`, in a child on wrangler's runtime that `exec` starts; `table` is the binding's migration
- * history, which each file's appended row goes to. Throws D1's refusal, or how the child failed
+ * history, which each file's appended row goes to. Throws D1's refusal, or how the child failed; answers
+ * each file D1's engine could not prove, as comb's local D1 crashed on its probes, and why
  */
 async function proveOnD1(
 	live: readonly LiveObject[],
@@ -104,7 +105,7 @@ async function proveOnD1(
 		moduleUrl = import.meta.url,
 		table,
 	}: { bin: ProjectBin; exec?: Run | undefined; moduleUrl?: string | undefined; table: string },
-): Promise<void> {
+): Promise<Array<{ name: string; why: string }>> {
 	/* the child is handed d1-engine-child.mjs by comb's own URL, which `moduleUrl` is unless a test says otherwise (D4-5 of the area D round-four review) */
 	refuseCompiled(
 		moduleUrl,
@@ -124,8 +125,9 @@ async function proveOnD1(
 			throw new Error(
 				`check could not prove the pending files on D1's engine: the proof on ${bin.runtime} ended with code ${ran.code} and no answer: ${ran.stderr.trim() || "it printed nothing"}`,
 			)
-		const { refused } = JSON.parse(readFileSync(output, "utf8")) as ProofResult
+		const { refused, unproven = [] } = JSON.parse(readFileSync(output, "utf8")) as ProofResult
 		if (refused !== undefined) throw new Error(refused)
+		return unproven
 	} finally {
 		removeDir()
 	}

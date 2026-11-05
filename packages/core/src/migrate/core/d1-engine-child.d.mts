@@ -12,8 +12,14 @@ export type ProofInput = {
 	wrangler: string
 }
 
-/** What the child answers: D1's refusal of a file, in D1's words, or none */
-export type ProofResult = { refused?: string | undefined }
+/**
+ * What the child answers: D1's refusal of a file, in D1's words, or none, with each file D1's engine
+ * could not prove, as comb's local D1 crashed compiling its probes, and why
+ */
+export type ProofResult = {
+	refused?: string | undefined
+	unproven?: Array<{ name: string; why: string }> | undefined
+}
 
 export function prove(input: ProofInput): Promise<ProofResult>
 export function main(input: string): Promise<ProofResult>

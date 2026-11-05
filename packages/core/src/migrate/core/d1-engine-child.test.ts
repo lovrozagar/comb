@@ -14,6 +14,29 @@ vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 const LIVE = "CREATE TABLE t (id INTEGER PRIMARY KEY, v REAL NOT NULL DEFAULT 1);\nINSERT INTO t (v) VALUES (2), (3);"
 
+/* a wrangler whose D1 dies compiling any DELETE, as workerd does on AC2-2's sequence, and answers nothing after */
+const CRASHING_WRANGLER = `
+const fail = () => { throw new TypeError("fetch failed", { cause: new Error("other side closed") }) }
+export const unstable_splitSqlQuery = (sql) => [sql]
+export async function getPlatformProxy() {
+	let dead = false
+	let made = false
+	const t = { type: "table", name: "t", tbl_name: "t", sql: "CREATE TABLE t (x)" }
+	const prepare = (sql) => ({ sql, all: async () => {
+		if (dead) fail()
+		return { results: sql.startsWith("SELECT type") && made ? [t] : [] }
+	} })
+	const batch = async (statements) => {
+		if (dead) fail()
+		for (const { sql } of statements) {
+			if (sql.startsWith("EXPLAIN DELETE")) { dead = true; fail() }
+			if (sql === t.sql) made = true
+		}
+	}
+	return { dispose: async () => {}, env: { DB: { batch, prepare } } }
+}
+`
+
 const dirs: string[] = []
 afterEach(() => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true })
@@ -148,6 +171,45 @@ describe("prove: what D1 applies and then cannot run", () => {
 		},
 		120_000,
 	)
+})
+
+/* AC2-2 of area C round 2: workerd crashes compiling this DELETE ("other side closed"), though D1 runs the DELETE */
+describe("prove when comb's local D1 crashes on a probe", () => {
+	it("compiles the probe again alone on a fresh copy, and passes the file D1 then runs", async () => {
+		const files = [
+			{
+				name: "1_t1.sql",
+				sql: "CREATE TABLE t1 (id INTEGER PRIMARY KEY, a TEXT, b INTEGER, r1 INTEGER REFERENCES t1 (id) ON DELETE SET DEFAULT);\nCREATE VIRTUAL TABLE f0 USING fts5 (a);\nCREATE INDEX i1 ON t1 (b) WHERE b > 0;",
+			},
+			{ name: "2_c8.sql", sql: "ALTER TABLE t1 ADD COLUMN c8 TEXT;" },
+		]
+		expect(await proven(files, { schema: "" })).toBeUndefined()
+	}, 120_000)
+
+	it("lists a file whose probe crashes it again on a fresh copy as unproven, and proves the files after it", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-d1-child-"))
+		dirs.push(dir)
+		writeFileSync(join(dir, "wrangler.mjs"), CRASHING_WRANGLER)
+		const files = [
+			{ name: "1_t.sql", query: "CREATE TABLE t (x)" },
+			{ name: "2_u.sql", query: "CREATE INDEX u ON t (x)" },
+		]
+		const input = {
+			configPath: join(dir, "wrangler.json"),
+			files,
+			seed: [],
+			shadows: {},
+			wrangler: join(dir, "wrangler.mjs"),
+		}
+		expect(await prove(input)).toEqual({
+			unproven: [
+				{
+					name: "1_t.sql",
+					why: `comb's local D1 (wrangler's workerd) crashed compiling DELETE FROM "t" once this file applied, and again on a fresh copy, so D1's engine proves nothing of it; wrangler's apply compiles no such statement, so this does not show the live database refuses the file`,
+				},
+			],
+		})
+	})
 })
 
 describe("prove over a schema with foreign keys, which D1 always enforces", () => {
