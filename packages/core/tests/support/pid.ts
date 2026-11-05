@@ -76,11 +76,13 @@ export function runs(seen: Seen | undefined): boolean {
  * writeFileSync creates a file before it writes it, so a test that waits for the file to exist may
  * read it empty (load.test.ts read a grandchild's pid as 0 in CI run 42083475773). It writes beside
  * the file, then renames into it, which no reader sees half done. It runs in a CommonJS or module
- * script, under node or bun, as it reaches fs by process.getBuiltinModule.
+ * script, under node or bun, as it reaches fs by process.getBuiltinModule. `file` is the path, or
+ * `{ expression }`, the JavaScript the child evaluates for a path only it knows. A test writes a pid
+ * file only through here: test-pids.test.ts fails a writeFileSync of a pid anywhere else.
  */
-export function recordWhole(file: string, text: string): string {
-	const part = JSON.stringify(`${file}.part`)
-	return `{ const fs = process.getBuiltinModule("node:fs"); fs.writeFileSync(${part}, ${text}); fs.renameSync(${part}, ${JSON.stringify(file)}) }`
+export function recordWhole(file: string | { readonly expression: string }, text: string): string {
+	const at = typeof file === "string" ? JSON.stringify(file) : file.expression
+	return `{ const fs = process.getBuiltinModule("node:fs"); const at = ${at}; fs.writeFileSync(at + ".part", ${text}); fs.renameSync(at + ".part", at) }`
 }
 
 /** Sends `signal` to `seen` while it runs, and answers whether it did; a later process given its pid gets nothing */

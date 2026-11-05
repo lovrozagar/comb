@@ -11,7 +11,7 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { recordWhole, runs, see, send, sendGroup } from "../support/pid.ts"
 
@@ -74,20 +74,67 @@ describe("the pids a test's child records", () => {
 				[process.execPath, "-e"],
 				[process.execPath, "--input-type=module", "-e"],
 				["bun", "-e"],
+				[process.execPath, "-e"],
 			].map((cmd, i) => {
 				const file = join(dir, `pids-${i}.json`)
+				/* the last names the path as the child evaluates it, as a stand-in that alone knows its path does */
+				const at = i === 3 ? { expression: JSON.stringify(file) } : file
 				const [bin, ...flags] = cmd as [string, ...string[]]
-				const ran = spawnSync(bin, [...flags, recordWhole(file, "JSON.stringify([process.pid])")], { encoding: "utf8" })
+				const ran = spawnSync(bin, [...flags, recordWhole(at, "JSON.stringify([process.pid])")], { encoding: "utf8" })
 				return [ran.status, (JSON.parse(readFileSync(file, "utf8")) as number[]).length]
 			})
 			expect(reads).toEqual([
 				[0, 1],
 				[0, 1],
 				[0, 1],
+				[0, 1],
 			])
-			expect(readdirSync(dir).sort()).toEqual(["pids-0.json", "pids-1.json", "pids-2.json"])
+			expect(readdirSync(dir).sort()).toEqual(["pids-0.json", "pids-1.json", "pids-2.json", "pids-3.json"])
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
 		}
 	})
+
+	it("are written only through recordWhole: no writeFileSync of a pid anywhere else in the tests or the code", () => {
+		expect(pidWriters(sources())).toEqual([])
+	})
+
+	it("find a pid written by hand, from a script a test hands its child or in a test's own code", () => {
+		/* the call's name split, so these samples are no writers of this file's own */
+		const write = ["write", "FileSync"].join("")
+		expect(
+			pidWriters([
+				["a.test.ts", `const s = \`require('fs').${write}(\${JSON.stringify(f)}, String(g.pid))\`\n`],
+				["b.test.ts", `fs.${write}(state + ".pid", String(process.pid))\n`],
+				["c.test.ts", `fs.${write}(done, "x")\nconst pid = child.pid\n`],
+				["tests/support/pid.ts", `fs.${write}(at, String(process.pid))\n`],
+			]),
+		).toEqual(["a.test.ts:1", "b.test.ts:1"])
+	})
 })
+
+/* comb's own code, tests and lint rules, where a child's script that records a pid could be written */
+const CORE = resolve(import.meta.dirname, "../..")
+function sources(): (readonly [string, string])[] {
+	return ["src", "tests", "lint"].flatMap((root) =>
+		readdirSync(join(CORE, root), { recursive: true, withFileTypes: true })
+			.filter((e) => e.isFile() && /\.[cm]?[jt]s$/.test(e.name) && !e.parentPath.includes("node_modules"))
+			.map((e) => {
+				const path = join(e.parentPath, e.name)
+				return [relative(CORE, path), readFileSync(path, "utf8")] as const
+			}),
+	)
+}
+
+/** Each `file:line` that writes a pid by a writeFile call of its own, pid.ts's recordWhole aside */
+function pidWriters(files: readonly (readonly [string, string])[]): string[] {
+	return files
+		.filter(([file]) => file !== "tests/support/pid.ts")
+		.flatMap(([file, text]) =>
+			text
+				.split("\n")
+				.flatMap((line, i) =>
+					/\b(?:writeFile|appendFile)(?:Sync)?\([^;]*\.pid\b/.test(line) ? [`${file}:${i + 1}`] : [],
+				),
+		)
+}

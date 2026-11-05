@@ -22,7 +22,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import { running, runs, type Seen, see, send } from "../../support/pid.ts"
+import { recordWhole, running, runs, type Seen, see, send } from "../../support/pid.ts"
 import { withScratchDb } from "../support/pg.ts"
 import { query } from "../support/pg-roles.ts"
 
@@ -48,7 +48,7 @@ const applies = args[0] === "migrate" && args[1] === "apply" && !args.includes("
 const call = applies ? Number(fs.existsSync(state) ? fs.readFileSync(state, "utf8") : "0") + 1 : 0
 if (applies) fs.writeFileSync(state, String(call))
 if (call === 2) {
-	fs.writeFileSync(state + ".pid", String(process.pid))
+	${recordWhole({ expression: 'state + ".pid"' }, "String(process.pid)")}
 	setInterval(() => {}, 1000)
 } else {
 	const real = spawnSync(process.env.COMB_REAL_ATLAS, args, { stdio: "inherit" })
