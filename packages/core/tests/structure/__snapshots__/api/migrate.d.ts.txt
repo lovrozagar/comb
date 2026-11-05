@@ -675,9 +675,13 @@ export type ProjectBin = {
     peer: BinPeer;
     runtime: string;
 };
+/** How a process ended, as `Run` resolves it */
 export type RunResult = {
+    /** The exit code: 0 on success, 128 plus the signal's number when a signal ended it, 124 past `timeoutMs`, 1 past `maxBuffer`, 127 when the command is not found, 126 when it could not start */
     code: number;
+    /** Everything the process wrote to stdout, as UTF-8 */
     stdout: string;
+    /** Everything the process wrote to stderr, as UTF-8; on a failure comb made or saw, such as a timeout or a signal, it says what happened */
     stderr: string;
 };
 /**
@@ -688,7 +692,9 @@ export type RunResult = {
 export declare const ATLAS_RANGE = ">=1.2.0 <2";
 /** Where Atlas, which no package ships, is installed from */
 export declare const ATLAS_INSTALL = "https://atlasgo.io/getting-started";
+/** How `Run` starts a process; every field is optional */
 export type RunOptions = {
+    /** The folder the process starts in; the parent's when omitted */
     cwd?: string | undefined;
     /** Variables set over the parent's environment for the child; an undefined value removes one. */
     env?: Readonly<Record<string, string | undefined>> | undefined;
@@ -703,9 +709,12 @@ export type RunOptions = {
     /** Milliseconds a process comb stopped gets to end before SIGKILL, as timeout(1)'s -k gives it; default 10 s */
     killAfterMs?: number | undefined;
 } & ({
+    /** Text written to the child's stdin, which is then closed; closed with nothing written when omitted */
     input?: string | undefined;
+    /** False or omitted: the child's stdin is closed once `input` is written */
     lifeline?: false | undefined;
 } | {
+    /** No `input` with a lifeline: the child's stdin is never written */
     input?: undefined;
     /**
      * The child's stdin left open and never written while comb runs, so its end tells the child
@@ -713,6 +722,10 @@ export type RunOptions = {
      */
     lifeline: true;
 });
+/**
+ * How comb starts a process (atlas, wrangler, drizzle-kit): `cmd` with `args`, no shell. It resolves
+ * with the process's end, a failed or unstartable command among them, and never rejects for one.
+ */
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => Promise<RunResult>;
 /** Runs `cmd` and reports how it ended; it never rejects for a failed command. Started while a signal stops comb, it waits with the rest. */
 export declare const run: Run;
