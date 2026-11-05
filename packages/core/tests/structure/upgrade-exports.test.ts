@@ -16,6 +16,7 @@ import { apiOf, type Exports, type Members } from "./support/exports-of.ts"
 const ROOT = join(import.meta.dirname, "../..")
 const RELEASED = JSON.parse(readFileSync(join(import.meta.dirname, "__snapshots__/released-exports.json"), "utf8")) as {
 	exports: Exports
+	inputs: string[]
 	members: Members
 	version: string
 }
@@ -65,6 +66,28 @@ const narrowed = (from: Members, to: Members): string[] =>
 						.map(([member]) => `${type}.${member}`),
 		)
 		.sort()
+
+/**
+ * Each member of a type a released callable took, which a consumer writes, that the type requires now
+ * and lacked then, as `Type.member`, sorted: a type it returns may gain members freely (AD7-3 of the
+ * area D round-seven review)
+ */
+const gained = (from: Members, to: Members, inputs: readonly string[]): string[] =>
+	inputs
+		.flatMap((type) =>
+			from[type] === undefined
+				? []
+				: Object.entries(to[type] ?? {})
+						.filter(([member, now]) => now === "required" && from[type]?.[member] === undefined)
+						.map(([member]) => `${type}.${member}`),
+		)
+		.sort()
+
+/** Each member narrowed since the release, or gained as required by a type its callables took */
+const changedMembers = (now: Members): string[] => [
+	...narrowed(RELEASED.members, now),
+	...gained(RELEASED.members, now, RELEASED.inputs),
+]
 
 const API = join(import.meta.dirname, "__snapshots__/api")
 
@@ -166,6 +189,18 @@ function listed(section: string, label: string): string[] {
 	return [...names].map((match) => match[1] as string).sort()
 }
 
+describe("the members a type a released callable took gained as required (AD7-3)", () => {
+	const from: Members = { Config: { name: "optional" }, Out: { x: "required" } }
+	const to: Members = {
+		Config: { banner: "required", name: "optional", note: "optional" },
+		Out: { x: "required", y: "required" },
+	}
+
+	it("are named for an input type, and not for an output one or a type new since then", () => {
+		expect(gained(from, { ...to, Fresh: { a: "required" } }, ["Config", "Fresh"])).toEqual(["Config.banner"])
+	})
+})
+
 describe("the newest upgrade section's exports", () => {
 	const api = apiOf(ROOT)
 	const now = api.exports
@@ -201,13 +236,14 @@ describe("the newest upgrade section's exports", () => {
 	})
 
 	/* comb-44's 0005 dropped `ManifestConfig.filePrefix`, which 0.20.1's generateManifest takes, and no list could name it */
-	it("names each member a released type lost or made required since then, as `Type.member` or `member`", () => {
-		const unnamed = narrowed(RELEASED.members, api.members).filter(
+	it("names each member a released type lost or made required, or a type a released callable took gained as required, since then", () => {
+		const unnamed = changedMembers(api.members).filter(
 			(name) => !section.includes(`\`${name}\``) && !section.includes(`\`${name.split(".")[1]}\``),
 		)
-		expect(released ? [] : unnamed, `narrowed since ${RELEASED.version}, unnamed in "Upgrading to ${version}"`).toEqual(
-			[],
-		)
+		expect(
+			released ? [] : unnamed,
+			`members changed since ${RELEASED.version}, unnamed in "Upgrading to ${version}"`,
+		).toEqual([])
 	})
 
 	/* D5-1 of the area D round-five review: the async paragraph left out exportDrizzleSchema and named a bare run */

@@ -151,3 +151,38 @@ describe("two types an export reaches under one name, with different members", (
 		expect(releasedApiOf(dir).members).toEqual({ Shared: { a: "required" }, UsesB: { shared: "required" } })
 	})
 })
+
+const TAKES = `type Inner = { label: string }
+export type Config = { inner: Inner; name?: string }
+type Seed = { seed: number }
+type Arg = { arg: string }
+type Made = { made: boolean }
+type Res = { x: number }
+export type Out = { result: Res }
+type Ctx = { ctx: string }
+export type Callback = (ctx: Ctx) => void
+export function define(config: Config): Config {
+	return config
+}
+export function run(): Out {
+	return { result: { x: 1 } }
+}
+export class Box {
+	constructor(seed: Seed) {
+		void seed
+	}
+	put(arg: Arg): void {
+		void arg
+	}
+}
+export const make = (made: Made): number => (made.made ? 1 : 0)
+`
+
+/* AD7-3 of the area D round-seven review: a member added as required to a type a consumer passes is a break no hash names */
+describe("the types a callable export takes, which a consumer writes", () => {
+	it("are each local type a function, class or const of function type takes, and each type those name", () => {
+		const root = fixture(BASE)
+		writeFileSync(join(root, "src/index.ts"), TAKES)
+		expect(apiOf(root).inputs).toEqual(["Arg", "Config", "Inner", "Made", "Seed"])
+	})
+})
