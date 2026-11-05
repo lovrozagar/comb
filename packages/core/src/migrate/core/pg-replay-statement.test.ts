@@ -21,15 +21,22 @@ function statement(sql: string) {
 	return { name: "2_b.sql", node, sent: String(read?.sent), type }
 }
 
-/** A run that left out the tablespaces `left`, whose connection records what it is sent and refuses `refused` */
-function run(left: string[], refused?: string) {
+/* devUrl's refusal of a statement, as Postgres codes a missing privilege */
+const DENIED = Object.assign(new Error("permission denied (42501)"), { code: "42501" })
+
+/**
+ * A run that left out the tablespaces `left`, as a role with CREATEROLE or not, whose connection
+ * records what it is sent and refuses what starts with `refused`
+ */
+function run(left: string[], refused?: string, createrole = false) {
 	const sent: string[] = []
 	const unsafe = async (query: string) => {
-		if (query === refused) throw new Error("permission denied (42501)")
+		if (refused !== undefined && query.startsWith(refused)) throw DENIED
 		sent.push(query)
 		return []
 	}
-	return { run: { created: [], sql: { unsafe }, tablespaces: new Set(left) } as unknown as Run, sent }
+	const on = { created: [], createrole, sql: { unsafe }, superuser: false, tablespaces: new Set(left) }
+	return { run: on as unknown as Run, sent }
 }
 
 /** The replay's words, each callback a mock */
@@ -68,6 +75,21 @@ describe("runStatement", () => {
 		await runStatement(on, statement("CREATE EXTENSION hstore;"), replay)
 		expect(sent).toEqual(["CREATE EXTENSION hstore"])
 		expect(replay.waits).toHaveBeenCalledWith(on.sql)
+	})
+
+	/* PR9 of r22b */
+	it("refuses a CREATE ROLE devUrl's role lacks CREATEROLE for, naming the privilege, as NO_CREATEDB names CREATEDB", async () => {
+		const { run: on } = run([], 'CREATE ROLE "app"')
+		await expect(runStatement(on, statement("CREATE ROLE app;"), replaying())).rejects.toThrow(
+			"2_b.sql creates the role app, which devUrl's server lacks, and devUrl's role cannot create a role (CREATEROLE), as comb replays the history in a database of its own on that server; grant the role CREATEROLE, or point devUrl at a server where it has it; check",
+		)
+	})
+
+	it("refuses a CREATE ROLE with devUrl's own error when its role has CREATEROLE", async () => {
+		const { run: on } = run([], 'CREATE ROLE "app"', true)
+		await expect(runStatement(on, statement("CREATE ROLE app;"), replaying())).rejects.toThrow(
+			'2_b.sql: devUrl refused "CREATE ROLE app" as replaying the history: Error: permission denied (42501)',
+		)
 	})
 
 	it("refuses with devUrl's error, naming the file, the statement and what the replay was doing", async () => {

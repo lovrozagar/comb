@@ -15,7 +15,17 @@ import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { pgCheck, T } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
-import { asRole, dropRoles, heldRole, hiddenWrites, query, roleOf, shapeRoles, unique } from "../support/pg-roles.ts"
+import {
+	asRole,
+	dropRoles,
+	heldRole,
+	hiddenWrites,
+	query,
+	roleOf,
+	shapeRoles,
+	testRoles,
+	unique,
+} from "../support/pg-roles.ts"
 
 const { checked, devUrl, dir, files, options } = pgCheck()
 
@@ -330,5 +340,17 @@ describe("check of a pending CREATE ROLE of a role the target's server already h
 			await applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
 			expect(await roleOf(role)).not.toEqual([])
 		})
+	}, 60_000)
+})
+
+/* PR9 of r22b: a role the history creates needs CREATEROLE on devUrl's server, as the database needs CREATEDB */
+describe("check on a devUrl whose role has CREATEDB and no CREATEROLE", () => {
+	it("refuses a history CREATE ROLE of a role the server lacks, naming CREATEROLE, and makes no role", async () => {
+		const [dev, app] = testRoles("comb_t_nocr", "comb_t_pr9")
+		const { refused } = await checked(`CREATE ROLE ${app};\n${T}`, RETYPE, await asRole(devUrl(), dev, "CREATEDB"))
+		expect(refused).toBe(
+			`20260101000000_one.sql creates the role ${app}, which devUrl's server lacks, and devUrl's role cannot create a role (CREATEROLE), as comb replays the history in a database of its own on that server; grant the role CREATEROLE, or point devUrl at a server where it has it; check applies nothing`,
+		)
+		expect(await roleOf(app)).toEqual([])
 	}, 60_000)
 })
