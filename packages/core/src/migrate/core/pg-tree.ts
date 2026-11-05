@@ -27,7 +27,8 @@ import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
 import { followFresh } from "./pg-fresh.ts"
-import { type Held, heldScans } from "./pg-validate.ts"
+import { type Held, holdStatement } from "./pg-held.ts"
+import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
@@ -48,7 +49,7 @@ type TreeContext = {
 	/** what the history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
 	fresh: Fresh
-	/** the tables the open transaction holds locked since its NOT VALID ADDs (PA8 of r22b) */
+	/** the locks the open transaction holds to its COMMIT, and what it made (PA8 and 0005 of r22b) */
 	held: Held
 }
 
@@ -253,6 +254,9 @@ function pgTreeFindings(
 			codeFinding(type, node, ctx),
 		].filter((finding) => finding !== undefined)
 	})
+	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
+	/* the locks the statement takes last to its transaction's COMMIT, read before the history follows it */
+	for (const [type, node] of tops) holdStatement(type, node, ctx)
 	/* what the statement made new, attached and reparented counts for the statements after it */
 	for (const [type, node] of nodes) {
 		followFresh(type, node, ctx)
@@ -261,7 +265,6 @@ function pgTreeFindings(
 	/* the event triggers the history made run on this statement before what it makes counts */
 	findings.push(...eventFindings(tree.stmts, ctx))
 	followTree(tree.stmts, ctx.facts)
-	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
 	const treeRated = tops.length > 0 && tops.every(([type, node]) => maintenanceFindings(type, node) !== undefined)
 	return {
 		findings,

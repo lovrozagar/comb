@@ -5,7 +5,10 @@ import { extractSchema } from "./schema.ts"
 /** The partitioned tables and indexes the history `sql` leaves */
 function partitioned(sql: string) {
 	const facts = historyFacts(extractSchema(sql, undefined, "postgres"), "public")
-	return { indexes: Object.fromEntries(facts.partitionedIndexes), tables: [...facts.partitioned] }
+	return {
+		indexes: Object.fromEntries([...facts.indexes].filter(([, table]) => facts.partitioned.has(table))),
+		tables: [...facts.partitioned],
+	}
 }
 
 const PT = "CREATE TABLE pt (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE plain (id int);\n"

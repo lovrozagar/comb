@@ -1,6 +1,6 @@
 /**
- * The partitioned tables a Postgres history leaves, and the indexes on them, which rating reads (P18
- * and P19 of r19): Postgres refuses a NOT VALID foreign key on a partitioned table, and a partitioned
+ * The partitioned tables a Postgres history leaves, and each index it names with its table, which rating reads (P18
+ * and P19 of r19, and 0005 of r22b, where a DROP INDEX locks its table): Postgres refuses a NOT VALID foreign key on a partitioned table, and a partitioned
  * index has no storage, so its SET TABLESPACE moves nothing. Tables and indexes share one namespace,
  * so each is keyed as a relation; an index is its table's, in its table's schema, and moves with it.
  * Each follows its table's or its own RENAME, SET SCHEMA and DROP.
@@ -16,18 +16,17 @@ function besideTable(table: string, name: string, schema: string): string {
 /** The table `from` now `to`: its own entry, and each index on it, which stays its own name in the table's schema */
 function moveTable(facts: Facts, from: string, to: string): void {
 	if (facts.partitioned.delete(from)) facts.partitioned.add(to)
-	for (const [index, table] of Array.from(facts.partitionedIndexes)) {
+	for (const [index, table] of Array.from(facts.indexes)) {
 		if (table !== from) continue
-		facts.partitionedIndexes.delete(index)
-		facts.partitionedIndexes.set(besideTable(to, index.split(".").at(-1) as string, facts.schema), to)
+		facts.indexes.delete(index)
+		facts.indexes.set(besideTable(to, index.split(".").at(-1) as string, facts.schema), to)
 	}
 }
 
 /** A table dropped, with each index on it */
 function dropTable(facts: Facts, table: string): void {
 	facts.partitioned.delete(table)
-	for (const [index, on] of Array.from(facts.partitionedIndexes))
-		if (on === table) facts.partitionedIndexes.delete(index)
+	for (const [index, on] of Array.from(facts.indexes)) if (on === table) facts.indexes.delete(index)
 }
 
 // lookup-table: the object kinds a partitioned table is renamed, moved or dropped as
@@ -40,10 +39,10 @@ function followName(type: string, node: Node, facts: Facts): void {
 	if (rel === undefined) return
 	const from = tableOf(rel, facts.schema).key
 	if (type === "RenameStmt" && kind === "OBJECT_INDEX") {
-		const table = facts.partitionedIndexes.get(from)
+		const table = facts.indexes.get(from)
 		if (table === undefined) return
-		facts.partitionedIndexes.delete(from)
-		facts.partitionedIndexes.set(besideTable(table, String(node["newname"]), facts.schema), table)
+		facts.indexes.delete(from)
+		facts.indexes.set(besideTable(table, String(node["newname"]), facts.schema), table)
 	} else if (TABLES.has(kind)) {
 		const to =
 			type === "RenameStmt"
@@ -56,20 +55,19 @@ function followName(type: string, node: Node, facts: Facts): void {
 	}
 }
 
-/** A partitioned table made, an index made on one, either renamed, moved or dropped, followed into `facts` */
+/** A partitioned table made, an index made, either renamed, moved or dropped, followed into `facts` */
 function followPartitioned(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateStmt" && node["partspec"] !== undefined)
 		facts.partitioned.add(tableOf(node["relation"], facts.schema).key)
 	else if (type === "IndexStmt" && node["idxname"] !== undefined) {
 		const table = tableOf(node["relation"], facts.schema).key
-		if (facts.partitioned.has(table))
-			facts.partitionedIndexes.set(besideTable(table, String(node["idxname"]), facts.schema), table)
+		facts.indexes.set(besideTable(table, String(node["idxname"]), facts.schema), table)
 	} else if (type === "RenameStmt" || type === "AlterObjectSchemaStmt") followName(type, node, facts)
 	else if (type === "DropStmt" && (node["removeType"] === "OBJECT_TABLE" || node["removeType"] === "OBJECT_INDEX")) {
 		for (const object of node["objects"] as Node[]) {
 			const key = keyOf(names((object["List"] as Node)["items"]), facts.schema)
 			if (node["removeType"] === "OBJECT_TABLE") dropTable(facts, key)
-			else facts.partitionedIndexes.delete(key)
+			else facts.indexes.delete(key)
 		}
 	}
 }
@@ -110,7 +108,7 @@ const usingIndex = (each: Node): boolean => {
 function dropRefusal(node: Node, facts: Facts): string | undefined {
 	const index = (node["objects"] as Node[])
 		.map((object) => names((object["List"] as Node)["items"]))
-		.find((parts) => facts.partitionedIndexes.has(keyOf(parts, facts.schema)))
+		.find((parts) => facts.partitioned.has(facts.indexes.get(keyOf(parts, facts.schema)) ?? ""))
 	if (index === undefined) return undefined
 	return `Postgres refuses DROP INDEX CONCURRENTLY of partitioned index ${index.join(".")} ("cannot drop partitioned index "${index.at(-1) as string}" concurrently"); drop it without CONCURRENTLY`
 }

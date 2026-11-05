@@ -8,18 +8,18 @@ import { historyFacts } from "./pg-history.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { pgRead } from "./pg-split.ts"
-import type { Held } from "./pg-validate.ts"
+import { type Held, heldStart } from "./pg-held.ts"
 
 beforeAll(loadPostgresParser)
 
 /** The tables still held after each statement of `sql`, read as a file outside a transaction when `bare` */
 function heldAfter(sql: string, bare: boolean): string[][] {
-	const held: Held = new Map()
+	const held: Held = heldStart()
 	const read = scopeReader(bare, { facts: historyFacts(undefined, "public"), held })
 	return pgRead(sql).statements.map(({ tree }, i) => {
 		read(tree)
-		held.set(`t${i}`, { name: `t${i}`, reads: false })
-		return [...held.keys()]
+		held.locks.set(`t${i}`, false)
+		return [...held.locks.keys()]
 	})
 }
 
@@ -42,7 +42,7 @@ describe("scopeReader: the locks a file holds, by where its statements commit (P
 	})
 
 	it("reads a statement Postgres runs only outside a transaction, and one it runs only inside a block", () => {
-		const read = scopeReader(true, { facts: historyFacts(undefined, "public"), held: new Map() })
+		const read = scopeReader(true, { facts: historyFacts(undefined, "public"), held: heldStart() })
 		const [vacuum, savepoint] = pgRead("VACUUM t;\nSAVEPOINT s;\n").statements.map(({ tree }) => read(tree))
 		expect({ savepoint: savepoint?.inside !== undefined, vacuum: vacuum?.outside !== undefined }).toEqual({
 			savepoint: true,

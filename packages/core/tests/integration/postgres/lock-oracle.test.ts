@@ -10,6 +10,7 @@ import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { withScratchDb } from "../support/pg.ts"
+import { heldBy } from "../support/pg-locks.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -22,36 +23,8 @@ const HISTORY = [
 	"CREATE TABLE ev_old PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');",
 ].join("\n")
 
-/** What a Postgres lock mode blocks of other sessions' reads and writes */
-function blocking(modes: readonly string[]): string | undefined {
-	if (modes.includes("AccessExclusiveLock")) return "reads and writes"
-	const writes = ["ShareLock", "ShareRowExclusiveLock", "ExclusiveLock"]
-	return modes.some((mode) => writes.includes(mode)) ? "writes" : undefined
-}
-
 /** What the transaction of `file` holds blocked by table at its end, the `earlier` files committed after HISTORY */
-async function heldBy(url: string, file: string, earlier: readonly string[] = []): Promise<Record<string, string>> {
-	const client = new pg.Client({ connectionString: url })
-	await client.connect()
-	try {
-		await client.query(HISTORY)
-		for (const sql of earlier) await client.query(sql)
-		await client.query("BEGIN")
-		await client.query(file)
-		const { rows } = await client.query<{ modes: string[]; relname: string }>(
-			"SELECT c.relname, array_agg(l.mode::text) AS modes FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE l.pid = pg_backend_pid() AND c.relkind IN ('r', 'p') AND c.relnamespace = 'public'::regnamespace GROUP BY 1",
-		)
-		await client.query("ROLLBACK")
-		return Object.fromEntries(
-			rows.flatMap(({ modes, relname }) => {
-				const blocks = blocking(modes)
-				return blocks === undefined ? [] : [[relname, blocks]]
-			}),
-		)
-	} finally {
-		await client.end()
-	}
-}
+const heldIn = (url: string, file: string, earlier: readonly string[] = []) => heldBy(url, [HISTORY, ...earlier], file)
 
 /** comb's lock warnings on `file`, the `earlier` files read into its history */
 const warned = (file: string, earlier: readonly string[] = []): string[] =>
@@ -62,7 +35,7 @@ const warned = (file: string, earlier: readonly string[] = []): string[] =>
 
 /** Postgres's locks at the end of `file` beside comb's warnings on it */
 const both = async (url: string, file: string, earlier: readonly string[] = []) => ({
-	held: await heldBy(url, file, earlier),
+	held: await heldIn(url, file, earlier),
 	warned: warned(file, earlier),
 })
 
@@ -70,7 +43,7 @@ const CHECK_ADD = "ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;
 const CHECK_VALIDATE = "ALTER TABLE users VALIDATE CONSTRAINT pos;"
 const FK_ADD = "ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;"
 const FK_VALIDATE = "ALTER TABLE orders VALIDATE CONSTRAINT fk;"
-const HELD = "the ADD's lock is held through this scan; validate in a later file"
+const HELD = "those locks last to the file's COMMIT; validate in a later file"
 
 describe("a NOT VALID ADD and its VALIDATE on Postgres 17 (PA8; sibling: the two-file NOT VALID shape)", () => {
 	it("warns of a CHECK's VALIDATE in the ADD's file, which scans while the transaction blocks reads", async () => {

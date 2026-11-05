@@ -59,7 +59,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.domains,
 		facts.operators,
 		facts.parents,
-		facts.partitionedIndexes,
+		facts.indexes,
 		facts.reads,
 		facts.tables,
 		facts.triggers,
@@ -83,7 +83,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.partitioned.delete(key)
 		facts.partitioned.add(move(key))
 	}
-	for (const [index, table] of facts.partitionedIndexes) facts.partitionedIndexes.set(index, move(table))
+	for (const [index, table] of facts.indexes) facts.indexes.set(index, move(table))
 	moveDefaults(facts, move)
 	moveReads(facts, move)
 }

@@ -28,7 +28,7 @@ import { type Facts, historyFacts } from "./pg-history.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { partitionedRecipe } from "./pg-partitioned.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
-import type { Held } from "./pg-validate.ts"
+import { type Held, heldStart } from "./pg-held.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
 import { outsideTransaction } from "./atlas-header.ts"
@@ -223,7 +223,7 @@ function readFile(
 		created,
 		dialect,
 		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
-		held: new Map(),
+		held: heldStart(),
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),

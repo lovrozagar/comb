@@ -196,7 +196,8 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 			: []
 	/* a partitioned index has no storage: its move changes only where its partitions' indexes go next (P19 of r19) */
 	const storageless =
-		objtype === "OBJECT_INDEX" && facts.partitionedIndexes.has(tableOf(node["relation"], facts.schema).key)
+		objtype === "OBJECT_INDEX" &&
+		facts.partitioned.has(facts.indexes.get(tableOf(node["relation"], facts.schema).key) ?? "")
 	return MOVED.has(String(objtype)) && !storageless && cmds.some((cmd) => REWRITE_COMMANDS.has(String(cmd["subtype"])))
 		? [{ level: "lock", note: REWRITES }]
 		: []

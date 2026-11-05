@@ -46,7 +46,7 @@ const emptyFacts = (schema: string): Facts => ({
 	operators: new Map(),
 	parents: new Map(),
 	partitioned: new Set(),
-	partitionedIndexes: new Map(),
+	indexes: new Map(),
 	reads: new Map(),
 	routines: new Map(),
 	schema,
@@ -103,8 +103,8 @@ type Facts = {
 	defaultPartitions: Map<string, string>
 	/** each partitioned table, by key (P18 of r19) */
 	partitioned: Set<string>
-	/** each index on a partitioned table, which has no storage of its own, with its table (P19 of r19) */
-	partitionedIndexes: Map<string, string>
+	/** each index the history names, with its table: one on a partitioned table has no storage of its own (P19 of r19) */
+	indexes: Map<string, string>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
 	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */

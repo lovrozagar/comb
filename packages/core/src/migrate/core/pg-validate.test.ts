@@ -25,7 +25,7 @@ const HISTORY = [
 const rate = (sql: string) =>
 	classifyMigration(sql, { before: extractSchema(HISTORY, undefined, "postgres"), dialect: "postgres" })
 
-const HELD = "the ADD's lock is held through this scan; validate in a later file"
+const HELD = "those locks last to the file's COMMIT; validate in a later file"
 
 const CHECK_ADD = "ALTER TABLE users ADD CONSTRAINT pos CHECK (n > 0) NOT VALID;"
 const CHECK_VALIDATE = "ALTER TABLE users VALIDATE CONSTRAINT pos;"
