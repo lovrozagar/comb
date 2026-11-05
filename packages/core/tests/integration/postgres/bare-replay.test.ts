@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { pgCheck, T, tempDir } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
-import { dropRoles, LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
+import { asRole, dropRoles, LOOPBACK, query, roleOf, testRoles, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply, devUrl, dir, files, options } = pgCheck()
 
@@ -166,6 +166,29 @@ describe("another session's change is its own (P2; sibling: two checks on one se
 			expect(await Promise.all(both)).toEqual([undefined, undefined])
 		} finally {
 			rmSync(dirs[1] as string, { force: true, recursive: true })
+		}
+	}, 60_000)
+})
+
+/** A txmode none file whose committing DO runs `change` bare */
+const bare = (change: string) => `${NONE}DO $$ BEGIN COMMIT; EXECUTE '${change}'; END $$;\n`
+
+/* AE6 of r22: a bare committing DO's change to a role or setting it names by keyword, which the read must resolve */
+describe("a bare change to a row the file names by keyword is the file's (AE6; sibling: P2's spelled names)", () => {
+	it("refuses ALTER ROLE CURRENT_USER SET under a CREATEDB devUrl, naming the setting devUrl's server keeps", async () => {
+		const [role] = testRoles("comb_t_kw")
+		/* DROP ROLE, which testRoles runs as the test ends, takes the role's settings with it */
+		const dev = await asRole(pgUrl(), role, "CREATEDB")
+		const { refused } = await checked(T, bare("ALTER ROLE CURRENT_USER SET work_mem = ''9MB''"), dev)
+		expect(refused).toContain(`devUrl's server keeps setting every database for ${role} added`)
+	}, 60_000)
+
+	it("refuses ALTER ROLE ALL SET, naming the setting every role keeps", async () => {
+		try {
+			const { refused } = await checked(T, bare("ALTER ROLE ALL SET comb_t.probe = ''leaked''"))
+			expect(refused).toContain("devUrl's server keeps setting every database for every role ")
+		} finally {
+			await query(pgUrl(), "ALTER ROLE ALL RESET comb_t.probe")
 		}
 	}, 60_000)
 })
