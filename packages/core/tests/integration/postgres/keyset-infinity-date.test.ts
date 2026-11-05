@@ -8,9 +8,11 @@
  */
 import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { date, integer, pgTable, timestamp } from "drizzle-orm/pg-core"
+import { date, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
+import { createCursor } from "../../../src/query/cursor-mint.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
+import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
@@ -239,3 +241,43 @@ describe.each(MINTS)(
 		})
 	},
 )
+
+/*
+ * AB4-5 of area B, 8a0dc7cd's Postgres half: under DateStyle 'SQL, DMY' in Asia/Kolkata node-postgres
+ * reads every finite timestamptz as an Invalid Date. A cursor minted from such a row's Date alone, as
+ * createCursor mints it, binds the row's own value while the row stands, so the list resumes past it;
+ * bound from the direction's own end, every page served the first row again.
+ */
+describe("keyset pagination past a finite timestamptz read as an Invalid Date (AB4-5 of area B)", () => {
+	const sessions = usePg()
+	const kept = pgTable("kept", { id: text("id").primaryKey(), k: timestamp("k", { precision: 6, withTimezone: true }) })
+	const bySchema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 3 }, sort: ["k"] })
+
+	it("resumes past r1 from a cursor minted on its Date alone, serving r2 and r3", async () => {
+		const client = sessions.pg()
+		await client.query(`SET DateStyle = 'SQL, DMY'; SET TimeZone = 'Asia/Kolkata'`)
+		await client.query("CREATE TEMP TABLE kept (id text PRIMARY KEY, k timestamptz(6))")
+		await client.query(`INSERT INTO kept VALUES ('r0', '2024-01-01 00:00:00+00'), ('r1', '2024-01-01 02:00:00+00'),
+			('r2', '2024-01-01 04:00:00+00'), ('r3', '2024-01-01 06:00:00+00')`)
+		const db = drizzle({ client, relations: defineRelations({ kept }) })
+		const read = await db.select().from(kept)
+		expect(read.every((row) => Number.isNaN(row.k?.getTime()))).toBe(true)
+		const anchor = read.find((row) => row.id === "r1") as (typeof read)[number]
+		const parsed = bySchema.parse({ order: "k.asc" })
+		/* one table-list page from `cursor`: its ids and its next cursor */
+		const pageOf = async (cursor: string): Promise<[string[], string | null]> => {
+			const list = buildListQuery({ ...SEALED, parsed: { ...parsed, cursor }, table: kept })
+			const rows = await applyListQuery((extras) => db.select({ id: kept.id, k: kept.k, ...extras }).from(kept), list)
+			const [items, meta] = queryHelpers.paginate(rows, list)
+			return [items.map((row) => row.id), meta.nextCursor]
+		}
+		let cursor: string | null = createCursor({ ...anchor, _combId: anchor.id }, parsed.parsedSort, SEALED)
+		const seen: string[] = []
+		for (let page = 0; cursor !== null && page < 8; page++) {
+			const [ids, next]: [string[], string | null] = await pageOf(cursor)
+			seen.push(...ids)
+			cursor = next
+		}
+		expect(seen).toEqual(["r2", "r3"])
+	})
+})
