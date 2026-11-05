@@ -192,6 +192,34 @@ function brokenElsewhereCases(): ScopeCase[] {
 	}))
 }
 
+/* the closure's clauses no other case reaches (AC2-5 of area C round 2): a trigger on a table a cascade reaches,
+   which writes a table the file never names, and a view a view or a trigger reads */
+function closureCases(): ScopeCase[] {
+	const p = "CREATE TABLE p (id INTEGER PRIMARY KEY);"
+	const views = "CREATE TABLE base (id INTEGER PRIMARY KEY, a TEXT);\nCREATE VIEW v1 AS SELECT id, a FROM base;"
+	return [
+		[
+			"a cascade fires a trigger on the child",
+			`${p}\nCREATE TABLE c (id INTEGER PRIMARY KEY, p INTEGER NOT NULL REFERENCES p (id) ON DELETE CASCADE);\nCREATE TABLE w (id INTEGER PRIMARY KEY, a TEXT);\nCREATE TRIGGER c_del AFTER DELETE ON c BEGIN DELETE FROM w; END;`,
+			"DELETE FROM p WHERE id > 0;",
+		],
+		[
+			"a view over a view",
+			`${views}\nCREATE VIEW v2 AS SELECT a FROM v1;\nCREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);`,
+			"INSERT INTO t (a) SELECT a FROM v2;",
+		],
+		[
+			"a trigger that reads a view",
+			`${views}\nCREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);\nCREATE TABLE logt (n INTEGER);\nCREATE TRIGGER t_ins AFTER INSERT ON t BEGIN INSERT INTO logt SELECT count(*) FROM v1; END;`,
+			"INSERT INTO t (a) VALUES ('x');",
+		],
+	].map(([label, schema, file]) => ({
+		file: file as string,
+		label: `closure: ${label as string}`,
+		schema: schema as string,
+	}))
+}
+
 /** Every case of the corpus */
 export function scopeCorpus(): ScopeCase[] {
 	return [
@@ -200,6 +228,7 @@ export function scopeCorpus(): ScopeCase[] {
 		...ftsCases(),
 		...viewTriggerCases(),
 		...brokenElsewhereCases(),
+		...closureCases(),
 		...shapes().map((file) => ({ file, label: `shape: ${file}`, schema: SHAPES_SCHEMA })),
 	]
 }
