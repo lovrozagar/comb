@@ -9,7 +9,17 @@
  * RENAME, SET SCHEMA and DROP, and a constraint's RENAME.
  */
 import { builtinFinding } from "./pg-builtins.ts"
-import { type Domain, type Facts, keyOf, names, type Node, nodesOf, typeOf } from "./pg-nodes.ts"
+import {
+	columnTypeOf,
+	type ColumnType,
+	type Domain,
+	type Facts,
+	keyOf,
+	names,
+	type Node,
+	nodesOf,
+	typeOf,
+} from "./pg-nodes.ts"
 
 /**
  * The first function an expression calls whose finding is unsafe, by name: code a write runs that
@@ -46,7 +56,16 @@ function chainOf(type: string, facts: Facts): Domain[] {
 function domainOf(
 	type: string,
 	facts: Facts,
-): { checked: boolean; constrained: boolean; fill: unknown; notNull: boolean; runs: string | undefined } | undefined {
+):
+	| {
+			checked: boolean
+			constrained: boolean
+			fill: unknown
+			notNull: boolean
+			over: ColumnType
+			runs: string | undefined
+	  }
+	| undefined {
 	const chain = chainOf(type, facts)
 	if (chain.length === 0) return undefined
 	const constraints = chain.flatMap((domain) => [...domain.constraints.values()])
@@ -55,6 +74,7 @@ function domainOf(
 		constrained: constraints.length > 0,
 		fill: (chain[0] as Domain).fill,
 		notNull: constraints.some((constraint) => constraint.kind === "notnull"),
+		over: (chain[0] as Domain).over,
 		runs: constraints.find((constraint) => constraint.runs !== undefined)?.runs,
 	}
 }
@@ -91,10 +111,13 @@ function followCreate(node: Node, facts: Facts): void {
 	const base = typeOf(node["typeName"], facts.schema)
 	const over = facts.domains.get(base)
 	const constraints = ((node["constraints"] as Node[] | undefined) ?? []).map((each) => each["Constraint"] as Node)
+	const own = columnTypeOf(node, facts.schema)
 	const domain: Domain = {
 		base: over === undefined ? undefined : base,
 		constraints: new Map(),
 		fill: constraints.find((constraint) => constraint["contype"] === "CONSTR_DEFAULT")?.["raw_expr"] ?? over?.fill,
+		/* an array of a domain keeps the domain as its element, as Postgres does */
+		over: over === undefined || own.dims > 0 ? own : { ...over.over, collation: own.collation ?? over.over.collation },
 	}
 	for (const constraint of constraints) constrain({ domain, key }, constraint, facts)
 	facts.domains.set(key, domain)
@@ -133,7 +156,10 @@ function moveDomain(facts: Facts, from: string, to: string): void {
 	if (domain === undefined) return
 	facts.domains.delete(from)
 	facts.domains.set(to, domain)
-	for (const each of facts.domains.values()) if (each.base === from) each.base = to
+	for (const each of facts.domains.values()) {
+		if (each.base === from) each.base = to
+		if (each.over.type === from) each.over = { ...each.over, type: to }
+	}
 	for (const columns of facts.columnTypes.values())
 		for (const [name, column] of columns) if (column.type === from) columns.set(name, { ...column, type: to })
 }
@@ -145,6 +171,7 @@ function moveDomain(facts: Facts, from: string, to: string): void {
 function moveDomains(facts: Facts, move: (key: string) => string): void {
 	for (const domain of facts.domains.values()) {
 		if (domain.base !== undefined) domain.base = move(domain.base)
+		domain.over = { ...domain.over, type: move(domain.over.type) }
 		for (const constraint of domain.constraints.values())
 			if (constraint.runs !== undefined) constraint.runs = move(constraint.runs)
 	}

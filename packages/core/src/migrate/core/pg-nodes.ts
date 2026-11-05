@@ -15,11 +15,15 @@ type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefine
  * A domain the history leaves (P3, P10 of r19): the domain it is over, if any; its default, its own
  * or, as CREATE DOMAIN copies it, its base's; and its constraints by the name Postgres gives them, a
  * CHECK with the function it calls. A base's constraints apply to it too, read through `base`.
+ * `over` is the type its values have, read through each domain under it as Postgres flattens it
+ * (PA11 of r22b): the innermost base's type, modifiers and dimensions, and its own collation, else
+ * its base's.
  */
 type Domain = {
 	base: string | undefined
 	constraints: Map<string, { kind: "check" | "notnull"; runs: string | undefined }>
 	fill: unknown
+	over: ColumnType
 }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
@@ -69,14 +73,15 @@ type ColumnType = { collation: string | undefined; dims: number; mods: readonly 
 const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean =>
 	[...columns.values()].some((column) => column.type === type)
 
-/** A type name's modifiers, the integers it is written with: varchar(20) has [20], numeric(12, 2) [12, 2] */
+/**
+ * A type name's modifiers, the integers it is written with: varchar(20) has [20], numeric(12, 2)
+ * [12, 2]; libpg-query writes a 0 as an ival with no value, and any other modifier reads as NaN
+ */
 const modsOf = (typeName: unknown): number[] =>
-	(((typeName as Node)["typmods"] as Node[] | undefined) ?? []).map((mod) =>
-		Number(
-			(((mod["A_Const"] as Node | undefined)?.["ival"] as Node | undefined)?.["ival"] as number | undefined) ??
-				Number.NaN,
-		),
-	)
+	(((typeName as Node)["typmods"] as Node[] | undefined) ?? []).map((mod) => {
+		const ival = (mod["A_Const"] as Node | undefined)?.["ival"] as Node | undefined
+		return ival === undefined ? Number.NaN : Number((ival["ival"] as number | undefined) ?? 0)
+	})
 
 /** A routine's volatility, as its CREATE or an ALTER FUNCTION declares it */
 type Volatility = "immutable" | "stable" | "volatile"

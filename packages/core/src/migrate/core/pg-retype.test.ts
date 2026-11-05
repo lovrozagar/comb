@@ -8,7 +8,7 @@ import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 
 const HISTORY =
-	"CREATE TABLE t (id int, name varchar(10), code varchar, body text, amount numeric(10, 2), flags varbit(5), n numeric); CREATE TABLE g (p geometry(Point, 4326));"
+	"CREATE TABLE t (id int, name varchar(10), code varchar, body text, amount numeric(10, 2), whole numeric(10), flags varbit(5), n numeric); CREATE TABLE g (p geometry(Point, 4326));"
 
 /** `later`'s rating after HISTORY and `more`, all read as Postgres */
 function rate(later: string, more = "") {
@@ -25,6 +25,8 @@ describe("a retype that only widens", () => {
 		"ALTER TABLE t ALTER COLUMN code TYPE text;",
 		"ALTER TABLE t ALTER COLUMN amount TYPE numeric(12, 2);",
 		"ALTER TABLE t ALTER COLUMN amount TYPE numeric;",
+		"ALTER TABLE t ALTER COLUMN whole TYPE numeric(12);",
+		"ALTER TABLE t ALTER COLUMN whole TYPE numeric(12, 0);",
 		"ALTER TABLE t ALTER COLUMN flags TYPE varbit(8);",
 		"ALTER TABLE t ALTER COLUMN flags SET DATA TYPE varbit;",
 	])("rates %j safe, with no lock warning", (later) => {
@@ -47,6 +49,8 @@ describe("a retype that may change a value or rewrite the table", () => {
 		["a numeric of another scale", "ALTER TABLE t ALTER COLUMN amount TYPE numeric(12, 3);"],
 		["a smaller numeric precision", "ALTER TABLE t ALTER COLUMN amount TYPE numeric(8, 2);"],
 		["an unbounded numeric bounded", "ALTER TABLE t ALTER COLUMN n TYPE numeric(10, 2);"],
+		["a numeric scale dropped", "ALTER TABLE t ALTER COLUMN amount TYPE numeric(12);"],
+		["an unbounded varchar bounded", "ALTER TABLE t ALTER COLUMN code TYPE varchar(20);"],
 		["int to bigint", "ALTER TABLE t ALTER COLUMN id TYPE bigint;"],
 		["a column the history does not know", "ALTER TABLE t ALTER COLUMN ghost TYPE text;"],
 		["a table the history does not know", "ALTER TABLE u ALTER COLUMN name TYPE text;"],
@@ -59,20 +63,31 @@ describe("a retype that may change a value or rewrite the table", () => {
 	})
 })
 
-/* r18 P1: Postgres rewrites an array retype, and an array to a scalar changes what the column holds */
+/*
+ * r18 P1: an array to a scalar changes what the column holds, and an element retyped rewrites; PA11
+ * of r22b: an array of the same element and modifier is done in place, of any dimensions
+ */
 describe("a retype on either side of an array", () => {
 	const ARRAYS = "CREATE TABLE a (tags varchar(10)[], grid int[][], label varchar(10));"
 	it.each([
 		"ALTER TABLE a ALTER COLUMN tags TYPE text;",
 		"ALTER TABLE a ALTER COLUMN tags TYPE varchar(20)[];",
 		"ALTER TABLE a ALTER COLUMN tags TYPE text[];",
-		"ALTER TABLE a ALTER COLUMN tags TYPE varchar(10)[];",
 		"ALTER TABLE a ALTER COLUMN label TYPE varchar(20)[];",
 		"ALTER TABLE a ALTER COLUMN label TYPE text ARRAY;",
 		"ALTER TABLE a ALTER COLUMN grid TYPE bigint[][];",
 	])("rates %j unsafe, with the rewrite warning", (later) => {
 		const rated = rate(later, ARRAYS)
 		expect([rated.safety, rated.lockWarnings.length]).toEqual(["unsafe", 1])
+	})
+
+	it.each([
+		"ALTER TABLE a ALTER COLUMN tags TYPE varchar(10)[];",
+		"ALTER TABLE a ALTER COLUMN tags TYPE varchar[][];",
+		"ALTER TABLE a ALTER COLUMN grid TYPE int[];",
+	])("rates %j safe, as each element keeps its value", (later) => {
+		const rated = rate(later, ARRAYS)
+		expect([rated.safety, rated.lockWarnings]).toEqual(["safe", []])
 	})
 
 	it("reads an array column's type as recorded after a rename", () => {
@@ -108,5 +123,91 @@ describe("a widening retype and the column's collation", () => {
 	it("reads the collation an earlier retype left", () => {
 		const more = `${COLLATED} ALTER TABLE c ALTER COLUMN plain TYPE varchar(10) COLLATE "C";`
 		expect(rate('ALTER TABLE c ALTER COLUMN plain TYPE varchar(30) COLLATE "C";', more).safety).toBe("safe")
+	})
+})
+
+/* PA11 of r22b: the retypes Postgres 17 does in place beyond a widening, and what still rewrites */
+/* TIMESTAMP(n) in capitals: no Date key, so the off-UTC pass (tests/support/off-utc.ts) skips the file */
+const MORE = [
+	"CREATE DOMAIN plain AS int; CREATE DOMAIN checked AS int CHECK (VALUE > 0); CREATE DOMAIN over AS plain;",
+	"CREATE DOMAIN short AS varchar(10); CREATE DOMAIN arr AS int[];",
+	"CREATE TABLE m (i int, ch char(5), x xml, net cidr, ts TIMESTAMP(3), t0 TIMESTAMP(0), tm time(2), ivd interval day,",
+	"iv interval(2), ivf interval, d plain, s short, a int[], da arr, ib int);",
+	"CREATE INDEX ON m (ib);",
+].join(" ")
+
+describe("a retype by a coercion that changes no value", () => {
+	it.each([
+		"ALTER TABLE m ALTER COLUMN i TYPE integer;",
+		"ALTER TABLE m ALTER COLUMN ch TYPE bpchar;",
+		"ALTER TABLE m ALTER COLUMN x TYPE text;",
+		"ALTER TABLE m ALTER COLUMN net TYPE inet;",
+		"ALTER TABLE m ALTER COLUMN i TYPE plain;",
+		"ALTER TABLE m ALTER COLUMN i TYPE over;",
+		"ALTER TABLE m ALTER COLUMN d TYPE int;",
+		"ALTER TABLE m ALTER COLUMN s TYPE text;",
+		"ALTER TABLE m ALTER COLUMN ts TYPE TIMESTAMP(6);",
+		"ALTER TABLE m ALTER COLUMN ts TYPE TIMESTAMP(4);",
+		"ALTER TABLE m ALTER COLUMN t0 TYPE TIMESTAMP(0);",
+		"ALTER TABLE m ALTER COLUMN t0 TYPE TIMESTAMP(3);",
+		"ALTER TABLE m ALTER COLUMN tm TYPE time(6);",
+		"ALTER TABLE m ALTER COLUMN ivd TYPE interval hour;",
+		"ALTER TABLE m ALTER COLUMN ivd TYPE interval day to second(0);",
+		"ALTER TABLE m ALTER COLUMN iv TYPE interval(4);",
+		"ALTER TABLE m ALTER COLUMN iv TYPE interval second(2);",
+		"ALTER TABLE m ALTER COLUMN ivf TYPE interval second;",
+	])("rates %j safe, with no lock warning", (later) => {
+		const rated = rate(later, MORE)
+		expect([rated.safety, rated.lockWarnings]).toEqual(["safe", []])
+	})
+
+	it.each([
+		"ALTER TABLE m ALTER COLUMN ch TYPE char(8);",
+		"ALTER TABLE t ALTER COLUMN body TYPE char(5);",
+		"ALTER TABLE m ALTER COLUMN i TYPE checked;",
+		"ALTER TABLE m ALTER COLUMN s TYPE varchar(20);",
+		"ALTER TABLE m ALTER COLUMN ts TYPE TIMESTAMP(2);",
+		"ALTER TABLE m ALTER COLUMN tm TYPE time(1);",
+		"ALTER TABLE m ALTER COLUMN ivd TYPE interval month;",
+		"ALTER TABLE m ALTER COLUMN iv TYPE interval(1);",
+		"ALTER TABLE m ALTER COLUMN ivf TYPE interval(3);",
+		"ALTER TABLE m ALTER COLUMN iv TYPE interval hour to minute;",
+		"ALTER TABLE m ALTER COLUMN a TYPE plain[];",
+	])("rates %j unsafe, with the rewrite warning", (later) => {
+		const rated = rate(later, MORE)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.lockWarnings.join(" ")).toContain("rewrites or scans the table under an exclusive lock")
+	})
+})
+
+/* PA11 of r22b: a retype that keeps every value can still rebuild the column's indexes */
+describe("a retype by a coercion that rebuilds the column's indexes", () => {
+	it.each([
+		"ALTER TABLE m ALTER COLUMN ib TYPE oid;",
+		"ALTER TABLE t ALTER COLUMN body TYPE bpchar;",
+		"ALTER TABLE m ALTER COLUMN a TYPE arr;",
+		"ALTER TABLE m ALTER COLUMN da TYPE int[];",
+	])("rates %j unsafe, warning that the column's indexes are rebuilt", (later) => {
+		const rated = rate(later, MORE)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.lockWarnings.join("\n")).toContain("rebuilds every index on the column")
+	})
+
+	/* the rebuild shows the element followed: an element read under its old name would rewrite */
+	it.each([
+		[
+			"a domain renamed",
+			"ALTER TABLE m ADD COLUMN pa plain[]; CREATE DOMAIN plains AS plain[]; ALTER DOMAIN plain RENAME TO whole;",
+			"plains",
+		],
+		[
+			"its schema renamed",
+			"CREATE SCHEMA k; CREATE DOMAIN k.e AS int; CREATE DOMAIN k.es AS k.e[]; ALTER TABLE m ADD COLUMN pa k.e[]; ALTER SCHEMA k RENAME TO j;",
+			"j.es",
+		],
+	])("follows an array domain's element through %s", (_, more, type) => {
+		const history = `${MORE} ${more}`
+		const rated = rate(`ALTER TABLE m ALTER COLUMN pa TYPE ${type};`, history)
+		expect(rated.lockWarnings.join("\n")).toContain("rebuilds every index on the column")
 	})
 })
