@@ -20,6 +20,16 @@ describe("reportsOf", () => {
 		const code = "// far\nlet x = 1\n// near\ndebugger // tail\nx = 2 // later\n"
 		expect(reportsOf(commentRule, { "a.ts": code }).map((r) => r.message)).toEqual(["before:near", "after:tail"])
 	})
+
+	it("hands a rule its options, and none when given none", () => {
+		const optionsRule = {
+			create: (context: { options: unknown[]; report(descriptor: { message: string; node: unknown }): void }) => ({
+				Program: (node: never) => context.report({ message: JSON.stringify(context.options), node }),
+			}),
+		}
+		expect(reportsOf(optionsRule, { "a.ts": "" }, { options: [{ a: 1 }] })[0]?.message).toBe('[{"a":1}]')
+		expect(reportsOf(optionsRule, { "a.ts": "" })[0]?.message).toBe("[]")
+	})
 })
 
 describe("oxlintReports", () => {

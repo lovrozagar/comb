@@ -15,6 +15,7 @@ type Comment = { end: number; start: number; type: string; value: string }
 type Node = { end: number; parent?: Node | null; start: number; type: string }
 type Context = {
 	filename: string
+	options: unknown[]
 	report(descriptor: { message: string; node: unknown }): void
 	sourceCode: {
 		getAllComments(): Comment[]
@@ -65,8 +66,11 @@ function walk(node: unknown, parent: Node | null, visitors: Visitors): void {
 	}
 }
 
+/** How a rule runs: the options its config gives it, and the folder the fixture's paths are relative to. */
+export type RunAs = { options?: unknown[] | undefined; repo?: string | undefined }
+
 /** Runs `rule` in process over every fixture file, the way oxlint hands it each file, as if `repo` held them. */
-export function reportsOf(rule: Rule, fixture: Fixture, repo = "/repo"): Report[] {
+export function reportsOf(rule: Rule, fixture: Fixture, { options = [], repo = "/repo" }: RunAs = {}): Report[] {
 	const reports: Report[] = []
 	for (const [file, code] of Object.entries(fixture)) {
 		const filename = `${repo}/${file}`
@@ -74,6 +78,7 @@ export function reportsOf(rule: Rule, fixture: Fixture, repo = "/repo"): Report[
 		const comments = parsed.comments as Comment[]
 		const visitors = rule.create({
 			filename,
+			options,
 			report: ({ message }) => reports.push({ file, message }),
 			sourceCode: {
 				getAllComments: () => comments,
@@ -88,14 +93,14 @@ export function reportsOf(rule: Rule, fixture: Fixture, repo = "/repo"): Report[
 }
 
 /** Writes the fixture to a temp repo and runs `rule` over it in process, so a rule that reads other files from disk finds them */
-export function reportsOnDisk(rule: Rule, fixture: Fixture): Report[] {
+export function reportsOnDisk(rule: Rule, fixture: Fixture, options: unknown[] = []): Report[] {
 	const repo = mkdtempSync(join(tmpdir(), "comb-rule-"))
 	try {
 		for (const [file, code] of Object.entries(fixture)) {
 			mkdirSync(dirname(join(repo, file)), { recursive: true })
 			writeFileSync(join(repo, file), code)
 		}
-		return reportsOf(rule, fixture, repo)
+		return reportsOf(rule, fixture, { options, repo })
 	} finally {
 		rmSync(repo, { force: true, recursive: true })
 	}
@@ -128,8 +133,8 @@ export function oxlintJson(
 	}
 }
 
-/** Runs the real oxlint binary with the comb plugin and only `comb/<name>` on, over the fixture. */
-export function oxlintReports(name: string, fixture: Fixture): Report[] {
+/** Runs the real oxlint binary with the comb plugin and only `comb/<name>` on, with `options`, over the fixture. */
+export function oxlintReports(name: string, fixture: Fixture, options: unknown[] = []): Report[] {
 	const dir = mkdtempSync(join(tmpdir(), "comb-lint-"))
 	try {
 		/* oxlint applies a checkout's .gitignore even with --no-ignore, so a fixture inside one lints nothing */
@@ -138,7 +143,7 @@ export function oxlintReports(name: string, fixture: Fixture): Report[] {
 			categories: { correctness: "off", suspicious: "off" },
 			jsPlugins: [{ name: "comb", specifier: PLUGIN }],
 			plugins: [],
-			rules: { [`comb/${name}`]: "error" },
+			rules: { [`comb/${name}`]: ["error", ...options] },
 		}
 		writeFileSync(join(dir, ".oxlintrc.json"), JSON.stringify(config))
 		for (const [file, code] of Object.entries(fixture)) {

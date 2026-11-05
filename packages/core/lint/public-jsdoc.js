@@ -226,11 +226,19 @@ function signedNames(program) {
 	return signed
 }
 
+/* `entries` names the `exports` keys whose surface is checked, so an entry stays clean once its docs are written
+ * while the others are; with none, every entry is */
+const OPTIONS = {
+	additionalProperties: false,
+	properties: { entries: { items: { type: "string" }, type: "array" } },
+	type: "object",
+}
+
 export const rule = {
 	create(context) {
 		const root = findPackageRoot(context.filename)
 		if (root === null) return {}
-		const surface = publicSurface(root)
+		const surface = publicSurface(root, context.options[0]?.entries ?? null)
 		return {
 			Program(program) {
 				for (const { file, form } of surface.unknown) {
@@ -249,4 +257,5 @@ export const rule = {
 			},
 		}
 	},
+	meta: { schema: [OPTIONS] },
 }

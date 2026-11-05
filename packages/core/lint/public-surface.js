@@ -221,11 +221,12 @@ function publishEntry(walk, root, source) {
 	else publishModule(walk, file)
 }
 
-function readSurface(root) {
+function readSurface(root, entries) {
 	const graph = { failed: new Set(), modules: new Map(), names: new Map(), published: new Set(), unknown: [] }
 	for (const [key, value] of Object.entries(readManifest(root).exports)) {
 		const source = sourceOf(value)
-		if (source !== null) publishEntry({ entryKey: key, graph }, root, source)
+		if (source !== null && (entries === null || entries.includes(key)))
+			publishEntry({ entryKey: key, graph }, root, source)
 	}
 	return { names: graph.names, unknown: graph.unknown }
 }
@@ -234,10 +235,14 @@ function readSurface(root) {
 const SURFACES = new Map()
 
 /**
- * The declarations `root` exposes, by file, each with the first entry that reaches it, and what could not be read.
+ * The declarations `root` exposes through `entries` (every entry when null), by file, each with the first of them that
+ * reaches it, and what could not be read.
+ * @param {string} root
+ * @param {string[] | null} [entries]
  * @returns {{ names: Map<string, Map<string, string>>, unknown: Array<{ file: string, form: string, line: number }> }}
  */
-export function publicSurface(root) {
-	if (!SURFACES.has(root)) SURFACES.set(root, readSurface(root))
-	return SURFACES.get(root)
+export function publicSurface(root, entries = null) {
+	const key = `${root}\0${entries === null ? "*" : JSON.stringify(entries)}`
+	if (!SURFACES.has(key)) SURFACES.set(key, readSurface(root, entries))
+	return SURFACES.get(key)
 }

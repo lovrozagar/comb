@@ -367,3 +367,34 @@ describe("comb/public-jsdoc: failing closed", () => {
 		expect(reports({ "package.json": MANIFEST, ...files })).toEqual([{ file, message }])
 	})
 })
+
+describe("comb/public-jsdoc: the entries it checks", () => {
+	const TWO = JSON.stringify({
+		exports: {
+			".": { "types@>=5.7": "./types/index.d.ts", default: "./src/index.ts" },
+			"./b": { "types@>=5.7": "./types/b.d.ts", default: "./src/b.ts" },
+		},
+	})
+	const fixture = {
+		"package.json": TWO,
+		"src/b.ts": 'export function b(): void {}\nexport { shared } from "./shared.ts"\n',
+		"src/index.ts": 'export function a(): void {}\nexport { shared } from "./shared.ts"\n',
+		"src/shared.ts": "export function shared(): void {}\n",
+	}
+	const only = [{ entries: ["./b"] }]
+
+	it("checks only the listed entries, and a name another entry also reaches through them", () => {
+		expect(reportsOnDisk(rule, fixture, only)).toEqual([
+			{ file: "src/b.ts", message: missing("b", "./b") },
+			{ file: "src/shared.ts", message: missing("shared", "./b") },
+		])
+	})
+
+	it("checks every entry with no list", () => {
+		expect(reportsOnDisk(rule, fixture).map(({ file }) => file)).toEqual(["src/b.ts", "src/index.ts", "src/shared.ts"])
+	})
+
+	it("takes the list through oxlint", () => {
+		expect(oxlintReports("public-jsdoc", fixture, only).map(({ file }) => file)).toEqual(["src/b.ts", "src/shared.ts"])
+	})
+})
