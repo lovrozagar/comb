@@ -104,6 +104,23 @@ describe("createBunSqliteProvider read-only, and the proof run's memory database
 		}
 	})
 
+	/* CI on 84332342: the lock probe (local-db.ts writeLocked) opens a file that is there, read-write, creating none */
+	it("opens an existing file read-write when asked not to create one", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-bun-vitest-"))
+		try {
+			const path = join(dir, "core.db")
+			const open = await bunLocal()
+			open(path).close()
+			const db = open(path, false)
+			db.exec("CREATE TABLE t (a)")
+			db.run("INSERT INTO t VALUES (1)")
+			expect(db.all("SELECT a FROM t")).toEqual([{ a: 1 }])
+			db.close()
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
 	it("opens a private database that runs statements and reads rows", async () => {
 		const db = (await bunLocal())(":memory:")
 		db.exec("CREATE TABLE t (a TEXT)")
