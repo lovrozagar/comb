@@ -120,6 +120,20 @@ describe("a widening retype and the column's collation", () => {
 		expect([rated.safety, rated.lockWarnings]).toEqual(["safe", []])
 	})
 
+	/* PA18 of r22b: Postgres keeps a text column's values and rebuilds its indexes; sibling: the varchar widening above */
+	it.each([
+		["CREATE TABLE c (email text);", 'ALTER TABLE c ALTER COLUMN email TYPE text COLLATE "C";'],
+		['CREATE TABLE c (email text COLLATE "C");', "ALTER TABLE c ALTER COLUMN email TYPE text;"],
+		["CREATE TABLE c (code varchar(10));", 'ALTER TABLE c ALTER COLUMN code TYPE varchar(10) COLLATE "C";'],
+	])(
+		"rates a change of collation alone, %j then %j, as one that rebuilds the indexes, not a rewrite",
+		(made, later) => {
+			const rated = rate(later, made)
+			expect(rated.safety).toBe("unsafe")
+			expect(rated.lockWarnings).toEqual([expect.stringContaining("rebuilds every index on the column")])
+		},
+	)
+
 	it("reads the collation an earlier retype left", () => {
 		const more = `${COLLATED} ALTER TABLE c ALTER COLUMN plain TYPE varchar(10) COLLATE "C";`
 		expect(rate('ALTER TABLE c ALTER COLUMN plain TYPE varchar(30) COLLATE "C";', more).safety).toBe("safe")
