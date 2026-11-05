@@ -44,8 +44,9 @@ const familyOf = (column: SQLWrapper): SQL =>
 
 /**
  * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
- * time: Postgres's own text of a timestamp, timestamptz or date, which it reads back as that type
- * (a column in string mode reads as that text already); a SQLite timestamp's stored seconds or
+ * time: a Postgres timestamp, timestamptz or date as to_json writes it, ISO 8601 with a numeric offset
+ * in every DateStyle, which it reads back as that type in any session (a column in string mode reads
+ * as its text already); a SQLite timestamp's stored seconds or
  * milliseconds at 17 significant digits, which a double reads back exactly, where a Date keeps whole
  * milliseconds; a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2).
  * A SQLite timestamp holding TEXT, which drizzle reads as a Date and SQLite orders after every number,
@@ -62,16 +63,18 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 	}
 	if (column instanceof DateKey) return null
 	if (is(column, Column) && !carriesOpaque(column))
-		return asRead && column.dataType === "object date" ? sql`coalesce((${column})::text, '')` : null
-	const carried =
-		asRead && !carriesOpaque(column) ? sql`${isTime(column)} or ${roundsOnRead(column)}` : roundsOnRead(column)
-	return sql`coalesce(case when ${carried} then (${column})::text end, '')`
+		return asRead && column.dataType === "object date" ? sql`coalesce(${isoText(column)}, '')` : null
+	const time = asRead && !carriesOpaque(column) ? sql` when ${isTime(column)} then ${isoText(column)}` : sql``
+	return sql`coalesce(case when ${roundsOnRead(column)} then (${column})::text${time} end, '')`
 }
+
+/* B2-7 of area B: a time's ::text follows DateStyle, whose zone abbreviation (IST, PST) reads back as another zone */
+const isoText = (column: SQLWrapper): SQL => sql`(to_json(${column}) #>> '{}')`
 
 /**
  * Whether a Postgres expression's type is a number no driver reads exactly: a numeric or a domain over
  * one (QL3 of r22b). No other type carries its text, so none holds the comma keyTextsSQL joins on (AB1
- * of area B): a numeric's is digits, a sign, a point, NaN or Infinity; a time's is ISO in every DateStyle
+ * of area B): a numeric's is digits, a sign, a point, NaN or Infinity; a time's is to_json's ISO 8601
  */
 const roundsOnRead = (column: SQLWrapper): SQL =>
 	sql`(pg_typeof(${column}) = 'numeric'::regtype or ${isDomainOver(column, sql`'numeric'::regtype`)})`

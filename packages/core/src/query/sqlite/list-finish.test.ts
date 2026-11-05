@@ -169,7 +169,7 @@ describe("finish's key families and stored times on Postgres (QL1, QL2 of r22b; 
 		/* beside a time, only a numeric or a domain over one is carried (AB1 of area B) */
 		const OVER_NUMERIC = `(pg_typeof("pg_ev"."at")::oid >= 16384 and pg_typeof("pg_ev"."at")::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('numeric'::regtype))))`
 		expect(times["_combKeyTexts"]).toBe(
-			`coalesce(("pg_ev"."at")::text, '') || ',' || coalesce(case when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) or (pg_typeof("pg_ev"."at") = 'numeric'::regtype or ${OVER_NUMERIC}) then ("pg_ev"."at")::text end, '') || ',' || '' || ',' || ''`,
+			`coalesce((to_json("pg_ev"."at") #>> '{}'), '') || ',' || coalesce(case when (pg_typeof("pg_ev"."at") = 'numeric'::regtype or ${OVER_NUMERIC}) then ("pg_ev"."at")::text when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) then (to_json("pg_ev"."at") #>> '{}') end, '') || ',' || '' || ',' || ''`,
 		)
 		expect(extrasOf("postgres", [{ column: pgEv.label, direction: "asc" }])).not.toHaveProperty("_combKeyTexts")
 		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv as never })).toEqual({

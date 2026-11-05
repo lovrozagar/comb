@@ -161,9 +161,9 @@ const storesText = (field: string): CombError =>
  */
 function storedText(value: unknown, stored: KeyClass | undefined, carried: string | undefined): unknown {
 	if (carried === undefined || carried === "") return value
-	if (typeof value === "number") return carried
-	if (!(value instanceof Date)) return value
-	return stored === "time" ? carried : Number(carried)
+	/* B2-7 of area B: node-postgres reads a time no DateStyle but ISO writes as null, which its stored text replaces */
+	if (stored === "time" || typeof value === "number") return carried
+	return value instanceof Date ? Number(carried) : value
 }
 
 /**
