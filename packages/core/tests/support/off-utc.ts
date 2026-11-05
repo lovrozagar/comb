@@ -72,6 +72,8 @@ export const OFF_UTC_POSTGRES = [
 	"tests/integration/codegen/pg-types.test.ts",
 	"tests/integration/codegen/pg-typmods.test.ts",
 	"tests/integration/postgres/columns.test.ts",
+	"tests/integration/postgres/datestyle-dates.test.ts",
+	"tests/integration/postgres/datestyle-keys.test.ts",
 	"tests/integration/postgres/derived-list.test.ts",
 	"tests/integration/postgres/keyset-infinity-date.test.ts",
 	"tests/integration/postgres/keyset-nonfinite.test.ts",
