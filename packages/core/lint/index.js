@@ -7,6 +7,7 @@ import { rule as noModuleState } from "./no-module-state.js"
 import { rule as noSilentCatch } from "./no-silent-catch.js"
 import { rule as noV8Ignore } from "./no-v8-ignore.js"
 import { rule as optionalUndefined } from "./optional-undefined.js"
+import { rule as publicJsdoc } from "./public-jsdoc.js"
 import { rule as rawSqlAllowlist } from "./raw-sql-allowlist.js"
 
 export default {
@@ -20,6 +21,7 @@ export default {
 		"no-silent-catch": noSilentCatch,
 		"no-v8-ignore": noV8Ignore,
 		"optional-undefined": optionalUndefined,
+		"public-jsdoc": publicJsdoc,
 		"raw-sql-allowlist": rawSqlAllowlist,
 	},
 }

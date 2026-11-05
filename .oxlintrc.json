@@ -76,6 +76,7 @@
 				"comb/no-silent-catch": "error",
 				"comb/no-v8-ignore": "error",
 				"comb/optional-undefined": "error",
+				"comb/public-jsdoc": "off",
 				"comb/raw-sql-allowlist": "error"
 			}
 		},
