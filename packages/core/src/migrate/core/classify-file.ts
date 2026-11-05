@@ -88,6 +88,8 @@ type ReadStatement = {
 	/** on Postgres, the line, from 1, the statement starts on in its file */
 	line?: number | undefined
 	outside?: string | undefined
+	/** on Postgres, why Postgres refuses the statement in any file, with comb's route */
+	refused?: string | undefined
 	stmt: string
 	tree?: unknown
 }
@@ -152,7 +154,7 @@ function pragmaRefusal(pragma: Pragma): string | undefined {
  * overrides this
  */
 function refuseUnrunnable(
-	{ code, control, dialect, inside, outside, stmt }: ReadStatement,
+	{ code, control, dialect, inside, outside, refused, stmt }: ReadStatement,
 	sql: string,
 	kind: TargetKind = "local",
 ): void {
@@ -173,7 +175,7 @@ function refuseUnrunnable(
 			`${preview(stmt)}: comb runs each file in a transaction of its own; remove the file's BEGIN, COMMIT, END and ROLLBACK (a SAVEPOINT nests inside it)`,
 		)
 	}
-	refuseOutOfScope({ control, inside, outside, stmt }, outsideTransaction(sql))
+	refuseOutOfScope({ control, inside, outside, refused, stmt }, outsideTransaction(sql))
 }
 
 /**
@@ -181,9 +183,17 @@ function refuseUnrunnable(
  * txmode none file (`bare`), cannot hold
  */
 function refuseOutOfScope(
-	{ control, inside, outside, stmt }: Pick<ReadStatement, "control" | "inside" | "outside" | "stmt">,
+	{
+		control,
+		inside,
+		outside,
+		refused,
+		stmt,
+	}: Pick<ReadStatement, "control" | "inside" | "outside" | "refused" | "stmt">,
 	bare: boolean,
 ): void {
+	/* PA10 of r22b: what Postgres refuses on a partitioned table fails in any file */
+	if (refused !== undefined) throw new Error(`${preview(stmt)}: ${refused}`)
 	/* PA2 of r22b: Atlas records the file in its transaction, which the file's own control would end */
 	if (control !== undefined && !bare) {
 		throw new Error(

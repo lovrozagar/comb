@@ -26,6 +26,7 @@ import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts } from "./pg-history.ts"
 import { scopeReader } from "./pg-scope.ts"
+import { partitionedRecipe } from "./pg-partitioned.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import type { Held } from "./pg-validate.ts"
 import { extractSchema } from "./schema.ts"
@@ -88,7 +89,7 @@ const RENAMES_NAMED = /* @__PURE__ */ new RegExp(
 const EXPLAIN = /^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const INDEX_ON = /* @__PURE__ */ new RegExp(
-	`^CREATE (?:UNIQUE )?INDEX (?!CONCURRENTLY)(?:IF NOT EXISTS )?(?:${QNAME} )?ON (?:ONLY )?(${QNAME})`,
+	`^CREATE (?:UNIQUE )?INDEX (?!CONCURRENTLY)(?:IF NOT EXISTS )?(?:${QNAME} )?ON (ONLY )?(${QNAME})`,
 	"i",
 )
 // per-process-constant: a pattern composed from the name grammar, compiled once
@@ -104,13 +105,24 @@ function dropNames(code: string): string[] {
 	return splitTopLevel(list).map((name) => `DROP ${kind.toUpperCase()} ${unquote(name)}`)
 }
 
-/** A CREATE INDEX that blocks writes to a table this file did not create */
+/**
+ * A CREATE INDEX that blocks writes to a table this file did not create. CREATE INDEX CONCURRENTLY
+ * refuses a partitioned table, whose route is an index ON ONLY it, which builds nothing, and each
+ * partition's index built concurrently and attached to it (PA10 of r22b)
+ */
 function indexWarning(code: string, ctx: FileContext): Finding | undefined {
-	const table = INDEX_ON.exec(code)?.[1]
+	const [, only, table] = INDEX_ON.exec(code) ?? []
 	if (table === undefined || ctx.created.has(nameKey(table, ctx.naming))) return undefined
+	const name = unquote(table)
+	if (!ctx.facts.partitioned.has(nameKey(table, ctx.naming)))
+		return {
+			level: "lock",
+			note: `blocks writes to ${name} while it builds; use CREATE INDEX CONCURRENTLY in its own -- atlas:txmode none file`,
+		}
+	if (only !== undefined) return undefined
 	return {
 		level: "lock",
-		note: `blocks writes to ${unquote(table)} while it builds; use CREATE INDEX CONCURRENTLY in its own -- atlas:txmode none file`,
+		note: `blocks writes to ${name} and its partitions while it builds; ${partitionedRecipe(name)}`,
 	}
 }
 
@@ -228,7 +240,7 @@ function readFile(
 	const scoped = scopeReader(outsideTransaction(sql), ctx)
 	return statements.map((stmt, i) => {
 		const tree = read?.statements[i]?.tree
-		const { control, inside, outside } = tree === undefined ? {} : scoped(tree)
+		const scope = tree === undefined ? {} : scoped(tree)
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
@@ -240,7 +252,7 @@ function readFile(
 			ctx.schema = extractSchema(stmt, ctx.schema)
 		}
 		const line = read?.statements[i]?.line
-		return { code: codes[i] as string, control, dialect, findings, inside, line, outside, stmt, tree }
+		return { code: codes[i] as string, ...scope, dialect, findings, line, stmt, tree }
 	})
 }
 

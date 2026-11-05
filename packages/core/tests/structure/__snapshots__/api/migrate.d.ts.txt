@@ -1120,6 +1120,8 @@ type ReadStatement = {
     /** on Postgres, the line, from 1, the statement starts on in its file */
     line?: number | undefined;
     outside?: string | undefined;
+    /** on Postgres, why Postgres refuses the statement in any file, with comb's route */
+    refused?: string | undefined;
     stmt: string;
     tree?: unknown;
 };
@@ -1134,7 +1136,7 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
  * overrides this
  */
-declare function refuseUnrunnable({ code, control, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
+declare function refuseUnrunnable({ code, control, dialect, inside, outside, refused, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
 /**
  * Refuses a txmode none Postgres file that leaves the transaction it opens open at its end: Atlas
  * records the file after its last statement, in that transaction, and closing the connection rolls

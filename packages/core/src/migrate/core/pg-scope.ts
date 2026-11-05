@@ -7,6 +7,7 @@
 import type { ReadStatement } from "./classify-file.ts"
 import { type Facts, tableOf } from "./pg-history.ts"
 import { blockAfter, insideOnly, nodeOf, outsideOnly, transactionControl } from "./pg-outside-transaction.ts"
+import { partitionedRefusal } from "./pg-partitioned.ts"
 import type { Held } from "./pg-validate.ts"
 
 /** Whether a table, or an index, the history `facts` follow is partitioned */
@@ -21,7 +22,7 @@ const partitionedIn =
 function scopeReader(
 	bare: boolean,
 	{ facts, held }: { facts: Facts; held: Held },
-): (tree: unknown) => Pick<ReadStatement, "control" | "inside" | "outside"> {
+): (tree: unknown) => Pick<ReadStatement, "control" | "inside" | "outside" | "refused"> {
 	let block = false
 	const partitioned = partitionedIn(facts)
 	return (tree) => {
@@ -30,7 +31,12 @@ function scopeReader(
 		const inside = block ? undefined : insideOnly(...parsed)
 		block = blockAfter(block, ...parsed)
 		/* before the statement's findings follow what it makes: a table partitioned so far (P9 of r21) */
-		return { control: transactionControl(...parsed), inside, outside: outsideOnly(...parsed, partitioned) }
+		return {
+			control: transactionControl(...parsed),
+			inside,
+			outside: outsideOnly(...parsed, partitioned),
+			refused: partitionedRefusal(...parsed, facts),
+		}
 	}
 }
 

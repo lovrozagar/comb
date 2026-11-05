@@ -18,6 +18,7 @@ import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, foreignScan, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
+import { partitionedKeyRecipe } from "./pg-partitioned.ts"
 import { retypeFindings } from "./pg-retype.ts"
 import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
 import { type Facts, names, type Node, nodesOf, tableOf, written } from "./pg-nodes.ts"
@@ -257,11 +258,14 @@ const INDEX_CONSTRAINTS = /* @__PURE__ */ new Set(["CONSTR_EXCLUSION", "CONSTR_P
  * The lock warnings of an ALTER TABLE that adds a primary key, unique or exclusion constraint
  * without USING INDEX on a table the file did not create (M81): it locks the table against reads
  * and writes while it builds the index. A unique or primary key can take an index built
- * concurrently first; an exclusion constraint cannot.
+ * concurrently first; an exclusion constraint cannot. On ONLY a partitioned table it builds
+ * nothing (PA10 of r22b).
  */
 function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Finding[] {
 	if (node["objtype"] !== "OBJECT_TABLE" || fresh.tables.has(tableOf(node["relation"], facts.schema).key)) return []
 	const table = written(node["relation"])
+	const partitioned = facts.partitioned.has(tableOf(node["relation"], facts.schema).key)
+	if (partitioned && (node["relation"] as Node)["inh"] !== true) return []
 	return (node["cmds"] as Node[]).flatMap((each): Finding[] => {
 		const cmd = each["AlterTableCmd"] as Node
 		/* an added column's inline primary key or unique builds its index as ADD CONSTRAINT does (P6) */
@@ -276,11 +280,16 @@ function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Fi
 				(constraint) => INDEX_CONSTRAINTS.has(String(constraint["contype"])) && constraint["indexname"] === undefined,
 			)
 			.map((constraint): Finding => {
-				const concurrent =
-					constraint["contype"] === "CONSTR_EXCLUSION"
-						? ""
-						: `; ${inline ? "add the column, then " : ""}build it first with CREATE UNIQUE INDEX CONCURRENTLY, then ADD … USING INDEX`
-				return { level: "lock", note: `locks ${table} against reads and writes while it builds its index${concurrent}` }
+				/* PA10 of r22b: on a partitioned table it builds each partition's too, and USING INDEX is refused there */
+				const locked = partitioned
+					? `${table} against reads and writes, and its partitions against writes,`
+					: `${table} against reads and writes`
+				const first = inline ? "add the column, then " : ""
+				const route = partitioned
+					? partitionedKeyRecipe(table, first)
+					: `${first}build it first with CREATE UNIQUE INDEX CONCURRENTLY, then ADD … USING INDEX`
+				const concurrent = constraint["contype"] === "CONSTR_EXCLUSION" ? "" : `; ${route}`
+				return { level: "lock", note: `locks ${locked} while it builds its index${concurrent}` }
 			})
 	})
 }
