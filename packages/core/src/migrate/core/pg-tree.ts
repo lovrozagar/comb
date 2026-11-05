@@ -251,7 +251,7 @@ function pgTreeFindings(
 	postgresParser()
 	let tree: { stmts?: unknown }
 	try {
-		tree = { stmts: resolveTemps(kept === undefined ? parsePostgres(stmt).stmts : kept, ctx.temps) }
+		tree = { stmts: resolveTemps(kept === undefined ? parsePostgres(stmt).stmts : kept, ctx.temps, ctx.facts.indexes) }
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		const note = `comb could not parse this as Postgres 17: ${(error as Error).message}`

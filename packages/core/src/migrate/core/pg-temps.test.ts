@@ -2,15 +2,19 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { extractSchema } from "./schema.ts"
 import { emptyFacts, type Node } from "./pg-nodes.ts"
 import { loadPostgresParser, parsePostgres } from "./pg-parser.ts"
+import { followTree } from "./pg-history.ts"
 import { fileEnds } from "./pg-split.ts"
 import { forgetTemps, resolveTemps, type Temps } from "./pg-temps.ts"
 
 beforeAll(loadPostgresParser)
 
-/** Each statement of `sql` resolved in turn, as one file: each one's top node, and the temps left */
+/** Each statement of `sql` resolved and followed in turn, as one file: each one's top node, and the temps left */
 function resolved(sql: string, temps: Temps = new Map()): { nodes: Node[]; temps: Temps } {
+	const facts = emptyFacts("public")
 	const nodes = (parsePostgres(sql).stmts as unknown[]).map((raw) => {
-		const [only] = resolveTemps([raw], temps) as Array<{ stmt: Record<string, Node> }>
+		const tree = resolveTemps([raw], temps, facts.indexes)
+		followTree(tree, facts)
+		const [only] = tree as Array<{ stmt: Record<string, Node> }>
 		return Object.values((only as { stmt: Record<string, Node> }).stmt)[0] as Node
 	})
 	return { nodes, temps }
@@ -27,7 +31,7 @@ const schemaOf = (relation: unknown): string | undefined => (relation as { schem
 describe("resolveTemps: a file's names of its temp relations, as Postgres's search path resolves them (AE2-5 of r22)", () => {
 	it("returns the tree itself for a file that has made no temp relation and a statement that makes none", () => {
 		const stmts = parsePostgres("ALTER TABLE o ADD COLUMN x int").stmts
-		expect(resolveTemps(stmts, new Map())).toBe(stmts)
+		expect(resolveTemps(stmts, new Map(), new Map())).toBe(stmts)
 	})
 
 	it("writes a temp relation's later unqualified names pg_temp, and not a CREATE without TEMP of its name", () => {
@@ -87,12 +91,13 @@ describe("resolveTemps: a temp relation's renames, as Postgres's search path res
 		expect([...temps]).toEqual([["o", "o"]])
 	})
 
-	it("follows the indexes of a temp table renamed, onto its new name", () => {
-		const { temps } = resolved("CREATE TEMP TABLE o (id int); CREATE INDEX i ON o (id); ALTER TABLE o RENAME TO p")
-		expect([...temps]).toEqual([
-			["i", "p"],
-			["p", "p"],
-		])
+	it("follows the indexes of a temp table renamed, and the one Postgres names, from the facts", () => {
+		const { nodes, temps } = resolved(
+			"CREATE TEMP TABLE o (id int); CREATE INDEX i ON o (id); ALTER TABLE o RENAME TO p; CREATE INDEX ON p (id); DROP INDEX p_id_idx; DROP INDEX i",
+		)
+		expect(dropped(nodes[4] as Node)).toEqual(["pg_temp", "p_id_idx"])
+		expect(dropped(nodes[5] as Node)).toEqual(["pg_temp", "i"])
+		expect([...temps]).toEqual([["p", "p"]])
 	})
 })
 

@@ -55,15 +55,42 @@ describe("a move to where the history left the relation (PA17 of r22b)", () => {
 		["ALTER TABLE c SET TABLESPACE fast;", "CREATE TABLE c TABLESPACE fast AS SELECT 1 AS id;\n"],
 		["ALTER TABLE c SET UNLOGGED;", "SELECT 1 AS id INTO UNLOGGED c;\n"],
 		["ALTER TABLE plain SET LOGGED, SET TABLESPACE fast;", "ALTER TABLE plain SET TABLESPACE fast;\n"],
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (VERBOSE) INDEX placed_id;\n"],
+		["ALTER TABLE placed SET TABLESPACE fast;", "REINDEX (TABLESPACE slow) TABLE placed;\n"],
 	])("warns of nothing for %j after %j", (later, more) => {
 		const rated = rate(later, more)
 		expect(rated.lockWarnings).toEqual([])
 		expect(rated.safety).toBe("safe")
 	})
 
+	it("follows the file's own REINDEX into a tablespace, so the move back warns of the rewrite (AE2-4 of r22)", () => {
+		const sql = "REINDEX (TABLESPACE slow) INDEX placed_id;\nALTER INDEX placed_id SET TABLESPACE fast;"
+		expect(rate(sql).lockWarnings).toContain(`ALTER INDEX placed_id SET TABLESPACE fast (${REWRITES})`)
+	})
+
 	it("follows the file's own move, so the second move to the same place warns of nothing", () => {
 		const sql = "ALTER TABLE plain SET TABLESPACE fast;\nALTER TABLE plain SET TABLESPACE fast;"
 		expect(rate(sql).lockWarnings).toEqual([`ALTER TABLE plain SET TABLESPACE fast (${REWRITES})`])
+	})
+})
+
+describe("an index Postgres names on a temp table of a permanent table's name (AE2-4 of r22)", () => {
+	it.each([
+		["CREATE INDEX ON o (id)", "o_id_idx"],
+		["ALTER TABLE o ADD PRIMARY KEY (id)", "o_pkey"],
+	])("keeps the permanent index where it was after %j moves the temp table's %s", (makes, index) => {
+		const files = [
+			`CREATE TABLE o (id int);\nCREATE UNIQUE INDEX ${index} ON o (id) TABLESPACE slow;\n`,
+			`CREATE TEMP TABLE o (id int);\n${makes};\nALTER INDEX ${index} SET TABLESPACE fast;\n`,
+		]
+		const before = files.reduce(
+			(schema, file) => extractSchema(file, schema, "postgres"),
+			extractSchema("", undefined, "postgres"),
+		)
+		const later = `ALTER INDEX ${index} SET TABLESPACE fast;`
+		expect(classifyMigration(later, { before, dialect: "postgres" }).lockWarnings).toEqual([
+			`${later.slice(0, -1)} (${REWRITES})`,
+		])
 	})
 })
 
@@ -87,6 +114,12 @@ describe("a move the history does not show is a no-op (siblings of PA17 of r22b)
 		["ALTER INDEX placed_id SET TABLESPACE fast;", "ALTER INDEX ALL IN TABLESPACE fast SET TABLESPACE slow;\n"],
 		["ALTER TABLE placed SET TABLESPACE fast;", "DROP TABLE placed;\nCREATE TABLE placed (id int);\n"],
 		["ALTER TABLE ghost SET TABLESPACE fast;", ""],
+		/* a REINDEX that rebuilds indexes in a tablespace (AE2-4 of r22) */
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (TABLESPACE slow) INDEX placed_id;\n"],
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (TABLESPACE slow) TABLE placed;\n"],
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (TABLESPACE slow) SCHEMA public;\n"],
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (TABLESPACE slow, VERBOSE) DATABASE d;\n"],
+		["ALTER INDEX placed_id SET TABLESPACE fast;", "REINDEX (TABLESPACE slow) SYSTEM d;\n"],
 	])("warns of the rewrite for %j after %j", (later, more) => {
 		expect(rate(later, more).lockWarnings).toEqual([`${later.slice(0, -1)} (${REWRITES})`])
 	})

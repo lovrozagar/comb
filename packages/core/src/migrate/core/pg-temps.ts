@@ -6,12 +6,14 @@
  * session of its own, so a temp relation dies when its file ends. resolveTemps writes each such
  * name `pg_temp.<name>` in a copy of the statement's tree, so every rule that keys a relation keys
  * it apart from the table it shadows; historyFacts then forgets every pg_temp key at each file's end
- * (forgetTemps). An index Postgres names itself on a temp table is not followed: an unqualified DROP
- * INDEX of one keys the current schema's index of that name.
+ * (forgetTemps). An index lives in its table's schema, so the facts key every index on a temp table
+ * under pg_temp, the one Postgres names as well as one the file names; resolveTemps reads those from
+ * the facts before each statement, so a later name of any of them resolves to it too.
  */
+import type { IndexFact } from "./pg-index-facts.ts"
 import type { Facts, Node } from "./pg-nodes.ts"
 
-/** The temp relations a file made so far: each by its bare name, with the table it belongs to, itself for a table, view or sequence */
+/** The temp relations a file made so far: each by its bare name, with the table it belongs to, itself for a table, view or sequence, an index's its table's */
 type Temps = Map<string, string>
 
 /** A RangeVar's fields */
@@ -89,21 +91,20 @@ function qualifyDrop(node: Node, temps: Temps): string[] {
 	return dropped
 }
 
-/** `temps` after a DROP of `dropped`: each, a table with every index of it */
-function forgetDropped(dropped: readonly string[], temps: Temps): void {
-	for (const name of dropped) {
-		const table = temps.get(name) === name
-		for (const [each, of] of Array.from(temps)) if (each === name || (table && of === name)) temps.delete(each)
-	}
-}
-
-/** `temps` after a temp relation's RENAME: its name, and its indexes' table's */
+/** `temps` after a temp relation's RENAME; an index's name the facts carry */
 function renamed(node: Node, temps: Temps): void {
 	const [was, now] = [(node["relation"] as RangeVar).relname, String(node["newname"])]
-	const table = temps.get(was) as string
 	temps.delete(was)
-	temps.set(now, table === was ? now : table)
-	if (table === was) for (const [each, of] of Array.from(temps)) if (of === was) temps.set(each, now)
+	temps.set(now, now)
+}
+
+const PREFIX = "pg_temp."
+
+/** `temps` with its indexes as the facts hold them: each index keyed under pg_temp, by its table */
+function learnIndexes(temps: Temps, indexes: ReadonlyMap<string, IndexFact>): void {
+	for (const [each, of] of Array.from(temps)) if (each !== of) temps.delete(each)
+	for (const [key, index] of indexes)
+		if (key.startsWith(PREFIX)) temps.set(key.slice(PREFIX.length), index.table.split(".").at(-1) as string)
 }
 
 /** One top-level statement of the file, its names of the file's temp relations written pg_temp, followed into `temps` */
@@ -115,20 +116,14 @@ function resolveStatement(type: string, node: Node, temps: Temps): void {
 		made.schemaname = "pg_temp"
 		made.relpersistence = "t"
 		temps.set(made.relname, made.relname)
-	} else if (type === "DropStmt") forgetDropped(qualifyDrop(node, temps), temps)
+	} else if (type === "DropStmt") for (const name of qualifyDrop(node, temps)) temps.delete(name)
 	else if (
 		type === "RenameStmt" &&
 		RELATIONS.has(String(node["renameType"])) &&
 		(node["relation"] as RangeVar | undefined)?.schemaname === "pg_temp" &&
-		temps.has((node["relation"] as RangeVar).relname)
+		temps.get((node["relation"] as RangeVar).relname) === (node["relation"] as RangeVar).relname
 	)
 		renamed(node, temps)
-	else if (
-		type === "IndexStmt" &&
-		(node["relation"] as RangeVar).schemaname === "pg_temp" &&
-		node["idxname"] !== undefined
-	)
-		temps.set(String(node["idxname"]), (node["relation"] as RangeVar).relname)
 }
 
 /** A statement's parse tree: its RawStmts */
@@ -139,10 +134,12 @@ const tops = (raws: Raws): Array<[string, Node]> => raws.flatMap((raw) => Object
 
 /**
  * A statement's parse tree with each name of a temp relation its file made before it written
- * `pg_temp.<name>`, and the temp relation it makes written so, followed into `temps`: a copy when it
- * changes anything, `stmts` itself when the file has made no temp relation and this makes none
+ * `pg_temp.<name>`, and the temp relation it makes written so, followed into `temps`, an index's
+ * from `indexes`, the facts so far: a copy when it changes anything, `stmts` itself when the file
+ * has made no temp relation and this makes none
  */
-function resolveTemps(stmts: unknown, temps: Temps): unknown {
+function resolveTemps(stmts: unknown, temps: Temps, indexes: ReadonlyMap<string, IndexFact>): unknown {
+	learnIndexes(temps, indexes)
 	const raws = stmts as Raws
 	const makes = tops(raws).some(([type, node]) => {
 		const made = madeBy(type, node)
@@ -155,7 +152,7 @@ function resolveTemps(stmts: unknown, temps: Temps): unknown {
 }
 
 /** Whether `key` is a temp relation's, or a name beside one */
-const inTemp = (key: string): boolean => key.startsWith("pg_temp.")
+const inTemp = (key: string): boolean => key.startsWith(PREFIX)
 
 /**
  * `facts` after a file ends, as its session does: every temp relation it made gone, with every

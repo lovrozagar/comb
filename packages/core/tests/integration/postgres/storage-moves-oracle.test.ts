@@ -7,11 +7,12 @@
  * does (classify.pg-moves.test.ts).
  */
 import pg from "pg"
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { withScratchDb } from "../support/pg.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { unique } from "../support/pg-roles.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -34,13 +35,14 @@ const MOVES: ReadonlyArray<readonly [string, string, boolean]> = [
 	[PLACED, "ALTER TABLE t SET UNLOGGED", true],
 ]
 
-/** t's relfilenode after `history`, and after `move` on top of it */
+/** t's relfilenode after `history`, a statement a line, and after `move` on top of it */
 function files(history: string, move: string): Promise<[string, string]> {
 	return withScratchDb(async (url) => {
 		const client = new pg.Client({ connectionString: url })
 		await client.connect()
 		try {
-			await client.query(history)
+			/* one statement a line, each its own query, as a REINDEX SCHEMA runs outside a transaction block */
+			for (const statement of history.split("\n")) await client.query(statement)
 			const read = async () =>
 				(await client.query<{ f: string }>("SELECT relfilenode::text AS f FROM pg_class WHERE relname = 't'")).rows[0]
 					?.f as string
@@ -52,6 +54,37 @@ function files(history: string, move: string): Promise<[string, string]> {
 		}
 	})
 }
+
+describe("a move back of an index a REINDEX rebuilt in a tablespace, against Postgres 17 (AE2-4 of r22)", () => {
+	/* a comb_t_fast_* tablespace made in place on the test server, dropped once the cases ran */
+	const fast = unique("comb_t_fast")
+	const admin = new pg.Client({ connectionString: pgUrl() })
+	beforeAll(async () => {
+		await admin.connect()
+		await admin.query("SET allow_in_place_tablespaces = on")
+		process.stderr.write(`[comb] AE2-4 catalog: CREATE TABLESPACE ${fast} LOCATION ''\n`)
+		await admin.query(`CREATE TABLESPACE ${fast} LOCATION ''`)
+	})
+	afterAll(async () => {
+		process.stderr.write(`[comb] AE2-4 catalog: DROP TABLESPACE IF EXISTS ${fast}\n`)
+		await admin.query(`DROP TABLESPACE IF EXISTS ${fast}`)
+		await admin.end()
+	})
+
+	it.each(["INDEX t", "TABLE b", "SCHEMA public"])(
+		"rewrites t back to pg_default after REINDEX (TABLESPACE …) %s, and comb warns of it",
+		async (target) => {
+			const history = `${INDEXED}\nREINDEX (TABLESPACE ${fast}) ${target};`
+			const [before, after] = await files(history, "ALTER INDEX t SET TABLESPACE pg_default")
+			expect(before).not.toBe(after)
+			const rated = classifyMigration("ALTER INDEX t SET TABLESPACE pg_default;", {
+				before: extractSchema(history, undefined, "postgres"),
+				dialect: "postgres",
+			})
+			expect(rated.lockWarnings.length).toBeGreaterThan(0)
+		},
+	)
+})
 
 describe("a move of a relation against Postgres 17 (PA17 of r22b)", () => {
 	it.each(MOVES)("after %j, %j rewrites t: %s, and comb warns of it exactly then", async (history, move, rewrites) => {

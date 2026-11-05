@@ -7,7 +7,10 @@
  * only where the history names them, at its CREATE or by an ALTER since: one made without USING or
  * TABLESPACE takes the target's default_table_access_method and default_tablespace, which check
  * cannot read. A tablespace renamed carries its relations' name with it; one emptied by an ALTER …
- * ALL IN TABLESPACE leaves where they went unknown, as an OWNED BY may have kept some.
+ * ALL IN TABLESPACE leaves where they went unknown, as an OWNED BY may have kept some. A REINDEX
+ * with a TABLESPACE option rebuilds indexes there, so it leaves every index's tablespace unknown:
+ * a SCHEMA, DATABASE or SYSTEM one reaches indexes the history may not name, and any index it may
+ * reach is unknown alike.
  */
 import { type Facts, flag, type Node, type Storage, tableOf } from "./pg-nodes.ts"
 
@@ -61,6 +64,12 @@ function retablespaced(facts: Facts, from: string, to: string | undefined): void
 		if (where.tablespace === from) where.tablespace = to
 }
 
+/** Whether a REINDEX names a TABLESPACE to rebuild its indexes in */
+const rebuildsElsewhere = (node: Node): boolean =>
+	((node["params"] as Array<{ DefElem: Node }> | undefined) ?? []).some(
+		({ DefElem }) => DefElem["defname"] === "tablespace",
+	)
+
 /** `facts.storage`, and each index's tablespace, after one statement */
 function followStorage(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateStmt") {
@@ -84,6 +93,8 @@ function followStorage(type: string, node: Node, facts: Facts): void {
 	else if (type === "RenameStmt" && node["renameType"] === "OBJECT_TABLESPACE")
 		retablespaced(facts, String(node["subname"]), String(node["newname"]))
 	else if (type === "AlterTableMoveAllStmt") retablespaced(facts, String(node["orig_tablespacename"]), undefined)
+	else if (type === "ReindexStmt" && rebuildsElsewhere(node))
+		for (const index of facts.indexes.values()) index.tablespace = undefined
 }
 
 /** Whether `cmd` moves a relation to where `where` says it already is, which Postgres skips */

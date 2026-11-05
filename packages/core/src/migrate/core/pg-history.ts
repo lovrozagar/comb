@@ -283,7 +283,7 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 		const ends = new Set(fileEnds(before))
 		let temps: Temps = new Map()
 		for (const [i, statement] of before.statements.entries()) {
-			followTree(resolveTemps(trees?.[i] ?? historyTree(statement), temps), facts)
+			followTree(resolveTemps(trees?.[i] ?? historyTree(statement), temps, facts.indexes), facts)
 			if (!ends.has(i + 1)) continue
 			forgetTemps(facts)
 			temps = new Map()
