@@ -30,39 +30,64 @@ const timestampDefaults = {
 	now: () => sql`(unixepoch() * 1000)`,
 }
 
+/** A SQLite TEXT column builder */
 type Text = SQLiteTextBuilder<[string, ...string[]]>
+/** The names a creation timestamp may take, in either casing, so codegen recognizes it */
 type CreatedAtName = "createdAt" | "created_at"
+/** The names a soft-delete timestamp may take, in either casing, so codegen recognizes it */
 type DeletedAtName = "deletedAt" | "deleted_at"
+/** The names an update timestamp may take, in either casing, so codegen recognizes it */
 type UpdatedAtName = "updatedAt" | "updated_at"
 
 /** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
 export type SqliteColumns = {
+	/** a boolean, stored as an INTEGER 0 or 1 */
 	boolean: (name: string) => SQLiteBooleanBuilder
+	/** the creation time in epoch milliseconds, NOT NULL, filled by the database when a row is inserted */
 	createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>
+	/** the soft-delete time in epoch milliseconds; null while the row is live */
 	deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder
+	/** one of `values`, stored as TEXT; the enum-checks generator writes a CHECK holding it to them, in force once the table's extra config returns `<table>EnumChecks(table)` */
 	enum: <T extends readonly string[]>(
 		name: string,
 		_values: T,
 		_options?: EnumOptions<T[number]>,
 	) => $Type<Text, T[number]>
+	/**
+	 * The TEXT primary key `id`, holding `<prefix>_<ulid>` ids the app writes with `generateId(prefix)`.
+	 * Throws unless `prefix` is 2 to 10 lowercase letters and digits starting with a letter
+	 */
 	id: (_prefix: string) => IsPrimaryKey<Text>
+	/** an INTEGER read as a JavaScript number */
 	integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder
+	/** a JSON value stored as TEXT, typed and validated by `schema` in the generated DTOs */
 	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(
 		name: string,
 		_schema: TSchema,
 		_constraints?: JsonConstraints,
 	) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>
+	/** a floating-point REAL */
 	real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder
+	/** a TEXT foreign key; chain `.references()` to name the column it points at */
 	ref: (name: string, _constraints?: TextConstraints) => Text
+	/** the auto-incrementing INTEGER primary key `id`, filled by the database */
 	serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>
+	/** a TEXT column; a declared `max` also becomes its declared length */
 	text: (name: string, _constraints?: TextConstraints) => Text
+	/** a point in time in epoch milliseconds, stored as an INTEGER */
 	timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder
+	/** the update time in epoch milliseconds, NOT NULL, filled on insert and set to the current time on every update drizzle writes */
 	updatedAt: (
 		name: UpdatedAtName,
 		_constraints?: TimestampConstraints,
 	) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>
 }
 
+/**
+ * comb's SQLite column helpers: drizzle columns that also record comb's constraints, which codegen
+ * reads to write the DTOs, constraint map and manifest. The same helpers exist for Postgres in
+ * `./pg/columns`, so a tables file moves between the dialects by its import
+ */
 export const c: SqliteColumns = {
 	/* Boolean as integer */
 	boolean: (name: string) => withCombColumn(integer(name, { mode: "boolean" }), { kind: "boolean" }),
