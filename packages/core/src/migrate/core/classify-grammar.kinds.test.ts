@@ -120,7 +120,8 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "DROP TYPE mood", "unsafe"],
 	["postgres", "DROP VIEW v", "cautious"],
 	["postgres", NO_TX + "END", "cautious"],
-	["postgres", "EXECUTE s", "unsafe"],
+	/* rated by what it runs; one its file does not prepare is refused (pg-execute.test.ts, AE2-9 of r22) */
+	["postgres", "PREPARE s AS DELETE FROM post; EXECUTE s", "unsafe"],
 	["postgres", "EXPLAIN SELECT 1", "safe"],
 	["postgres", "FETCH c", "unsafe"],
 	["postgres", "GRANT SELECT ON post TO r", "cautious"],

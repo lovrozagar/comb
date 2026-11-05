@@ -2,8 +2,9 @@
  * comb's ratings of COPY and EXECUTE held to the pinned Atlas on Postgres 17 (PA15 of r22b). Each case
  * applies a table t, then its files, with `atlas migrate apply`; comb reads the last file on the
  * history of the ones before it. A COPY comb refuses at check is one Atlas's driver cannot run; every
- * statement comb rates Atlas runs, but an EXECUTE whose statement comb cannot read, which comb rates
- * unsafe for the write it may hold.
+ * statement comb rates Atlas runs, but an EXECUTE of a statement its file never prepared: comb's
+ * apply runs one Atlas call per file (atlas-apply-runs.ts), so an earlier file's PREPARE never reaches
+ * it, and comb refuses it at check (AE2-9 of r22).
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -34,6 +35,21 @@ const atlas = (files: readonly string[]): Promise<string> =>
 		await hashDir(run, dir)
 		const ran = await run("atlas", ["migrate", "apply", "--url", url, "--dir", `file://${dir}`])
 		return ran.code === 0 ? "applies" : `fails: ${`${ran.stdout}${ran.stderr}`.trim().split("\n").at(-1) ?? ""}`
+	})
+
+/**
+ * Atlas's apply of `files` after the table as comb's apply runs it, one call per file, each on a
+ * session of its own (atlas-apply-runs.ts): "applies", or "fails: " and the last line it printed
+ */
+const atlasPerFile = (files: readonly string[]): Promise<string> =>
+	withScratchDb(async (url) => {
+		for (const [i, file] of [TABLE, ...files].entries()) writeFileSync(join(dir, `${i + 1}_m.sql`), file)
+		await hashDir(run, dir)
+		for (const _ of [TABLE, ...files]) {
+			const ran = await run("atlas", ["migrate", "apply", "--url", url, "--dir", `file://${dir}`, "1"])
+			if (ran.code !== 0) return `fails: ${`${ran.stdout}${ran.stderr}`.trim().split("\n").at(-1) ?? ""}`
+		}
+		return "applies"
 	})
 
 /** comb's rating of the last of `files` after the table and the ones before it: its safety, or "refused" */
@@ -68,7 +84,6 @@ const CASES: ReadonlyArray<[what: string, files: readonly string[], atlas: strin
 		"applies",
 		"unsafe",
 	],
-	["an EXECUTE of an earlier file's PREPARE", ["PREPARE p AS DELETE FROM t;\n", "EXECUTE p;\n"], "applies", "unsafe"],
 ]
 
 describe("a COPY or an EXECUTE, as the pinned Atlas runs it on Postgres 17 (PA15 of r22b)", () => {
@@ -80,12 +95,21 @@ describe("a COPY or an EXECUTE, as the pinned Atlas runs it on Postgres 17 (PA15
 		60_000,
 	)
 
-	it("has an EXECUTE of a statement prepared nowhere fail, which comb rates unsafe", async () => {
+	it("has an EXECUTE of a statement prepared nowhere fail, which comb refuses", async () => {
 		/* the EXECUTE aborts the file's transaction, and Atlas's revision write after it fails */
 		expect(await atlas(["EXECUTE nothere(1);\n"])).toBe(
 			"fails: sql/migrate: write revision: pq: current transaction is aborted, commands ignored until end of transaction block (25P02)",
 		)
-		expect(comb(["EXECUTE nothere(1);\n"])).toBe("unsafe")
+		expect(comb(["EXECUTE nothere(1);\n"])).toBe("refused")
+	}, 60_000)
+
+	/* AE2-9 of r22: one Atlas call ran both files on one session, where comb's apply runs each on its own */
+	it("has an EXECUTE of an earlier file's PREPARE fail as comb applies it, which comb refuses", async () => {
+		const files = ["PREPARE p AS DELETE FROM t;\n", "EXECUTE p;\n"]
+		expect(await atlasPerFile(files)).toBe(
+			"fails: sql/migrate: write revision: pq: current transaction is aborted, commands ignored until end of transaction block (25P02)",
+		)
+		expect(comb(files)).toBe("refused")
 	}, 60_000)
 
 	/* AE2-2 of r22: an EXECUTE under a CREATE TABLE AS runs the prepared statement's writes as a bare one does */

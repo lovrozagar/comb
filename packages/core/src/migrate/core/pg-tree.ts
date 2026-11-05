@@ -31,7 +31,7 @@ import { type Held, holdStatement } from "./pg-held.ts"
 import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
-import { executedNodes, executeFindings } from "./pg-execute.ts"
+import { dynamicOf, executedNodes, executeFindings } from "./pg-execute.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 import { staysPut } from "./pg-storage.ts"
 import { flag } from "./pg-nodes.ts"
@@ -56,6 +56,8 @@ type TreeContext = {
 	held: Held
 	/** the query each PREPARE so far holds, by the name Postgres keys it under, which an EXECUTE runs (PA15 of r22b) */
 	preparing: Map<string, Node>
+	/** the file's first statement so far that may PREPARE as it runs, named (pg-execute.ts, AE2-9 of r22) */
+	dynamic?: string | undefined
 }
 
 // lookup-table: the settings whose change decides what a later statement runs, and why
@@ -256,7 +258,7 @@ function pgTreeFindings(
 	const nodes = executedNodes(raws, ctx.preparing)
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
-		if (type === "ExecuteStmt") return executeFindings(node, ctx.preparing)
+		if (type === "ExecuteStmt") return refusingAs(stmt, () => executeFindings(node, ctx))
 		return [
 			...(refusingAs(stmt, () => ddlFindings(type, node, ctx.facts)) ?? []),
 			...(type === "AlterTableStmt" ? [...constraintIndexWarnings(node, ctx), ...heldScans(node, ctx)] : []),
@@ -265,6 +267,7 @@ function pgTreeFindings(
 	})
 	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
 	/* the locks the statement takes last to its transaction's COMMIT, read before the history follows it */
+	ctx.dynamic ??= dynamicOf(nodes)
 	for (const [type, node] of tops) {
 		holdStatement(type, node, ctx)
 		if (type === "PrepareStmt") ctx.preparing.set(String(node["name"]), node["query"] as Node)

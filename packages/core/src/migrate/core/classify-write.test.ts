@@ -47,7 +47,7 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 	it.each([
 		["PREPARE s AS DELETE FROM t; EXECUTE s;", "unsafe", "an EXECUTE of a statement the file prepares"],
 		["PREPARE s (int) AS UPDATE t SET x = 1 WHERE id = $1; EXECUTE s(1);", "unsafe", "a filtered prepared write"],
-		["EXECUTE stmt;", "unsafe", "an EXECUTE of a statement comb cannot read (PA15 of r22b)"],
+		["SELECT f(); EXECUTE stmt;", "unsafe", "an EXECUTE a function call before it may prepare (AE2-9 of r22)"],
 		["PREPARE s AS SELECT 1;", "cautious", "a PREPARE, which runs nothing until an EXECUTE (P21 of r19)"],
 		["SELECT setval('s', 1);", "cautious", "setval"],
 		["SELECT pg_catalog.setval('s', 1, false);", "cautious", "a qualified setval"],

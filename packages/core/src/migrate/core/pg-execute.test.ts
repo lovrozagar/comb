@@ -47,25 +47,41 @@ describe("an EXECUTE (PA15 of r22b)", () => {
 			expect(line).toContain("deletes rows of t")
 		},
 	)
+})
 
-	it("rates an EXECUTE inside a CREATE TABLE AS whose statement comb cannot read unsafe", () => {
-		expect(rated("CREATE TABLE x AS EXECUTE nothere;")).toEqual({
-			cautiousStatements: [],
-			safety: "unsafe",
-			unsafeStatements: [
-				"CREATE TABLE x AS EXECUTE nothere (runs a prepared statement comb cannot read; approve it in the file)",
-			],
-		})
+/** Why check refuses an EXECUTE of `name` that nothing before it in its file prepares */
+const unprepared = (name: string) =>
+	`no statement before it in its file prepares ${name}, and comb applies each file in a session of its own, so an earlier file's PREPARE never reaches it: Postgres fails the file with "prepared statement "${name}" does not exist"; PREPARE it in this file`
+
+/* AE2-9 of r22: comb's apply runs one Atlas call per file (atlas-apply-runs.ts), so an EXECUTE runs
+   only what its own file prepared, or what its DO blocks, CALLs and function calls before it did */
+describe("an EXECUTE of a statement its file does not prepare (AE2-9 of r22)", () => {
+	it.each([
+		["EXECUTE nothere;", "EXECUTE nothere", "nothere"],
+		["EXECUTE nothere(1);", "EXECUTE nothere(1)", "nothere"],
+		["CREATE TABLE x AS EXECUTE nothere;", "CREATE TABLE x AS EXECUTE nothere", "nothere"],
+		["EXPLAIN ANALYZE EXECUTE nothere;", "EXPLAIN ANALYZE EXECUTE nothere", "nothere"],
+		['EXECUTE "P";', 'EXECUTE "P"', "P"],
+		["PREPARE q AS SELECT 1;\nEXECUTE p;", "EXECUTE p", "p"],
+		/* Postgres looks the name up when the EXECUTE runs, so a PREPARE after it is too late */
+		["EXECUTE p;\nPREPARE p AS SELECT 1;", "EXECUTE p", "p"],
+		/* a function called after the EXECUTE runs after its lookup failed */
+		["EXECUTE p;\nSELECT f();", "EXECUTE p", "p"],
+		/* a prepared query runs only when an EXECUTE runs it */
+		["PREPARE q AS SELECT f();\nEXECUTE p;", "EXECUTE p", "p"],
+	])("refuses %j at check, past any approval", (sql, statement, name) => {
+		expect(() => rate(sql)).toThrow(`${statement}: ${unprepared(name)}`)
+		expect(() => rate(`-- comb:allow-unsafe: prepared elsewhere\n${sql}`)).toThrow(unprepared(name))
 	})
 
-	it.each(["EXECUTE nothere;", "EXECUTE nothere(1);"])(
-		"rates %j, whose statement an earlier file or session prepared, unsafe",
-		(sql) => {
-			expect(rated(sql)).toEqual({
-				cautiousStatements: [],
-				safety: "unsafe",
-				unsafeStatements: [`${sql.slice(0, -1)} (runs a prepared statement comb cannot read; approve it in the file)`],
-			})
-		},
-	)
+	it.each([
+		["DO $$ BEGIN EXECUTE 'PREPARE p AS SELECT 1'; END $$;\nEXECUTE p;", "a DO block"],
+		["CALL make_p();\nEXECUTE p;", "a CALL of make_p"],
+		["SELECT public.make_p();\nEXECUTE p;", "a call of public.make_p()"],
+		["PREPARE q AS SELECT make_p();\nEXECUTE q;\nEXECUTE p;", "a call of make_p()"],
+	])("rates %j, whose own dynamic SQL may prepare it, unsafe and names that SQL", (sql, dynamic) => {
+		expect(rate(sql).unsafeStatements).toContain(
+			`EXECUTE p (runs a prepared statement comb cannot read, which ${dynamic} before it may prepare; approve it in the file)`,
+		)
+	})
 })
