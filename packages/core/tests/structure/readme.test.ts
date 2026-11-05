@@ -71,6 +71,7 @@ describe("README code", () => {
 		const notCompiled: Record<string, string> = {
 			bash: "shell commands",
 			diff: "an upgrade step: a before and an after line of a caller's code, a fragment with no module around it",
+			jsonc: "a wrangler config, which readme-migrate-commands.test.ts loads through wrangler's own reader",
 			text: "program output, a directory tree, or the list query's syntax",
 		}
 		const fences: { indent: string; language: string; line: number }[] = []

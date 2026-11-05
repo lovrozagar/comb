@@ -47,7 +47,7 @@ function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { co
 }
 
 /** Run `request.mode` on the D1 database `resolved` names, or `request.db` when the project has no migrate config */
-export { wranglerReader }
+export { d1Config, wranglerReader }
 
 export async function migrateD1(
 	request: D1Request,

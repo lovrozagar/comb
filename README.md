@@ -547,19 +547,57 @@ export default defineConfig({
 		core: {
 			migrationsDir: "./atlas-migrations",
 			drizzleConfigPath: "./drizzle.config.ts",
+			name: "core",
 			provider: { type: "bun-sqlite", path: "./.comb/core.db" },
-			environments: {
-				prod: {
-					name: "prod",
-					provider: { type: "d1", databaseName: "core" },
-				},
-			},
 		},
 	},
 })
 ```
 
 The config is Zod-validated when comb loads it, so a typo fails at load rather than at apply, with one message that names the file and the key, whether it is exported through `defineConfig` (which only types it), as a plain object, or as a function, sync or async, that returns one; a function that returns a function is refused, naming the form below (a program that imports its config module instead calls `await parseConfig(imported)`, on either form, the one parse `loadConfig(path)` runs, since `defineConfig` checks nothing at run time): every object is strict, and a key comb does not know is refused by name. `diff`, `apply`, `check` and `status` all take a database by its name here; a database whose tables and FTS live under another name in `comb.config.ts`, as two shards of one schema do, says so with `codegen: "shard"`, and `diff shard-0` reads that database's FTS. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`databaseName`, the Turso database's own name, `org`, `apiToken`, and `group`, default `default`), `d1` (`databaseName`, the wrangler config's `database_name` or binding; wrangler finds the database through its config), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. A database is one of two shapes, held at load: one target, with its `name` and `provider`, or `environments`, at least one, chosen by `-e`, each named by its key unless it gives a `name` and taking the database's `provider` unless it gives its own; a database with both a `name` and `environments`, or an environment with no provider at either level, is refused. Every environment of a database has its dialect, and `-e` on a database that declares no environments is refused. A `postgres` `url` is checked when a command resolves its environment, not at load, so a production URL unset in this shell blocks no command on `-e dev`, and `diff`, which reaches only `devUrl`, needs none. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
+
+A database migrated in more than one place declares `environments` instead, and every command on it names one with `-e`. Here `core` is the D1 database the wrangler config beside the migrate config binds: `dev` is the local copy wrangler keeps under `.wrangler/`, and `prod`, which takes the database's provider, is the remote one:
+
+```ts
+/* comb.migrate.config.ts */
+import { defineConfig } from "@lovrozagar/comb/migrate"
+
+export default defineConfig({
+	databases: {
+		core: {
+			migrationsDir: "./atlas-migrations",
+			drizzleConfigPath: "./drizzle.config.ts",
+			provider: { type: "d1", databaseName: "core" },
+			environments: {
+				dev: { provider: { type: "d1", databaseName: "core", local: true } },
+				prod: {},
+			},
+		},
+	},
+})
+```
+
+The wrangler config beside it needs the binding with `migrations_dir` set to comb's `migrationsDir`, which comb checks before it applies; a Worker's `database_id` goes here too:
+
+```jsonc
+// wrangler.jsonc
+{
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "core",
+			"migrations_dir": "atlas-migrations",
+		},
+	],
+}
+```
+
+```bash
+bunx comb migrate diff core add_post_slug -e dev
+bunx comb migrate apply core -e dev
+bunx comb migrate check core -e prod
+bunx comb migrate apply core -e prod
+```
 
 The function form, for a config that reads its secrets when comb loads it: the function calls `defineConfig`, so TypeScript holds the object written inline to its known keys here too, and a misspelled `local` or `migrationsDir` fails to compile. `defineConfig` takes no function:
 
@@ -617,6 +655,8 @@ export default defineConfig({
 `loadConfig()`, `resolveDatabaseConfig()`, and `createProvider()` turn that into a `ConnectionProvider`. Each provider exposes the same `Connection` interface, and the SQLite introspection reads it: `introspectSqliteSchema`, `getSqliteTables`, `getSqliteColumns`, `getSqliteIndexes`.
 
 ### Diff and apply
+
+On the first config under [Config and providers](#config-and-providers), a bun-sqlite database, the cycle is:
 
 ```bash
 bunx comb migrate init
