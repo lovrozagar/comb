@@ -32,7 +32,8 @@
 		"src",
 		"types",
 		"!src/**/*.test.ts",
-		"!src/**/__fixtures__/**"
+		"!src/**/__fixtures__/**",
+		"!docs/testing.md"
 	],
 	"type": "module",
 	"sideEffects": false,
