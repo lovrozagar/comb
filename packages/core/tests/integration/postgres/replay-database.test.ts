@@ -231,7 +231,84 @@ describe("the replay's database beside what the history makes", () => {
 			})
 		})
 	}, 60_000)
+})
 
+/** "ok" once `act` ends, or why it threw */
+async function said(act: () => Promise<unknown>): Promise<string> {
+	try {
+		await act()
+		return "ok"
+	} catch (error) {
+		return (error as Error).message
+	}
+}
+
+/** What check, apply and baseline say of `files` against a target holding what `seed` makes, apply the oracle */
+async function asApplied(dev: string, seed: string, files: readonly string[]): Promise<Record<string, string>> {
+	const target = (url: string) => ({ devUrl: dev, lockTimeout: "5s", schema: "public", url })
+	await query(dev, seed)
+	const ran = await withScratchDb(async (url) => {
+		await query(url, seed)
+		await write(files)
+		const checked = (await check(dev, url)).refused ?? "ok"
+		const applied = await said(() =>
+			applyWithAtlas({
+				approve: (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true }),
+				dir,
+				print: () => undefined,
+				target: target(url),
+			}),
+		)
+		return { apply: applied, check: checked }
+	})
+	const baseline = await withScratchDb(async (url) => {
+		await query(url, seed)
+		for (const sql of files) await query(url, sql)
+		return said(() => baselineWithAtlas({ dir, print: () => undefined, target: target(url) }))
+	})
+	return { ...ran, baseline }
+}
+
+const AGREE = { apply: "ok", baseline: "ok", check: "ok" }
+
+describe("the replay copies every extension a plain CREATE EXTENSION doesn't need absent (PR1 of r22b; sibling: r21 P5)", () => {
+	it("copies one an earlier file uses and a later file creates IF NOT EXISTS", async () => {
+		const outcome = await withScratchDb((dev) =>
+			asApplied(dev, "CREATE EXTENSION pgcrypto", [
+				"-- comb:allow-unsafe: the test's history\nCREATE TABLE k (id int, salt bytea DEFAULT gen_random_bytes(16));\n",
+				"CREATE EXTENSION IF NOT EXISTS pgcrypto;\n",
+			]),
+		)
+		expect(outcome).toEqual(AGREE)
+	}, 120_000)
+
+	it("copies one that requires an extension the history creates IF NOT EXISTS", async () => {
+		const outcome = await withScratchDb((dev) =>
+			asApplied(dev, "CREATE EXTENSION cube; CREATE EXTENSION earthdistance", [
+				"CREATE EXTENSION IF NOT EXISTS cube;\nCREATE TABLE places (id int, at cube);\n",
+			]),
+		)
+		expect(outcome).toEqual(AGREE)
+	}, 120_000)
+
+	it("makes one that requires an extension a file creates plainly right after that file's CREATE, in its schema and version", async () => {
+		await withScratchDb(async (dev) => {
+			await query(
+				dev,
+				"CREATE EXTENSION cube; CREATE SCHEMA geo; CREATE EXTENSION earthdistance WITH SCHEMA geo VERSION '1.1'",
+			)
+			await withScratchDb(async (url) => {
+				await write([
+					"CREATE EXTENSION cube;\nCREATE TABLE places (id int, at cube);\n",
+					"-- comb:allow-unsafe: the test's history\nCREATE VIEW reach AS SELECT geo.earth() AS r;\n",
+				])
+				expect((await check(dev, url)).refused).toBeUndefined()
+			})
+		})
+	}, 120_000)
+})
+
+describe("the replay's database beside the roles the history makes", () => {
 	/* P6 of r21: since Postgres 16 a role's maker needs the role granted to SET it, as `OWNER TO` does; the grant was left out */
 	it("runs a grant of a role the replay made, under a role that is no superuser, and leaves out one of a role it did not", async () => {
 		const [manager, app, other] = testRoles("comb_t_mgr", "comb_t_app", "comb_t_other")
