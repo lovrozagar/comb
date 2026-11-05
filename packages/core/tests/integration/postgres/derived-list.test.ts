@@ -236,6 +236,7 @@ const side = pgTable("side", {
 	big: bigint("big", { mode: "number" }),
 	item_id: text("item_id"),
 	t: timestamp("t", { precision: 6 }),
+	tz: timestamp("tz", { precision: 6, withTimezone: true }),
 })
 const SERVED = { asc: ["d", "a", "c", "b"], desc: ["b", "c", "a", "d"] } as const
 
@@ -251,18 +252,24 @@ type ListShape = "anchored joined" | "anchored own" | "anchorless"
 /** Every id `shape` serves on `client` by `key`, one a page, by cursor, at most eight pages */
 async function served(
 	client: pg.Client,
-	{ direction, key, shape }: { direction: "asc" | "desc"; key: "big" | "t" | "ti" | "tz"; shape: ListShape },
+	{
+		direction,
+		inside = false,
+		key,
+		shape,
+	}: { direction: "asc" | "desc"; inside?: boolean; key: "big" | "t" | "ti" | "tz"; shape: ListShape },
 ): Promise<string[]> {
 	await client.query(`CREATE TEMP TABLE IF NOT EXISTS item (id text PRIMARY KEY, big bigint, t timestamp(6), tz timestamptz(6), ti timestamp);
-	CREATE TEMP TABLE IF NOT EXISTS side (item_id text, big bigint, t timestamp(6));
+	CREATE TEMP TABLE IF NOT EXISTS side (item_id text, big bigint, t timestamp(6), tz timestamptz(6));
 	INSERT INTO item VALUES
 	('d', 1152921504606847176, '2024-01-01 00:00:00.123100', '2024-01-01 00:00:00.123100+00', '-infinity'),
 	('a', 1152921504606847186, '2024-01-01 00:00:00.123400', '2024-01-01 00:00:00.123400+00', '2024-01-01'),
 	('c', 1152921504606847226, '2024-01-01 00:00:00.123700', '2024-01-01 00:00:00.123700+00', '2024-01-02'),
 	('b', 1152921504606847500, '2024-01-01 00:00:00.124000', '2024-01-01 00:00:00.124000+00', 'infinity')
 	ON CONFLICT DO NOTHING;
-	INSERT INTO side SELECT id, big, t FROM item WHERE NOT EXISTS (SELECT FROM side)`)
-	const column = shape === "anchored joined" ? side[key as "big" | "t"] : item[key]
+	INSERT INTO side SELECT id, big, t, tz FROM item WHERE NOT EXISTS (SELECT FROM side)`)
+	const own = shape === "anchored joined" ? side[key as "big" | "t" | "tz"] : item[key]
+	const column = inside ? sql`${own}` : own
 	const db = drizzle({ client })
 	const ids: string[] = []
 	let cursor: string | undefined
@@ -393,4 +400,32 @@ describe("a key read exactly carries no text (AB1; sibling: QL3's carriage)", ()
 				expect(texts.every((carried) => carried === undefined || carried === "")).toBe(true)
 			}
 	})
+})
+
+/*
+ * B2-7 of area B: a time key's stored value was carried as Postgres's text of it, which follows the
+ * session's DateStyle: under SQL a timestamptz reads as `01/01/2024 05:30:00.1231 IST`, whose zone
+ * abbreviation Postgres reads back as Israel's (Asia/Kolkata's IST) or as Pacific time (Asia/Manila's
+ * PST), so the cursor bound another instant. Ids are out of key order. 0.20.1 did the same.
+ */
+describe("a time key's carried value reads back as itself in any DateStyle (B2-7 of area B; sibling: QL2's carriage)", () => {
+	const sessions = usePg()
+
+	it.each([
+		["SQL, DMY", "Asia/Kolkata"],
+		["SQL, MDY", "Asia/Manila"],
+	])(
+		"pages a timestamptz(6) under DateStyle %s in %s, anchorless and anchored joined, every row once",
+		async (style, zone) => {
+			const client = sessions.pg()
+			await client.query(`SET DateStyle = '${style}'; SET TimeZone = '${zone}'`)
+			for (const shape of ["anchorless", "anchored joined"] as const)
+				for (const inside of [false, true])
+					for (const direction of ["asc", "desc"] as const)
+						expect(
+							await served(client, { direction, inside, key: "tz", shape }),
+							`${shape}${inside ? " inside an expression" : ""} ${direction}`,
+						).toEqual(SERVED[direction])
+		},
+	)
 })
