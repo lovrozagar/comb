@@ -84,8 +84,12 @@ export default defineConfig({
 		],
 		coverage: {
 			include: ["src/**", "lint/**"],
-			/* src/bin.ts is the three-line shim over runCli; it only runs as a process, which v8 does not see */
-			exclude: ["**/*.test.ts", "**/__fixtures__/**", "**/index.ts", "src/bin.ts"],
+			/*
+			 * src/bin.ts is the three-line shim over runCli; it only runs as a process, which v8 does not see.
+			 * A .d.mts declares a .mjs's types and holds no code; nothing loads one, so a run would try to
+			 * parse it as JavaScript for the uncovered files and print its parse error
+			 */
+			exclude: ["**/*.test.ts", "**/__fixtures__/**", "**/index.ts", "src/bin.ts", "**/*.d.mts"],
 			provider: "v8",
 			reporter: ["text", "json-summary"],
 			/*

@@ -95,6 +95,7 @@ Left out of the report, and why:
 | `**/*.test.ts`, `**/__fixtures__/**` | tests and their inputs are not the code under test                                                          |
 | `**/index.ts`                        | barrels hold re-exports only; `sibling-test.test.ts` fails if one gains runtime code                        |
 | `src/bin.ts`                         | the three-line shim over `runCli` runs only as a process, which v8 does not see; `runCli` itself is covered |
+| `**/*.d.mts`                         | declares a `.mjs`'s types and holds no code, so nothing loads it to measure                                 |
 
 ## Lint
 
