@@ -87,8 +87,11 @@ function over(owner: string | undefined, sessions: readonly Session[], now: numb
 	return !sessions.some((each) => String(each["pid"]) === pid && (each["start"] === null || each["start"] === start))
 }
 
-/** What a replay whose run is over left: its databases, each with the backends it left in it, and its tagged roles */
-type Leftovers = { databases: Array<{ name: string; pids: unknown[] }>; roles: string[] }
+/**
+ * What a replay whose run is over left: its databases, each with the backends it left in it and
+ * whether it is a template, and its tagged roles
+ */
+type Leftovers = { databases: Array<{ name: string; pids: unknown[]; template: boolean }>; roles: string[] }
 
 /**
  * What replays over at `now` left on `sql`'s server, which a sweep takes: the replay databases of
@@ -98,16 +101,16 @@ type Leftovers = { databases: Array<{ name: string; pids: unknown[] }>; roles: s
 async function leftovers(sql: Sql, now: number, droppable: boolean): Promise<Leftovers> {
 	const sessions = await sql.unsafe(SESSIONS, [])
 	const names = await sql.unsafe(
-		`SELECT datname FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%'${droppable ? " AND pg_has_role(datdba, 'USAGE')" : ""}`,
+		`SELECT datname, datistemplate FROM pg_database WHERE datname LIKE 'comb\\_replay\\_%'${droppable ? " AND pg_has_role(datdba, 'USAGE')" : ""}`,
 		[],
 	)
 	const databases: Leftovers["databases"] = []
-	for (const { datname } of names) {
+	for (const { datistemplate, datname } of names) {
 		const name = String(datname)
 		const owner = /^comb_replay_(\d+(?:_\d+)?)_[^_]+$/.exec(name)?.[1]
 		const inIt = sessions.filter((each) => each["datname"] === name)
 		if (over(owner, sessions, now) && inIt.every((each) => each["app"] === `${TAG} ${owner}`))
-			databases.push({ name, pids: inIt.map((each) => each["pid"]) })
+			databases.push({ name, pids: inIt.map((each) => each["pid"]), template: datistemplate === true })
 	}
 	const tagged = await sql.unsafe(
 		`SELECT r.rolname, d.description FROM pg_roles r JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE d.description LIKE 'comb\\_replay %'`,

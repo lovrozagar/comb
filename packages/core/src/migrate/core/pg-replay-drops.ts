@@ -73,12 +73,14 @@ async function dropRole(admin: Sql, role: string): Promise<void> {
 /**
  * Drop what replays over at `now` left, each drop that fails `leave`d: every replay database this
  * role may drop, whichever role made it (PR8 of r22b), once the backends its replay left in it are
- * ended (P4 of r22), and the tagged roles
+ * ended (P4 of r22) and one a template no more, and the tagged roles
  */
 async function sweep(admin: Sql, now: number, leave: Leave): Promise<void> {
 	const { databases, roles } = await leftovers(admin, now, true)
-	for (const { name, pids } of databases) {
+	for (const { name, pids, template } of databases) {
 		for (const pid of pids) await settle(() => admin.unsafe("SELECT pg_terminate_backend($1)", [pid]))
+		/* Postgres drops no template, which a committing DO can make the replay's database (AE8 of r22) */
+		if (template) await settle(() => admin.unsafe(`ALTER DATABASE ${sqlIdentifier(name)} IS_TEMPLATE false`, []))
 		await dropOr(leave, { swept: true, what: `database ${name}` }, () =>
 			admin.unsafe(`DROP DATABASE IF EXISTS ${sqlIdentifier(name)}`, []),
 		)

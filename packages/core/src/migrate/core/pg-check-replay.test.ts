@@ -36,7 +36,7 @@ const AROUND = {
 	],
 	before: [
 		expect.stringMatching(/^SELECT pid, datname, .* FROM pg_stat_activity$/),
-		expect.stringMatching(/^SELECT datname FROM pg_database/),
+		expect.stringMatching(/^SELECT datname, datistemplate FROM pg_database/),
 		expect.stringMatching(/^SELECT r\.rolname/),
 		expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
 		"SELECT set_config($1, $2, false), set_config($3, $4, false)",

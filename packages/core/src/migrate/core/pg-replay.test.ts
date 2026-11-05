@@ -54,7 +54,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 const SESSIONS = expect.stringMatching(/^SELECT pid, datname, .* FROM pg_stat_activity$/)
 const SWEEP = [
 	SESSIONS,
-	expect.stringMatching(/^SELECT datname FROM pg_database/),
+	expect.stringMatching(/^SELECT datname, datistemplate FROM pg_database/),
 	expect.stringMatching(/^SELECT r\.rolname/),
 	expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
 	"SELECT set_config($1, $2, false), set_config($3, $4, false)",
@@ -349,7 +349,7 @@ describe("replayCatalog stopped by a signal", () => {
 
 	it("drops the database a replay made after a signal that came before it, the host keeping the process", async () => {
 		const dev = fake([], (query) => {
-			if (query.startsWith("SELECT datname FROM pg_database")) process.emit("SIGINT", "SIGINT")
+			if (query.startsWith("SELECT datname, datistemplate FROM pg_database")) process.emit("SIGINT", "SIGINT")
 			return undefined
 		})
 		const killed = await signalled(

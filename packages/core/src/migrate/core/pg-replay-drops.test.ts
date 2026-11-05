@@ -169,6 +169,20 @@ describe("sweep of a replay killed mid-statement", () => {
 	})
 })
 
+/* AE8 of r22: a committing DO made the replay's database a template, which Postgres drops only once it is none */
+describe("sweep of a replay whose database is a template", () => {
+	it("makes it no template, then drops it", async () => {
+		const admin = fake((query) =>
+			query.startsWith("SELECT datname") ? [{ datistemplate: true, datname: "comb_replay_9_666_ffffffff" }] : [],
+		)
+		await sweep(admin.sql, 10 * STALE_MS, () => undefined)
+		expect(admin.sent.slice(3, 5)).toEqual([
+			'ALTER DATABASE "comb_replay_9_666_ffffffff" IS_TEMPLATE false',
+			'DROP DATABASE IF EXISTS "comb_replay_9_666_ffffffff"',
+		])
+	})
+})
+
 /** A connector whose target server holds a role a dead replay tagged, or nothing, each connection's options and end kept */
 function servers(left: boolean, dev: ReturnType<typeof fake> = fake()) {
 	const given: Array<Record<string, unknown>> = []

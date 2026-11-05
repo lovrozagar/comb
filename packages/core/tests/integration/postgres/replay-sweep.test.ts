@@ -72,17 +72,28 @@ const holds = async (name: string): Promise<boolean> =>
 	(await query(pgUrl(), `SELECT 1 FROM pg_database WHERE datname = '${name}'`)).length > 0
 
 /**
- * A stale replay's database `name` (pid 1 is no backend, so its replay is over), made a template, which no
- * sweep may drop: every other file's apply and check sweeps this server, and took a plain one, or its
- * tagged role, while the test still set it up ("tuple concurrently deleted" in a GRANT on it)
+ * A replay database planted held: its `name` and the `owner` a role's tag names are a live backend of
+ * the test's, whose replay no sweep counts over. Every other file's apply and check sweeps this server,
+ * and took a stale one, or its tagged role, while the test still set it up ("tuple concurrently
+ * deleted" in a GRANT on it). `release` ends that backend, so the replay is over and a sweep takes both
  */
-const plantHeld = (name: string, clause = ""): Promise<unknown> =>
-	query(pgUrl(), `CREATE DATABASE ${name} ${clause} IS_TEMPLATE true`)
-
-/** `name`, planted held, handed to any sweep; a template no sweep could drop, so only one still held */
-async function release(name: string): Promise<void> {
-	const held = await query(pgUrl(), `SELECT 1 FROM pg_database WHERE datname = '${name}' AND datistemplate`)
-	if (held.length > 0) await query(pgUrl(), `ALTER DATABASE ${name} IS_TEMPLATE false`)
+async function plantHeld(clause = ""): Promise<{ name: string; owner: string; release(): Promise<void> }> {
+	const holder = new pg.Client({ application_name: "comb_t_hold", connectionString: pgUrl() })
+	await holder.connect()
+	let ended: Promise<void> | undefined
+	const release = (): Promise<void> => (ended ??= holder.end())
+	try {
+		const { rows } = await holder.query(
+			"SELECT pid, (extract(epoch FROM backend_start) * 1000000)::bigint::text AS start FROM pg_stat_activity WHERE pid = pg_backend_pid()",
+		)
+		const owner = `${rows[0].pid}_${rows[0].start}`
+		const name = `comb_replay_${owner}_${unique("held").slice(-8)}`
+		await query(pgUrl(), `CREATE DATABASE ${name} ${clause}`)
+		return { name, owner, release }
+	} catch (error) {
+		await release()
+		throw error
+	}
 }
 
 /**
@@ -156,6 +167,56 @@ describe("a check killed by SIGKILL mid-replay", () => {
 				await write([`${UNSAFE}CREATE ROLE ${made};\n`])
 				await withScratchDb((target) => applyWithAtlas(options(dev, target)))
 				expect(await holds(left)).toBe(false)
+			}),
+		)
+	}, 60_000)
+})
+
+/** The replay database a check made a template, once its replay waits on `resume` in it, at most 30 s; a check that `ended` first fails with what it wrote */
+async function templateWaiting(resume: string, ended: Promise<string[]>): Promise<string> {
+	let gone: string[] | undefined
+	void ended.then((said) => (gone = said))
+	for (const deadline = Date.now() + 30_000; Date.now() < deadline; await new Promise((done) => setTimeout(done, 50))) {
+		if (gone !== undefined) throw new Error(`the check ended before its database was a template: ${gone.join("\n")}`)
+		const [row] = await query(
+			pgUrl(),
+			`SELECT d.datname FROM pg_database d JOIN pg_stat_activity a ON a.datname = d.datname WHERE d.datistemplate AND a.query LIKE '%${resume}%' AND a.pid <> pg_backend_pid()`,
+		)
+		if (row !== undefined) return String(row["datname"])
+	}
+	throw new Error("the replay never made its database a template")
+}
+
+describe("a check killed by SIGKILL after a committing DO made its database a template", () => {
+	leavesStale()
+
+	/* AE8 of r22: the sweep sent a plain DROP DATABASE, which Postgres refuses on a template */
+	it("is swept by the next check", async () => {
+		const resume = unique("comb_t_resume")
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				await write([
+					/* the wait inside the DO, past a COMMIT: the replay refuses the change as the statement ends, and drops its database */
+					`-- atlas:txmode none\n\n${UNSAFE}DO $$ BEGIN COMMIT; EXECUTE format('ALTER DATABASE %I IS_TEMPLATE true', current_database()); COMMIT; FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = '${resume}'); PERFORM pg_sleep(0.05); PERFORM pg_stat_clear_snapshot(); END LOOP; END $$;\n`,
+				])
+				const child = childCheck(dev, url, dir)
+				let [left, ended] = ["", false]
+				void child.ended.then(() => (ended = true))
+				try {
+					left = await templateWaiting(resume, child.ended)
+					await child.kill("SIGKILL")
+					expect((await child.ended).at(-1)).toBe("exit 137")
+					await pause.go(resume)
+					await write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
+					expect((await check(dev, url)).refused).toBeUndefined()
+					expect(await holds(left)).toBe(false)
+				} finally {
+					if (!ended) child.hardKill()
+					if (left !== "" && (await holds(left))) {
+						await query(pgUrl(), `ALTER DATABASE ${left} IS_TEMPLATE false`)
+						await query(pgUrl(), `DROP DATABASE ${left} WITH (FORCE)`)
+					}
+				}
 			}),
 		)
 	}, 60_000)
@@ -268,23 +329,20 @@ describe("a superuser's sweep of a replay another role left (PR8 of r22b)", () =
 	leavesStale()
 	it("drops that replay's database and role, so apply's CREATE ROLE of it passes", async () => {
 		const [made, other] = testRoles("comb_t_left", "comb_t_ci")
-		/* pid 1 is no backend, so the replay that made it is over */
-		const left = `comb_replay_1_1_${unique("pr8").slice(-8)}`
+		await query(pgUrl(), `CREATE ROLE ${other} CREATEDB`)
+		const { name: left, owner, release } = await plantHeld(`OWNER ${other}`)
 		try {
-			await query(pgUrl(), `CREATE ROLE ${other} CREATEDB`)
-			await plantHeld(left, `OWNER ${other}`)
 			await query(pgUrl(), `CREATE ROLE ${made} NOLOGIN`)
 			await query(pgUrl(), `GRANT CONNECT ON DATABASE ${left} TO ${made}`)
-			/* the tag last, as it makes the role a sweep's, and then the database */
-			await query(pgUrl(), `COMMENT ON ROLE ${made} IS 'comb_replay 1_1'`)
-			await release(left)
+			await query(pgUrl(), `COMMENT ON ROLE ${made} IS 'comb_replay ${owner}'`)
+			await release()
 			await write([`${UNSAFE}CREATE ROLE ${made};\n`])
 			await withScratchDb((dev) => withScratchDb((target) => applyWithAtlas(options(dev, target))))
 			/* the role there now is apply's own, made as the file says: the sweep dropped the replay's tagged one first */
 			const tag = `SELECT shobj_description(oid, 'pg_authid') AS tag FROM pg_roles WHERE rolname = '${made}'`
 			expect([await holds(left), await query(pgUrl(), tag)]).toEqual([false, [{ tag: null }]])
 		} finally {
-			await release(left)
+			await release()
 			await query(pgUrl(), `DROP DATABASE IF EXISTS ${left}`)
 		}
 	}, 60_000)
@@ -316,9 +374,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 	}, 60_000)
 
 	it("skips a stale replay database with a session in it, keeps the verdict, and the next run takes it", async () => {
-		/* pid 1 is no backend, so the replay that made it is over */
-		const stale = `comb_replay_1_1_${unique("busy").slice(-8)}`
-		await plantHeld(stale)
+		const { name: stale, release } = await plantHeld()
 		/* a person's psql, by its application_name, as P4 of r22 ends only a replay's own backends */
 		const session = new pg.Client({
 			application_name: "psql",
@@ -326,7 +382,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 		})
 		try {
 			await session.connect()
-			await release(stale)
+			await release()
 			await withScratchDb((dev) =>
 				withScratchDb(async (url) => {
 					await write(["CREATE TABLE t (id int PRIMARY KEY);\n"])
@@ -339,7 +395,7 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 			)
 		} finally {
 			await session.end().catch(() => undefined)
-			await release(stale)
+			await release()
 			await query(pgUrl(), `DROP DATABASE IF EXISTS ${stale}`)
 		}
 	}, 60_000)

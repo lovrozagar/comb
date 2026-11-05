@@ -380,11 +380,15 @@ declare function claim(admin: Sql): Promise<{
     owner: string;
     settings: Record<string, string>;
 }>;
-/** What a replay whose run is over left: its databases, each with the backends it left in it, and its tagged roles */
+/**
+ * What a replay whose run is over left: its databases, each with the backends it left in it and
+ * whether it is a template, and its tagged roles
+ */
 type Leftovers = {
     databases: Array<{
         name: string;
         pids: unknown[];
+        template: boolean;
     }>;
     roles: string[];
 };
