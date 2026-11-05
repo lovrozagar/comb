@@ -34,6 +34,32 @@ describe("limitSchemaFor", () => {
 	})
 })
 
+/*
+ * AB4-9 of area B: a count held at most the digits its maximum needs, so the query string comb accepts
+ * stays within maxQueryBytes; leading zeros past them held no number, and a 40 KB query parsed to limit 5
+ */
+describe("a limit or page of more digits than its maximum", () => {
+	it("takes a limit at the cap's digits, leading zeros included, and refuses one digit more as an issue on limit", () => {
+		const limit = limitSchemaFor(undefined)
+		expect(limit.parse("100")).toBe(100)
+		expect(limit.parse("005")).toBe(5)
+		for (const raw of ["0005", "0100", `${"0".repeat(20_000)}5`]) {
+			const parsed = z.object({ limit }).safeParse({ limit: raw })
+			expect(parsed.success, raw.slice(0, 8)).toBe(false)
+			expect(parsed.error?.issues.map((issue) => issue.path)).toEqual([["limit"]])
+		}
+	})
+
+	it("takes a page at maxPage's digits, refuses padding one digit past them as invalid_page, and keeps a deeper page for maxPage's page_too_deep", () => {
+		const page = pageSchemaFor(undefined)
+		expect(page.parse("00005")).toBe(5)
+		expect(page.parse("10000")).toBe(10_000)
+		for (const raw of ["000005", `${"0".repeat(20_000)}2`])
+			expect(() => page.parse(raw), raw.slice(0, 8)).toThrow(expect.objectContaining({ errorKey: "invalid_page" }))
+		expect(page.parse("100000")).toBe(100_000)
+	})
+})
+
 describe("pickExtended", () => {
 	it("takes the extension keys from the data, and nothing without extensions", () => {
 		expect(pickExtended({ include: z.string() }, { include: "a", other: 1 })).toEqual({ include: "a" })

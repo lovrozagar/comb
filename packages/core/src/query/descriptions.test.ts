@@ -66,7 +66,8 @@ describe("searchParamMeta", () => {
 describe("limitParamMeta", () => {
 	it("names the default and the cap, with each as an example, once when they are one", () => {
 		expect(limitParamMeta(5, 10)).toEqual({
-			description: "Maximum number of items per page, in decimal digits. Defaults to 5, at most 10.",
+			description:
+				"Maximum number of items per page, in decimal digits, zero-padded to at most 2 of them. Defaults to 5, at most 10.",
 			examples: [5, 10],
 		})
 		expect(limitParamMeta(10, 10).examples).toEqual([10])

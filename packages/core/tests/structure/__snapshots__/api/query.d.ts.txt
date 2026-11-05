@@ -576,7 +576,7 @@ import type { FieldType, FilterOperator } from "./types.ts";
 /** The OpenAPI description of the `cursor` param */
 declare const CURSOR_DESCRIPTION = "Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent.";
 /** The OpenAPI description of the `page` param */
-declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present.";
+declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, or zero-padded past maxPage's digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present.";
 /** The OpenAPI examples of the `page` param */
 declare const PAGE_EXAMPLES: number[];
 /** The OpenAPI description of the `lang` param */

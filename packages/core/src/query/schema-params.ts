@@ -76,13 +76,21 @@ type CountParam = z.ZodPreprocess<z.ZodNumber, unknown>
 /* a count in a query string: decimal digits, with no sign, space, fraction, exponent or 0x, 0b or 0o prefix (U36) */
 const DECIMAL_DIGITS = /^\d+$/
 
-/** `raw` as a number: as given, or read from decimal digits; NaN for any other string, which a number schema refuses */
-const fromDigits = (raw: unknown): unknown =>
-	typeof raw === "string" ? (DECIMAL_DIGITS.test(raw) ? Number(raw) : Number.NaN) : raw
+/**
+ * `raw` as a number: as given, or read from decimal digits, at most `max`'s unless the first is no
+ * zero; NaN for any other string, which a number schema refuses. Digits past `max`'s that start with
+ * no zero hold a number past it, which its bound refuses; leading zeros past them hold none, so the
+ * query string comb accepts stays within maxQueryBytes (AB4-9 of area B)
+ */
+function fromDigits(raw: unknown, max: number): unknown {
+	if (typeof raw !== "string") return raw
+	const padded = raw.length > String(max).length && raw.startsWith("0")
+	return DECIMAL_DIGITS.test(raw) && !padded ? Number(raw) : Number.NaN
+}
 
 /** `raw` as a page, a whole number from 1; anything else is invalid_page, as the builders answer it (U36) */
-function pageFrom(raw: unknown): unknown {
-	const page = fromDigits(raw)
+function pageFrom(raw: unknown, maxPage: number): unknown {
+	const page = fromDigits(raw, maxPage)
 	if (typeof page !== "number" || !Number.isInteger(page) || page < 1) throw invalidPage(raw)
 	return page
 }
@@ -99,7 +107,7 @@ function limitSchema(defaultLimit: number, maxLimit: number): z.ZodDefault<Count
 		.min(1)
 		.max(maxLimit)
 		.meta({ default: defaultLimit, ...limitParamMeta(defaultLimit, maxLimit) })
-	return z.preprocess(fromDigits, limit).default(defaultLimit)
+	return z.preprocess((raw) => fromDigits(raw, maxLimit), limit).default(defaultLimit)
 }
 
 const defaultLimitSchema = /* @__PURE__ */ limitSchema(PAGINATION_DEFAULTS.defaultLimit, PAGINATION_DEFAULTS.maxLimit)
@@ -148,7 +156,7 @@ function pageSchema(maxPage: number): z.ZodOptional<CountParam> {
 		.int()
 		.min(1)
 		.meta({ description: PAGE_DESCRIPTION, examples: PAGE_EXAMPLES, maximum: maxPage })
-	return z.preprocess(pageFrom, page).optional()
+	return z.preprocess((raw) => pageFrom(raw, maxPage), page).optional()
 }
 
 const defaultPageSchema = /* @__PURE__ */ pageSchema(PAGINATION_DEFAULTS.maxPage)
