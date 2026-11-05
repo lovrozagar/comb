@@ -51,9 +51,10 @@ export function usePg(): PgSessions {
  * need a whole clean database rather than TEMP tables. `run` gets its URL. Called in a test, the
  * database is also dropped when the test ends, so one vitest timed out, whose `run` never settles,
  * leaves none (plan 21 leaf 10.9); a database a killed run left is the global setup's sweep's
- * (scratch-sweep.ts). The name carries the millisecond it was made, which the sweep reads.
+ * (scratch-sweep.ts). The name carries the millisecond it was made, which the sweep reads. `options`
+ * follow CREATE DATABASE, such as a template and locale.
  */
-export async function withScratchDb<T>(run: (url: string) => Promise<T> | T): Promise<T> {
+export async function withScratchDb<T>(run: (url: string) => Promise<T> | T, options?: string): Promise<T> {
 	const server = new URL(pgUrl() as string)
 	const name = scratchName()
 	const admin = new pg.Client({ connectionString: server.href })
@@ -67,7 +68,7 @@ export async function withScratchDb<T>(run: (url: string) => Promise<T> | T): Pr
 	if (getCurrentTest() !== undefined) onTestFinished(release)
 	try {
 		await admin.connect()
-		await admin.query(`CREATE DATABASE ${name}`)
+		await admin.query(`CREATE DATABASE ${name}${options === undefined ? "" : ` ${options}`}`)
 		made = true
 	} catch (error) {
 		await release()
