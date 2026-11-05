@@ -207,7 +207,13 @@ function countOf(rowsPerShard: ReadonlyArray<readonly object[]>, cursor: string 
  */
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<readonly T[]>,
-	built: { pagination: ListPagination & { merged: true } },
+	built: {
+		/** the pagination buildListQuery returned for the list */
+		pagination: ListPagination & {
+			/** set when buildListQuery was given the `merged` option, so each shard reads the rows a merged page needs */
+			merged: true
+		}
+	},
 ): readonly [Array<ListRow<T>>, PaginationResponse] {
 	const pagination = paginationIn(built, true)
 	for (const shard of rowsPerShard) {

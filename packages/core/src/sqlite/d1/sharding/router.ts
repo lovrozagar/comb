@@ -47,6 +47,12 @@ class ShardRouter {
 	private readonly pick: ShardPick
 	private readonly totalShards: number
 
+	/**
+	 * Check `config` and fill its defaults: a RangeError when `totalShards` or `maxOrgsPerShard` is
+	 * no positive integer, or `kvTtlSeconds` is no integer of at least 60. Without `pick`, a new org
+	 * goes to the shard with the most room under `maxOrgsPerShard`; without `log`, only failures the
+	 * router absorbs reach console.warn.
+	 */
 	constructor(config: ShardRouterConfig) {
 		const { kvTtlSeconds, maxOrgsPerShard, totalShards } = routerSettings(config)
 		this.totalShards = totalShards
@@ -108,15 +114,16 @@ class ShardRouter {
 		return mapping
 	}
 
+	// Q13 and Q7 of r17
 	/**
 	 * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
 	 * named: a mapping cached here can predate a `move` in another isolate, since invalidate
 	 * reaches only this isolate's LRU and KV. When they are not, the primary is read past every
 	 * cache. When it names the shard just probed, the org's rows may not be there yet: that mapping
-	 * is returned, and nothing is written or logged (Q13 of r17). When it names another, or none,
-	 * the org is invalidated, the primary read again under the tombstone, and that mapping, or
-	 * undefined when the org is gone, returned without a second probe; it is cached only while no
-	 * invalidate here, a move's among them, came after the tombstone (Q7 of r17).
+	 * is returned, and nothing is written or logged. When it names another, or none, the org is
+	 * invalidated, the primary read again under the tombstone, and that mapping, or undefined when
+	 * the org is gone, returned without a second probe; it is cached only while no invalidate here,
+	 * a move's among them, came after the tombstone.
 	 */
 	async resolveVerified(
 		orgId: string,
@@ -161,10 +168,12 @@ class ShardRouter {
 		return this.placeFirst(placement, deps, executionCtx)
 	}
 
+	// R4
 	/**
 	 * Move an org to `shardId` and invalidate it here. Moving its rows is the app's; its writes on
 	 * the core database for the move (`with`) batch with the mapping's, landing together or not at
-	 * all (R4). Another isolate routes to the old shard until its caches expire or it verifies.
+	 * all. Another isolate routes to the old shard until its caches expire or it verifies. A
+	 * RangeError when `orgId` is over 64 UTF-16 code units or `shardId` is not a shard.
 	 */
 	async move(placement: ShardMove, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		const { orgId, shardId } = placement
@@ -182,23 +191,30 @@ class ShardRouter {
 		await this.invalidate(orgId, deps.kv)
 	}
 
+	// K2 of r22
 	/**
 	 * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
-	 * binding, in the type the env holds its shard bindings as (K2 of r22). An env typed by a string
-	 * index signature gives the D1 binding it holds, else D1DatabaseLike; one whose known keys hold no
-	 * `SHARD_DB_*` is refused.
+	 * binding, in the type the env holds its shard bindings as. An env typed by a string index
+	 * signature gives the D1 binding it holds, else D1DatabaseLike; one whose known keys hold no
+	 * `SHARD_DB_*` is refused. Throws when the env holds no binding under that key at run time.
 	 */
 	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>
+	// D2-1 and D2-2 of the area D round-two review; D3-1 of the round-three review
 	/**
 	 * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
 	 * parameter bounded by an env interface whose `SHARD_DB_0` is required: the binding type that key
-	 * holds, since shard 0 always exists, with every other `SHARD_DB_*` key it names a D1 binding
-	 * (D2-1 and D2-2 of the area D round-two review). An env bounded by no shard key is refused. So
-	 * is a bound whose `SHARD_DB_0` is optional, as `wrangler types` writes it when no shard is bound
-	 * at the top level: the helper widens its parameter to that env first, `const env: Env = given`,
-	 * and the first overload then gives shard 0's binding (D3-1 of the round-three review).
+	 * holds, since shard 0 always exists, with every other `SHARD_DB_*` key it names a D1 binding.
+	 * An env bounded by no shard key is refused. So is a bound whose `SHARD_DB_0` is optional, as
+	 * `wrangler types` writes it when no shard is bound at the top level: the helper widens its
+	 * parameter to that env first, `const env: Env = given`, and the first overload then gives
+	 * shard 0's binding. Throws when the env holds no binding under the mapping's key at run time.
 	 */
-	getHandle<E extends { readonly SHARD_DB_0: D1DatabaseLike }>(
+	getHandle<
+		E extends {
+			/** shard 0's D1 binding, which every sharded env holds */
+			readonly SHARD_DB_0: D1DatabaseLike
+		},
+	>(
 		mapping: ShardMapping,
 		env: E & { readonly [K in keyof E & `SHARD_DB_${string}`]?: D1DatabaseLike | undefined },
 	): ShardDbHandle<E["SHARD_DB_0"]>

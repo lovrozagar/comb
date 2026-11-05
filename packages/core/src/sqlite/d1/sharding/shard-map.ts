@@ -22,16 +22,24 @@ export function assertOrgId(orgId: string): void {
 
 /** Each column's builder, from the `c` factory that makes it */
 export type ShardMapColumns = {
+	/** when the org was first placed, in epoch milliseconds, filled on insert */
 	created_at: ReturnType<SqliteColumns["createdAt"]>
+	/** when the org was unplaced, in epoch milliseconds; null while its row is live */
 	deleted_at: ReturnType<SqliteColumns["deletedAt"]>
+	/** the kind of database the shard is, `"d1"` by default */
 	driver: HasDefault<NotNull<ReturnType<typeof c.enum<readonly ["d1"]>>>>
+	/** the org's id, the primary key, at most 64 UTF-16 code units */
 	org_id: IsPrimaryKey<ReturnType<SqliteColumns["text"]>>
+	/** the shard the org's rows are on */
 	shard_id: NotNull<ReturnType<SqliteColumns["integer"]>>
+	/** the suffix of the `SHARD_DB_<target>` binding the router opens, at most 128 characters; comb writes String(shard_id), so a hand-written move of shard_id writes it too */
 	target: NotNull<ReturnType<SqliteColumns["text"]>>
+	/** when the row last changed, in epoch milliseconds */
 	updated_at: ReturnType<SqliteColumns["updatedAt"]>
 }
 
-/* drizzle's own table type for these columns, so it follows each drizzle the peer range admits (rc.5 added `isAlias`) */
+// drizzle's own table type, so it follows each drizzle the peer range admits (rc.5 added `isAlias`)
+/** The drizzle table type of `shard_map`, for a query or a migration schema that names it */
 export type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>
 
 /* the table is built in a function so module scope runs one call, marked pure */
@@ -58,4 +66,10 @@ function defineShardMap(): ShardMapTable {
 	)
 }
 
+/**
+ * The core database's `shard_map` table, one row per org placed: which shard its rows are on.
+ * Include it in the core database's schema so its migrations create it, with an index on
+ * `shard_id` and one on `driver` over live rows. The router writes it; read it for an operator's
+ * view, and change a row through `router.move` so its caches are invalidated.
+ */
 export const shardMap: ShardMapTable = /* @__PURE__ */ defineShardMap()
