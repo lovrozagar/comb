@@ -128,7 +128,7 @@ function header(): string[] {
 		"/** Shared meta example objects for OpenAPI — avoids repeated inline allocations */",
 		"export const _m = {",
 		...SHARED_META_KEYS.map((key) => `\t${key}: ${SHARED_META_VALUES[key]},`),
-		/* literal, so isolatedDeclarations infers its arrays (C7 = K8 of r18) */
+		/* literal, so isolatedDeclarations infers its arrays */
 		"} as const",
 		"",
 		"/** Shared complete schemas — identical across all entities */",
@@ -140,10 +140,10 @@ function header(): string[] {
 		"/** Nullable timestamp field */",
 		"export const timestampNullableSchema = _intNN.max(globalThis.Number.MAX_SAFE_INTEGER).nullable()",
 		"",
-		"/** A JSON value that is no null at its top: null is its column's to take (C5 of r19); comb's one JSON value below it, so every document publishes it once, whatever the databases (CS9 of r22b, A2-1 of r22) */",
+		"/** A JSON value that is no null at its top: null is its column's to take; comb's one JSON value below it, so every document publishes it once, whatever the databases */",
 		"export const jsonValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(comb.jsonValue), z.record(z.string(), comb.jsonValue)])",
 		"",
-		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50), published as x-comb-cidr, which a field that names it states (CS8 of r22b, AA3) */",
+		"/** A Postgres cidr: an address, its prefix length, and no bit set past it, published as x-comb-cidr, which a field that names it states */",
 		`export const cidrSchema = ${inetRule()}.refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })`,
 		"",
 	]
@@ -174,7 +174,7 @@ export function generateSharedFile(
 
 /**
  * The lines without the zod import when nothing kept uses it, with comb's own predicates under its
- * namespace when they use one (C2 of r17), and an empty module when nothing is kept at all
+ * namespace when they use one, and an empty module when nothing is kept at all
  */
 function withoutUnusedImports(lines: readonly string[], combFrom: string): readonly string[] {
 	const uses = (pattern: RegExp) => lines.some((line) => line !== ZOD_IMPORT && pattern.test(line))
