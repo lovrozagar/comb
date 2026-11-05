@@ -121,7 +121,7 @@ function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "LockStmt") return lockFindings(node)
 	/* a PREPARE runs nothing itself: the EXECUTE that runs it is rated by what it runs (P21 of r19) */
 	if (type === "PrepareStmt") return [PREPARES]
-	/* an EXECUTE is the statement the file prepared, or one comb cannot read (classify-runtime.ts, PA15 of r22b) */
+	/* an EXECUTE is the statement the file prepared, or one comb cannot read (pg-tree.ts, PA15 of r22b) */
 	if (type === "ExecuteStmt") return []
 	if (type === "CopyStmt") return copyFindings(node)
 	return type === "ClusterStmt" ? [LOCKED] : undefined

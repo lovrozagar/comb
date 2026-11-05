@@ -1,32 +1,14 @@
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
-import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
-
-const none = () => []
-
-describe("preparedOf", () => {
-	it("reads each prepared statement's name and the code it runs", () => {
-		expect([...preparedOf(['PREPARE "s" (int) AS DELETE FROM t WHERE id = $1', "SELECT 1"])]).toEqual([
-			["s", "DELETE FROM t WHERE id = $1"],
-		])
-	})
-})
+import { runtimeFindings } from "./classify-runtime.ts"
 
 describe("runtimeFindings", () => {
-	it("reads an EXECUTE as what it runs, and one comb cannot read as cautious", () => {
-		const prepared = new Map([["s", "DELETE FROM t"]])
-		expect(runtimeFindings("EXECUTE s", prepared, () => [{ level: "unsafe" }])).toEqual([{ level: "unsafe" }])
-		expect(runtimeFindings("EXECUTE other", prepared, none)).toEqual([
-			{ level: "unsafe", note: "runs a prepared statement comb cannot read; approve it in the file" },
-		])
-	})
-
 	/* R4: every other pragma is unsafe by default-deny's rule alone, never also cautious here */
 	/* S1 of r19: the name is read unquoted, as SQLite reads it */
 	it.each(['PRAGMA "foreign_keys" = off', "PRAGMA [Foreign_Keys] = 0", "PRAGMA main.`foreign_keys` = false"])(
 		"rates %j as foreign_keys, cautious, quoted or not",
 		(sql) => {
-			expect(runtimeFindings(sql, new Map(), none).map((finding) => finding.level)).toEqual(["cautious"])
+			expect(runtimeFindings(sql).map((finding) => finding.level)).toEqual(["cautious"])
 		},
 	)
 
@@ -34,31 +16,29 @@ describe("runtimeFindings", () => {
 	it.each(["PRAGMA foreign_keys = on", "PRAGMA foreign_keys(1)", "PRAGMA foreign_keys"])(
 		"gives %j no finding of its own",
 		(sql) => {
-			expect(runtimeFindings(sql, new Map(), none)).toEqual([])
+			expect(runtimeFindings(sql)).toEqual([])
 		},
 	)
 
 	it("rates a quoted writable_schema unsafe", () => {
-		expect(runtimeFindings('PRAGMA "writable_schema" = 1', new Map(), none).map((finding) => finding.level)).toEqual([
-			"unsafe",
-		])
+		expect(runtimeFindings('PRAGMA "writable_schema" = 1').map((finding) => finding.level)).toEqual(["unsafe"])
 	})
 
 	it("rates a pragma by name: comb's own nothing, foreign_keys cautious, writable_schema unsafe, any other nothing", () => {
-		expect(runtimeFindings("PRAGMA main.defer_foreign_keys = on", new Map(), none)).toEqual([])
-		expect(runtimeFindings("PRAGMA foreign_keys = off", new Map(), none)).toEqual([
+		expect(runtimeFindings("PRAGMA main.defer_foreign_keys = on")).toEqual([])
+		expect(runtimeFindings("PRAGMA foreign_keys = off")).toEqual([
 			{
 				level: "cautious",
 				note: "does nothing inside the transaction comb runs each file in: foreign keys stay on, and comb migrate diff writes defer_foreign_keys instead",
 			},
 		])
-		expect(runtimeFindings("PRAGMA WRITABLE_SCHEMA = 1", new Map(), none)[0]?.level).toBe("unsafe")
-		expect(runtimeFindings("PRAGMA recursive_triggers = on", new Map(), none)).toEqual([])
-		expect(runtimeFindings("PRAGMA journal_mode = WAL", new Map(), none)).toEqual([])
+		expect(runtimeFindings("PRAGMA WRITABLE_SCHEMA = 1")[0]?.level).toBe("unsafe")
+		expect(runtimeFindings("PRAGMA recursive_triggers = on")).toEqual([])
+		expect(runtimeFindings("PRAGMA journal_mode = WAL")).toEqual([])
 	})
 })
 
-const rated = (code: string) => runtimeFindings(code, new Map(), none)
+const rated = (code: string) => runtimeFindings(code)
 const levels = (code: string) => rated(code).map((finding) => finding.level)
 
 /* SQLite reads a value it does not know as off, and SQLite versions read numbers apart, so no value SQLite reads

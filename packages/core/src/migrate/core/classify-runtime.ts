@@ -1,6 +1,6 @@
 /**
- * The destructive-change gate on statements whose effect is what they run at apply time or after: a
- * prepared statement executed later in the file, a rule (an INSTEAD NOTHING one discards writes) and its action, a SQLite trigger's body (run by
+ * The destructive-change gate on statements whose effect is what they run at apply time or after (an
+ * EXECUTE is pg-tree.ts's): a rule (an INSTEAD NOTHING one discards writes) and its action, a SQLite trigger's body (run by
  * every later write to its table), a sequence reset through setval (a COPY is pg-copy.ts's),
  * ownership handed to a role that bypasses row level security, and SQLite's foreign_keys pragma (writable_schema,
  * which can corrupt the schema, is unsafe; every other pragma comb does not write is unsafe by default-deny's rule alone).
@@ -8,10 +8,6 @@
 import type { Finding } from "./classify-alter.ts"
 import { IDENT, lastPart, pragmaOf } from "./sql-code.ts"
 
-// per-process-constant: patterns composed from the name grammar, compiled once
-const PREPARE = /* @__PURE__ */ new RegExp(`^PREPARE (${IDENT})(?: ?\\([^)]*\\))? AS (.+)$`, "i")
-// per-process-constant: see above
-const EXECUTE = /* @__PURE__ */ new RegExp(`^EXECUTE (${IDENT})`, "i")
 // per-process-constant: a rule's event, its table and whether it replaces the event, composed once
 const RULE = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:OR REPLACE )?RULE ${IDENT} AS ON (SELECT|INSERT|UPDATE|DELETE) TO (${IDENT}(?: ?\\. ?${IDENT})?)\\b.*?\\bDO (INSTEAD )?(NOTHING\\b)?`,
@@ -23,16 +19,6 @@ const TRIGGER = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?${IDENT}(?: ?\\. ?${IDENT})? .*?\\bON (${IDENT}(?: ?\\. ?${IDENT})?)(.*)$`,
 	"i",
 )
-
-/** The statements a file prepares, by name, with the code each runs */
-function preparedOf(codes: readonly string[]): Map<string, string> {
-	const out = new Map<string, string>()
-	for (const code of codes) {
-		const [, name, body] = PREPARE.exec(code) ?? []
-		if (name !== undefined && body !== undefined) out.set(lastPart(name), body)
-	}
-	return out
-}
 
 /** The findings of a pragma: foreign_keys off cautious, writable_schema unsafe, any other none of its own */
 function pragmaFinding(code: string): Finding | undefined {
@@ -91,22 +77,9 @@ function triggerFindings(code: string): Finding[] {
 		.map(() => ({ level: "unsafe" as const, note }))
 }
 
-/**
- * The findings of one statement for what it runs at apply time; `read` classifies the code an
- * EXECUTE runs, `prepared` holds what the file prepares
- */
-function runtimeFindings(
-	code: string,
-	prepared: ReadonlyMap<string, string>,
-	read: (code: string) => Finding[],
-): Finding[] {
+/** The findings of one statement for what it runs at apply time */
+function runtimeFindings(code: string): Finding[] {
 	const findings: Finding[] = []
-	const executed = EXECUTE.exec(code)?.[1]
-	const body = executed === undefined ? undefined : prepared.get(lastPart(executed))
-	if (body !== undefined) findings.push(...read(body))
-	else if (executed !== undefined || /^EXECUTE\b/i.test(code))
-		/* PA15 of r22b: an earlier file's PREPARE, on Atlas's one session, may hold any write */
-		findings.push({ level: "unsafe", note: "runs a prepared statement comb cannot read; approve it in the file" })
 	const rule = ruleFinding(code)
 	if (rule !== undefined) findings.push(rule)
 	findings.push(...triggerFindings(code))
@@ -123,4 +96,4 @@ function runtimeFindings(
 	return findings
 }
 
-export { preparedOf, runtimeFindings }
+export { runtimeFindings }

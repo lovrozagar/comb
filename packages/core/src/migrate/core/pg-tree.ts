@@ -22,7 +22,7 @@ import type { ExtractedSchema } from "../migration-types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
-import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
+import { type Facts, followTree, keyOf, names, tableOf } from "./pg-history.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
@@ -31,6 +31,7 @@ import { type Held, holdStatement } from "./pg-held.ts"
 import { heldScans } from "./pg-validate.ts"
 import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
+import { executedNodes, executeFindings } from "./pg-execute.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 import { staysPut } from "./pg-storage.ts"
 import { flag } from "./pg-nodes.ts"
@@ -251,17 +252,11 @@ function pgTreeFindings(
 		const note = `comb could not parse this as Postgres 17: ${(error as Error).message}`
 		return { findings: [{ level: "unsafe", note }], grammar: { treeRated: true } }
 	}
-	/* a PREPARE is rated as itself, never as the statement it holds (P21 of r19) */
 	const raws = tree.stmts as Array<{ stmt: Node }>
-	/* an EXECUTE is rated by the query it runs too, read where the EXECUTE runs it (PA15 of r22b) */
-	const runs = raws.flatMap((raw) => {
-		if ("PrepareStmt" in raw.stmt) return [{ stmt: { PrepareStmt: {} } }]
-		const query = ctx.preparing.get(String((raw.stmt["ExecuteStmt"] as Node | undefined)?.["name"]))
-		return query === undefined ? [raw] : [raw, { stmt: query }]
-	})
-	const nodes = nodesOf(runs)
+	const nodes = executedNodes(raws, ctx.preparing)
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
+		if (type === "ExecuteStmt") return executeFindings(node, ctx.preparing)
 		return [
 			...(refusingAs(stmt, () => ddlFindings(type, node, ctx.facts)) ?? []),
 			...(type === "AlterTableStmt" ? [...constraintIndexWarnings(node, ctx), ...heldScans(node, ctx)] : []),

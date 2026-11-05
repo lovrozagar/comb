@@ -1,9 +1,9 @@
 /**
- * PA15 of r22b: a Postgres file's COPY and EXECUTE rated by what they do, as the pinned Atlas runs
- * them (tests/integration/postgres/copy-execute-oracle.test.ts), never as statements comb does not
+ * PA15 of r22b: a Postgres file's COPY rated by what it does, as the pinned Atlas runs it
+ * (tests/integration/postgres/copy-execute-oracle.test.ts), never as a statement comb does not
  * recognize. Atlas's driver cannot run a COPY FROM STDIN or TO STDOUT, so the check refuses one; a
  * COPY that runs a program or writes a server file reaches past the database; a COPY from a server
- * file loads rows; an EXECUTE is the statement the file prepared, or one comb cannot read.
+ * file loads rows.
  */
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
@@ -75,33 +75,4 @@ describe("a COPY with a server file or program (PA15 of r22b)", () => {
 			"does not recognize",
 		)
 	})
-})
-
-describe("an EXECUTE (PA15 of r22b)", () => {
-	it("is the statement the file prepared", () => {
-		expect(rated("PREPARE p AS SELECT 1;\nEXECUTE p;")).toEqual({
-			cautiousStatements: [
-				"PREPARE p AS SELECT 1 (prepares a statement for an EXECUTE, which comb rates by the statement it runs)",
-			],
-			safety: "cautious",
-			unsafeStatements: [],
-		})
-		expect(rate("PREPARE p (int) AS DELETE FROM t WHERE id = $1;\nEXECUTE p(1);").unsafeStatements).toEqual([
-			"EXECUTE p(1) (deletes rows of t)",
-		])
-		expect(rate('PREPARE "P" AS UPDATE t SET id = 2;\nEXECUTE "P";').unsafeStatements).toEqual([
-			'EXECUTE "P" (updates existing rows of t (id))',
-		])
-	})
-
-	it.each(["EXECUTE nothere;", "EXECUTE nothere(1);"])(
-		"rates %j, whose statement an earlier file or session prepared, unsafe",
-		(sql) => {
-			expect(rated(sql)).toEqual({
-				cautiousStatements: [],
-				safety: "unsafe",
-				unsafeStatements: [`${sql.slice(0, -1)} (runs a prepared statement comb cannot read; approve it in the file)`],
-			})
-		},
-	)
 })

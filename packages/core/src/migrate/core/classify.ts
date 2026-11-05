@@ -23,7 +23,7 @@ import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
-import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
+import { runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts } from "./pg-history.ts"
 import type { Node } from "./pg-nodes.ts"
@@ -68,8 +68,6 @@ type FileContext = RebuildContext & {
 	schema: ExtractedSchema
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
-	/** the statements the file prepares, by name, with the code each runs */
-	prepared: Map<string, string>
 	/** on Postgres, the query each PREPARE so far holds, by the name Postgres keys it under (pg-tree.ts) */
 	preparing: Map<string, Node>
 }
@@ -163,7 +161,7 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 		return [{ level: "cautious", note: "an FTS index comb rebuilds from its content table" }]
 	const findings: Finding[] = ctx.dialect === "postgres" ? pgTextFindings(code) : sqliteDropFindings(code)
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	findings.push(...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, ctx)))
+	findings.push(...runtimeFindings(code))
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
 		if (index !== undefined) findings.push(index)
@@ -229,7 +227,6 @@ function readFile(
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
 		fresh: freshStart(before),
 		txmodeNone: dialect === "sqlite" && outsideTransaction(sql),
-		prepared: preparedOf(codes),
 		drops: new Map(),
 		fired: guards.fired,
 		rebuilds,

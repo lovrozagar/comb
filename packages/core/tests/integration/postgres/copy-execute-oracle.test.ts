@@ -8,6 +8,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import pg from "pg"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
@@ -85,5 +86,26 @@ describe("a COPY or an EXECUTE, as the pinned Atlas runs it on Postgres 17 (PA15
 			"fails: sql/migrate: write revision: pq: current transaction is aborted, commands ignored until end of transaction block (25P02)",
 		)
 		expect(comb(["EXECUTE nothere(1);\n"])).toBe("unsafe")
+	}, 60_000)
+
+	/* AE2-2 of r22: an EXECUTE under a CREATE TABLE AS runs the prepared statement's writes as a bare one does */
+	it("has a CREATE TABLE AS EXECUTE delete the rows its PREPARE names, which comb rates unsafe", async () => {
+		const file = "PREPARE p AS WITH d AS (DELETE FROM t RETURNING id) SELECT id FROM d;\nCREATE TABLE x AS EXECUTE p;\n"
+		const left = await withScratchDb(async (url) => {
+			for (const [i, each] of [`${TABLE}INSERT INTO t VALUES (1), (2);\n`, file].entries())
+				writeFileSync(join(dir, `${i + 1}_m.sql`), each)
+			await hashDir(run, dir)
+			const ran = await run("atlas", ["migrate", "apply", "--url", url, "--dir", `file://${dir}`])
+			const client = new pg.Client({ connectionString: url })
+			await client.connect()
+			try {
+				const { rows } = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM t")
+				return { code: ran.code, rows: rows[0]?.n }
+			} finally {
+				await client.end()
+			}
+		})
+		expect(left).toEqual({ code: 0, rows: 0 })
+		expect(comb([file])).toBe("unsafe")
 	}, 60_000)
 })
