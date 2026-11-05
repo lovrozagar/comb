@@ -12,6 +12,7 @@ import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { type Command, needsOf, PEERS, type Provider } from "../../src/migrate/core/peer-needs.ts"
 import { ATLAS_RANGE, type BinPeer } from "../../src/migrate/core/process.ts"
+import { LOCAL_LOCK_MS } from "../../src/migrate/drivers/d1-lock.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const REPO = join(ROOT, "../..")
@@ -269,17 +270,20 @@ const ftsAdds = (): Array<readonly [Provider, Command]> => {
 }
 
 /* D4-6 of the area D round-four review: item 2 promises what a Bun single-file executable refuses */
-describe("README peer install upgrade item", () => {
-	const item =
-		/^\d+\. \*\*Install `wrangler` and `drizzle-kit` in the project that runs comb\.\*\*.*$/m.exec(README)?.[0] ?? ""
-	const refused = item.split(/(?<=\.) /).find((sentence) => sentence.includes("are refused in such an executable"))
+const installItem =
+	/^\d+\. \*\*Install `wrangler` and `drizzle-kit` in the project that runs comb\.\*\*.*$/m.exec(README)?.[0] ?? ""
+/** Item 2's sentence on what a compiled executable refuses */
+const installRefused = installItem
+	.split(/(?<=\.) /)
+	.find((sentence) => sentence.includes("are refused in such an executable"))
 
+describe("README peer install upgrade item", () => {
 	it("says codegen's analyze and the D1 commands but diff are refused in a compiled executable, and why", () => {
-		expect(item).toContain("an app compiled to one executable")
-		expect(refused).toContain("Codegen's `analyze`")
-		expect(refused).toContain("(`status`, `check`, `apply` and `baseline`)")
-		expect(refused).toMatch(/cannot read the modules the executable embeds/)
-		expect(refused).toMatch(/run them with bun or node/)
+		expect(installItem).toContain("an app compiled to one executable")
+		expect(installRefused).toContain("Codegen's `analyze`")
+		expect(installRefused).toContain("(`status`, `check`, `apply` and `baseline`)")
+		expect(installRefused).toMatch(/cannot read the modules the executable embeds/)
+		expect(installRefused).toMatch(/run them with bun or node/)
 	})
 
 	/* D5-2 follow-up: the commands item 2 says are refused are those whose peer table row loads a peer, drizzle-kit
@@ -293,7 +297,7 @@ describe("README peer install upgrade item", () => {
 		)
 		const said: Record<string, string[]> = {}
 		/* D6-3 of the area D round-six review: the whole exception list, so a second "and `migrate x`" is read */
-		for (const [, list, but] of (refused ?? "").matchAll(
+		for (const [, list, but] of (installRefused ?? "").matchAll(
 			/every ((?:[\w ,]+?)) command but ((?:`migrate \w+`(?:, | and )?)+)/g,
 		))
 			for (const name of (list as string).split(/, | and /))
@@ -310,20 +314,39 @@ describe("README peer install upgrade item", () => {
 		const sqlite = (Object.keys(PEERS) as Provider[]).filter((provider) => provider !== "postgres").sort()
 		expect([...new Set(added.map(([provider]) => provider))].sort()).toEqual(sqlite)
 		for (const verb of new Set(added.map(([, command]) => command)))
-			expect(refused).toContain(`a SQLite \`migrate ${verb}\` whose comb.config.ts declares FTS`)
+			expect(installRefused).toContain(`a SQLite \`migrate ${verb}\` whose comb.config.ts declares FTS`)
 	})
 
 	/* D5-2 of the area D round-five review: libsql, Turso and Postgres load their peers in process too */
 	it("says the libsql, Turso and Postgres commands that load a peer are refused there, naming each peer", () => {
-		expect(refused).toContain("every D1, libsql and Turso command but `migrate diff`")
-		expect(refused).toContain("every Postgres command but `migrate status`")
-		expect(refused).toContain("`loadPostgresParser`")
+		expect(installRefused).toContain("every D1, libsql and Turso command but `migrate diff`")
+		expect(installRefused).toContain("every Postgres command but `migrate status`")
+		expect(installRefused).toContain("`loadPostgresParser`")
 		/* D6-6 of the area D round-six review: the libsql and Turso providers an app calls load @libsql/client too */
-		expect(refused).toContain(
+		expect(installRefused).toContain(
 			"`createLibsqlProvider`, `createTursoProvider` and `createProvider` for a libsql or Turso config",
 		)
 		for (const peer of ["wrangler", "@libsql/client", "libpg-query", "postgres"])
-			expect(refused).toContain(`\`${peer}\``)
+			expect(installRefused).toContain(`\`${peer}\``)
+	})
+})
+
+/* AD7-12 of the area D round-seven review: the seconds the D1 provider waits on a locked local database */
+describe("README D1 provider's local lock", () => {
+	it("says the wait LOCAL_LOCK_MS sets", () => {
+		const seconds = /is waited for, up to (\d+(?:\.\d+)?) s, then refused naming the lock/.exec(README)?.[1]
+		expect(Number(seconds) * 1000).toBe(LOCAL_LOCK_MS)
+	})
+})
+
+describe("README peer install upgrade item's reason", () => {
+	/* AD7-12 of the area D round-seven review: the reason named the FTS command's child process unpinned */
+	it("gives a child process as the reason for each command a declared FTS adds a child-loaded need to", () => {
+		const reason =
+			/each with the reason: ([^,]+(?:, [^,]+)*?) run a child process/.exec(installRefused ?? "")?.[1] ?? ""
+		const verbs = [...new Set(ftsAdds().map(([, command]) => command))]
+		expect(verbs.filter((verb) => !reason.includes(`an FTS ${verb}`))).toEqual([])
+		expect(verbs.length).toBeGreaterThan(0)
 	})
 })
 

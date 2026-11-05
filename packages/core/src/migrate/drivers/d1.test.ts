@@ -8,6 +8,23 @@ import { asCalled, wranglerBin } from "../../cli/__fixtures__/d1.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
 
+/* the steps a wait holds for a signal and has not let go of, through cleanup's own hold */
+const unreleased = vi.hoisted(() => new Set<unknown>())
+vi.mock("../core/cleanup.ts", async (original) => {
+	const real = await original<typeof import("../core/cleanup.ts")>()
+	return {
+		...real,
+		hold: (step: Parameters<typeof real.hold>[0]) => {
+			const release = real.hold(step)
+			unreleased.add(step)
+			return () => {
+				unreleased.delete(step)
+				release()
+			}
+		},
+	}
+})
+
 /** A runner that answers each call, recording a wrangler spawn as `wrangler` and its own arguments; `spawns` keeps them raw */
 function fakeRun(answer: (call: Call) => RunResult): Run & { calls: Call[]; spawns: Call[] } {
 	const calls: Call[] = []
@@ -272,6 +289,38 @@ const slowly =
 		await new Promise((resolve) => setTimeout(resolve, 6000))
 		return run(...args)
 	}
+
+describe("createD1Provider: how long a local database another process has locked is waited for", () => {
+	fakeClock()
+
+	/* AD7-12 of the area D round-seven review: a 100 ms loop of wrangler spawns, or a 1 s window, passed */
+	it("runs a busy request again at 100, 300 and 700 ms, doubling, and refuses at 5 s, not before", async () => {
+		const start = Date.now()
+		const at: number[] = []
+		const run = fakeRun(() => {
+			at.push(Date.now() - start)
+			return BUSY
+		})
+		let settled = false
+		const failed = (await connect(run, LOCAL)).execute("x").then(unexpected, (error: unknown) => error as Error)
+		void failed.then(() => {
+			settled = true
+		})
+		await vi.advanceTimersByTimeAsync(4999)
+		const early = settled
+		await vi.advanceTimersByTimeAsync(1)
+		expect([at, early, (await failed).message]).toEqual([[0, 100, 300, 700, 1500, 3100, 5000], false, LOCKED])
+	})
+
+	it("lets go of what it held for a signal once each wait ends", async () => {
+		unreleased.clear()
+		const run = answering(BUSY, BUSY, json([{ results: [{ n: 1 }] }]))
+		const rows = (await connect(run, LOCAL)).execute("SELECT 1 AS n")
+		await vi.advanceTimersByTimeAsync(1000)
+		await rows
+		expect(unreleased.size).toBe(0)
+	})
+})
 
 describe("createD1Provider: a local database another process has locked", () => {
 	fakeClock()

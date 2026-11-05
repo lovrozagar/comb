@@ -285,6 +285,14 @@ function readOnlyAt(url: string) {
 }
 
 describe("libsql for a reader, its file: path decoded as libsql reads it (M80)", () => {
+	/* AD7-12 of the area D round-seven review: an in-memory database sent down the file path refuses as a missing file */
+	it.each([":memory:", "file::memory:"])("opens %s for a reader, and answers it", async (url) => {
+		const conn = await readOnlyAt(url)
+		const { rows } = await conn.execute("SELECT 1")
+		await conn.close()
+		expect(rows).toEqual([[1]])
+	})
+
 	it("refuses a URL whose decoded file is missing beside a file named as the URL spells it, and creates none", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-m80-"))
 		writeFileSync(join(dir, "a%20b.db"), "")
