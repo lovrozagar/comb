@@ -14,7 +14,7 @@ export type Unexported = Map<string, string>
 
 /** What the declaration files `entries` export, and every local type under `dir` they name that none exports */
 export function unexportedIn(dir: string, entries: readonly string[]): Unexported {
-	const { checker, program } = checkerOf(entries)
+	const { checker, program } = checkerOf(dir, entries)
 	const local = (symbol: ts.Symbol) => symbol.declarations?.[0]?.getSourceFile().fileName.startsWith(dir) === true
 	const exported = new Set(
 		entries.flatMap((file) => {
@@ -54,7 +54,7 @@ export type BySubpath = { exports: Map<string, Set<string>>; found: Map<string, 
  */
 export const unexportedBySubpath = (root: string): BySubpath =>
 	withEmitted(root, ({ dir, entries }) => {
-		const { checker, program } = checkerOf(Object.values(entries))
+		const { checker, program } = checkerOf(dir, Object.values(entries))
 		const exports = new Map(
 			exportsBySubpath(checker, program, entries).map(([subpath, symbols]) => [
 				subpath,

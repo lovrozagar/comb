@@ -6,9 +6,8 @@
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { createRequire } from "node:module"
-import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { ts } from "ts-morph"
+import { Project, ts } from "ts-morph"
 
 /**
  * An exports entry: a file, or from 0.19 the declaration a consumer's tsc reads and the source that
@@ -36,9 +35,14 @@ function subpaths(root: string): Array<[string, ExportTarget]> {
 	return Object.entries(exports).filter(([subpath]) => subpath !== "./package.json")
 }
 
-/** `use` run on the declarations tsconfig.strict.json emits for the package at `root`, which are gone after */
+/**
+ * `use` run on the declarations tsconfig.strict.json emits for the package at `root`, which are gone
+ * after. They are emitted inside the package, so their imports of its dependencies resolve, as a
+ * consumer's do: in a folder outside it, drizzle-orm and zod resolved to nothing, and the types that
+ * name them read as `any`.
+ */
 export function withEmitted<T>(root: string, use: (declarations: Declarations) => T): T {
-	const dir = mkdtempSync(join(tmpdir(), "comb-declarations-"))
+	const dir = mkdtempSync(join(root, ".tmp-declarations-"))
 	try {
 		const tsc = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc")
 		const args = ["-p", join(root, "tsconfig.strict.json"), "--noEmit", "false", "--emitDeclarationOnly"]
@@ -62,16 +66,41 @@ export function packedDeclarations(dir: string): Declarations {
 	return { dir, entries: Object.fromEntries(entries) }
 }
 
-/** A checker over the declaration files `entries`, as a consumer's bundler project reads them */
-export function checkerOf(entries: readonly string[]): { checker: ts.TypeChecker; program: ts.Program } {
-	const program = ts.createProgram([...entries], {
-		module: ts.ModuleKind.ESNext,
-		moduleResolution: ts.ModuleResolutionKind.Bundler,
-		noEmit: true,
-		skipLibCheck: true,
-		strict: true,
-		target: ts.ScriptTarget.ES2023,
+/** Each error a compiler reports for the declaration files under `dir`, or for the program as a whole */
+export function diagnosticsIn(program: ts.Program, dir: string): string[] {
+	const files = program.getSourceFiles().filter((file) => file.fileName.startsWith(dir))
+	return [
+		...program.getOptionsDiagnostics(),
+		...program.getGlobalDiagnostics(),
+		...files.flatMap((file) => [...program.getSyntacticDiagnostics(file), ...program.getSemanticDiagnostics(file)]),
+	].map(
+		(diagnostic) =>
+			`${diagnostic.file?.fileName.slice(dir.length + 1) ?? "program"}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`,
+	)
+}
+
+/**
+ * A checker over the declaration files `files` under `dir`, as a consumer's bundler project reads them. It is built through
+ * ts-morph, whose compiler serves TypeScript's libs, and it throws for any error the declarations
+ * hold: a lib or an import it cannot find reads as `any`, which answers every question asked of it.
+ */
+export function checkerOf(dir: string, files: readonly string[]): { checker: ts.TypeChecker; program: ts.Program } {
+	const project = new Project({
+		compilerOptions: {
+			module: ts.ModuleKind.ESNext,
+			moduleResolution: ts.ModuleResolutionKind.Bundler,
+			noEmit: true,
+			strict: true,
+			target: ts.ScriptTarget.ES2023,
+			/* comb's declarations name `NodeJS` and node's modules, as its own tsconfig's `types` does */
+			types: ["node"],
+		},
+		skipAddingFilesFromTsConfig: true,
 	})
+	project.addSourceFilesAtPaths([...files])
+	const program = project.getProgram().compilerObject
+	const errors = diagnosticsIn(program, dir)
+	if (errors.length > 0) throw new Error(`the declarations under ${dir} do not check:\n${errors.join("\n")}`)
 	return { checker: program.getTypeChecker(), program }
 }
 

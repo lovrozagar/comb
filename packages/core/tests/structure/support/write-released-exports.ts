@@ -5,7 +5,6 @@
  */
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { releasedApiOf } from "./exports-of.ts"
 
@@ -13,7 +12,8 @@ const version = process.argv[2]
 if (version === undefined) throw new Error("name the release's version, such as 0.20.1")
 const response = await fetch(`https://registry.npmjs.org/@lovrozagar/comb/-/comb-${version}.tgz`)
 if (!response.ok) throw new Error(`comb ${version}: the registry answered ${response.status}`)
-const dir = mkdtempSync(join(tmpdir(), "comb-released-"))
+/* unpacked inside the package, so the release's declarations resolve its dependencies */
+const dir = mkdtempSync(join(import.meta.dirname, "../../..", ".tmp-released-"))
 try {
 	writeFileSync(join(dir, "comb.tgz"), new Uint8Array(await response.arrayBuffer()))
 	const untar = spawnSync("tar", ["-xzf", join(dir, "comb.tgz"), "-C", dir], { encoding: "utf8" })

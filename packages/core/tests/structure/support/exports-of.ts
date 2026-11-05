@@ -137,7 +137,7 @@ function memberReader(
 
 /** The hashes of what `declarations` exports, by subpath and name, and the members of each type they reach */
 function apiIn({ dir, entries }: Declarations): Api {
-	const { checker, program } = checkerOf(Object.values(entries))
+	const { checker, program } = checkerOf(dir, Object.values(entries))
 	const bySubpath = exportsBySubpath(checker, program, entries)
 	const local = (symbol: ts.Symbol) => symbol.declarations?.[0]?.getSourceFile().fileName.startsWith(dir) === true
 	const reachedTypes = new Set<ts.Symbol>()
