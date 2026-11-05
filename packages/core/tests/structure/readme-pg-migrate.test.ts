@@ -6,12 +6,11 @@
  * atlas-history.ts), where the README said it warned. Sibling: the session paragraph
  * (readme-pg-session.test.ts).
  */
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { README, section } from "./support/readme.ts"
 
-const README = readFileSync(join(import.meta.dirname, "../../../..", "README.md"), "utf8")
-const [docs = "", upgrade = ""] = README.split(/\n## Upgrading to 0\.21\n/)
+const [docs = ""] = README.split("\n## Upgrading to 0.21\n")
+const upgrade = section("Upgrading to 0.21")
 
 /** The README paragraph, outside the upgrade notes, that holds `marker` */
 function paragraph(marker: string): string {
@@ -22,6 +21,13 @@ function paragraph(marker: string): string {
 function sentence(text: string, marker: string): string {
 	return text.split(/(?<=\.) (?=[`A-Z])/).find((part) => part.includes(marker)) ?? ""
 }
+
+describe("the 0.21 upgrade notes these tests read (AE2-10)", () => {
+	it("end where the 0.20.1 notes start", () => {
+		expect(upgrade).not.toContain("\n## Upgrading to 0.20")
+		expect(upgrade).toContain("Run comb on Node 22.13 or later")
+	})
+})
 
 describe("the README on Postgres's outside-transaction statements (PA14 of r22b)", () => {
 	const list = sentence(

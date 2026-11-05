@@ -4,12 +4,11 @@
  * and the 0.21 upgrade notes tell a history that relied on an earlier file's SET to set it in each
  * file. Sibling: the SQLite paragraph's "the next file runs as it would alone" (S1 of r21).
  */
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { README, section } from "./support/readme.ts"
 
-const README = readFileSync(join(import.meta.dirname, "../../../..", "README.md"), "utf8")
-const [docs = "", upgrade = ""] = README.split(/\n## Upgrading to 0\.21\n/)
+const [docs = ""] = README.split("\n## Upgrading to 0.21\n")
+const upgrade = section("Upgrading to 0.21")
 
 /** The README paragraph, outside the upgrade notes, that holds `marker` */
 function paragraph(marker: string): string {
