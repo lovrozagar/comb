@@ -175,6 +175,13 @@ async function prepare(
 	return waits
 }
 
+/*
+ * the startup settings Atlas's session applies a file on, which the replay's opens with too: Atlas's
+ * driver pins DateStyle, and the target URL carries the schema, a plain name, as search_path, so a
+ * RESET or DISCARD ALL returns to them and a date reads month first on any server (PR3 of r22b)
+ */
+const ATLAS_SESSION = { DateStyle: "ISO, MDY" } as const
+
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
@@ -188,7 +195,7 @@ async function opening(
 	{ connect, stops }: { connect: Connect; stops: string },
 ): Promise<{ open: () => Sql; run: Run }> {
 	const { owner, settings } = await claim(admin)
-	const search = { ...settings, search_path: sqlIdentifier(target.schema) }
+	const search = { ...settings, ...ATLAS_SESSION, search_path: target.schema }
 	const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${stops}`))
 	const open = () => connect(replayOptions(target.devUrl, { database, settings: search }))
 	const run: Run = {

@@ -127,11 +127,11 @@ describe("replayCatalog", () => {
 			application_name: "comb_replay 7_9",
 			client_connection_check_interval: "1s",
 		})
-		/* the prepare's session, then one for each file, as apply gives each an Atlas call (PA1 of r22b), each searching the schema from its start */
+		/* the prepare's session, then one for each file, as apply gives each an Atlas call (PA1 of r22b), each searching the schema and reading dates month first from its start, as Atlas's session does (PR3 of r22b) */
 		const sessions = dev.given.slice(1) as Array<{ connection: Record<string, string>; database: string }>
-		expect(sessions.map((each) => [each.database, each.connection["search_path"]])).toEqual(
-			Array.from({ length: 3 }, () => [replay.database, '"app"']),
-		)
+		expect(
+			sessions.map((each) => [each.database, each.connection["search_path"], each.connection["DateStyle"]]),
+		).toEqual(Array.from({ length: 3 }, () => [replay.database, "app", "ISO, MDY"]))
 	})
 })
 
