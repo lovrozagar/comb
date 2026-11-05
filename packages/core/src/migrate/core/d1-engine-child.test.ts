@@ -108,12 +108,25 @@ describe("prove: each file on D1's own engine (SD1 of r22)", () => {
 			/^1_g\.sql: D1 refuses this file on its own engine, .*not authorized to use function: ceiling/,
 		)
 	}, 120_000)
+})
 
+/* SD1 of r22: D1 resolves a function in a trigger, a view or a generated column only when a statement runs it */
+describe("prove: what D1 applies and then cannot run", () => {
 	it.each([
 		[
 			"a trigger body",
 			"CREATE TABLE sq (id INTEGER PRIMARY KEY, v REAL);\nCREATE TRIGGER t_sq AFTER INSERT ON t BEGIN INSERT INTO sq (id, v) VALUES (new.id, power(new.v, 2)); END;",
 			/then refuses INSERT INTO "t" DEFAULT VALUES: .*not authorized to use function: power/,
+		],
+		[
+			"an UPDATE trigger's body",
+			"CREATE TRIGGER t_up AFTER UPDATE ON t BEGIN SELECT power(new.v, 2); END;",
+			/then refuses UPDATE "t" SET "id" = "id", "v" = "v": .*not authorized to use function: power/,
+		],
+		[
+			"a DELETE trigger's body",
+			"CREATE TRIGGER t_del AFTER DELETE ON t BEGIN SELECT power(old.v, 2); END;",
+			/then refuses DELETE FROM "t": .*not authorized to use function: power/,
 		],
 		[
 			"a view",
