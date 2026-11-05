@@ -87,10 +87,11 @@ function ruleFindings(table: string, action: string, ctx: AlterContext): Finding
 			]
 }
 
-/** The findings of an ALTER TABLE, action by action; undefined for code that is not one */
-function alterTableFindings(code: string, ctx: AlterContext): Finding[] | undefined {
+/** The findings of an ALTER TABLE, action by action; one unsafe finding for an ALTER TABLE comb cannot read */
+function alterTableFindings(code: string, ctx: AlterContext): Finding[] {
 	const [, table, actions] = ALTER_TABLE.exec(code) ?? []
-	if (table === undefined || actions === undefined) return undefined
+	if (table === undefined || actions === undefined)
+		return [{ level: "unsafe", note: "comb does not recognize this ALTER TABLE; approve it in the file" }]
 	return splitTopLevel(actions).flatMap((action) => ruleFindings(table, action, ctx))
 }
 

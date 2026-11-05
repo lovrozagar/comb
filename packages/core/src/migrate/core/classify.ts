@@ -158,7 +158,7 @@ function findingsOf(code: string, ctx: FileContext): Finding[] {
 	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), ctx)
 	if (!/^ALTER TABLE\b/i.test(code)) return statementFindings(code, ctx)
 	/* on Postgres an ALTER TABLE is rated from its parse tree, command by command (pg-ddl.ts, M70) */
-	return ctx.dialect === "postgres" ? [] : (alterTableFindings(code, ctx) ?? statementFindings(code, ctx))
+	return ctx.dialect === "postgres" ? [] : alterTableFindings(code, ctx)
 }
 
 /**

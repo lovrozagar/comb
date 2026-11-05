@@ -4,13 +4,20 @@ import { classifyMigration } from "./classify.ts"
 
 const ctx = { rebuilds: new Map<string, Array<{ temp: string }>>() }
 const levels = (code: string, at: Parameters<typeof alterTableFindings>[1] = ctx) =>
-	alterTableFindings(code, at)?.map((finding) => finding.level)
+	alterTableFindings(code, at).map((finding) => finding.level)
 
 /* SQLite's ALTER TABLE, read from its text; Postgres's is pg-ddl.ts's, from its parse tree (M70) */
 describe("alterTableFindings", () => {
-	it("reads nothing but an ALTER TABLE", () => {
-		expect(alterTableFindings("ALTER INDEX i RENAME TO j", ctx)).toBeUndefined()
-	})
+	/* SQLite refuses each at prepare; comb rates what it cannot read unsafe, never by the rules for other statements */
+	it.each(["ALTER TABLE users", "ALTER TABLE", "ALTER TABLE users*"])(
+		"rates %j, which it cannot read, unsafe",
+		(sql) => {
+			const rated = classifyMigration(`${sql};`, {})
+			expect(rated.unsafeStatements).toEqual([
+				`${sql} (comb does not recognize this ALTER TABLE; approve it in the file)`,
+			])
+		},
+	)
 
 	it("reads each action of the list on its own, and warns of no lock", () => {
 		expect(levels("ALTER TABLE post ADD COLUMN x int, DROP COLUMN body, ALTER COLUMN t DROP NOT NULL")).toEqual([
@@ -24,7 +31,7 @@ describe("alterTableFindings", () => {
 	})
 
 	it("names a dropped column with its table as written", () => {
-		const [finding] = alterTableFindings('ALTER TABLE ONLY "main"."post" DROP COLUMN IF EXISTS "body"', ctx) ?? []
+		const [finding] = alterTableFindings('ALTER TABLE ONLY "main"."post" DROP COLUMN IF EXISTS "body"', ctx)
 		expect(finding?.drops).toEqual(["DROP COLUMN main.post.body"])
 	})
 
