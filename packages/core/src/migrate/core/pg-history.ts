@@ -16,6 +16,7 @@ import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
 import { followForeign } from "./pg-foreign.ts"
+import { followIndexes } from "./pg-indexes.ts"
 import { followPartitioned } from "./pg-partitioned.ts"
 import { followRoutine } from "./pg-routines.ts"
 import {
@@ -66,6 +67,8 @@ function followPartition(table: string, cmd: Node, facts: Facts): void {
 	const child = tableOf(partition["name"], facts.schema).key
 	if (cmd["subtype"] === "AT_DetachPartition") {
 		if (facts.defaultPartitions.get(table) === child) facts.defaultPartitions.delete(table)
+		/* a partition has no parent but the one it leaves: Postgres attaches no inheritance child */
+		facts.parents.delete(child)
 		return
 	}
 	facts.parents.set(child, [...(facts.parents.get(child) ?? []), { parent: table, partition: true }])
@@ -230,6 +233,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 		followReads(type, node, facts)
 		followDomainName(type, node, facts)
 		followPartitioned(type, node, facts)
+		followIndexes(type, node, facts)
 		followForeign(type, node, facts)
 		followRoutine(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))

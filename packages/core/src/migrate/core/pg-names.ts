@@ -6,6 +6,7 @@
 import type { TriggerEvent } from "../migration-types.ts"
 import { moveReads } from "./pg-cascade.ts"
 import { moveDomains } from "./pg-domains.ts"
+import { lineage } from "./pg-index-facts.ts"
 import { type Facts, flag, keyOf, names, type Node, num, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the bits of a trigger's events, as pg_trigger numbers them
@@ -83,7 +84,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.partitioned.delete(key)
 		facts.partitioned.add(move(key))
 	}
-	for (const [index, table] of facts.indexes) facts.indexes.set(index, move(table))
+	for (const index of facts.indexes.values()) index.table = move(index.table)
 	moveDefaults(facts, move)
 	moveReads(facts, move)
 }
@@ -178,11 +179,17 @@ function followName(type: string, node: Node, facts: Facts): void {
 	}
 }
 
-/** A table, view or sequence dropped takes its triggers, columns, view and what it reads with it */
+/**
+ * A table, view or sequence dropped takes its triggers, columns, view, parents and what it reads with
+ * it, and a partitioned table its partitions, down to theirs
+ */
 function followDrop(node: Node, facts: Facts): void {
 	if (!RELATIONS.has(String(node["removeType"]))) return
-	for (const object of node["objects"] as Node[]) {
-		const table = keyOf(names((object["List"] as Node)["items"]), facts.schema)
+	const tables = (node["objects"] as Node[]).flatMap((object) =>
+		lineage(facts, keyOf(names((object["List"] as Node)["items"]), facts.schema)),
+	)
+	for (const table of tables) {
+		facts.parents.delete(table)
 		facts.triggers.delete(table)
 		facts.tables.delete(table)
 		facts.views.delete(table)

@@ -271,4 +271,14 @@ function followForeign(type: string, node: Node, facts: Facts): void {
 			)
 }
 
-export { type Change, followForeign, type ForeignKey, keyReach, partitionReach, type PrimaryKey, truncated }
+export {
+	type Change,
+	clipped,
+	followForeign,
+	type ForeignKey,
+	keyReach,
+	objectName,
+	partitionReach,
+	type PrimaryKey,
+	truncated,
+}

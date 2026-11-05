@@ -109,7 +109,7 @@ function dropLocks(node: Node, facts: Facts): Lock[] {
 		)
 	if (type === "OBJECT_INDEX")
 		return dropped(node).flatMap((parts): Lock[] => {
-			const table = facts.indexes.get(keyOf(parts, facts.schema))
+			const table = facts.indexes.get(keyOf(parts, facts.schema))?.table
 			return table === undefined ? [] : [[table, true]]
 		})
 	if (/^OBJECT_(?:TRIGGER|POLICY|RULE)$/.test(type))
@@ -166,7 +166,7 @@ function createLocks(node: Node, facts: Facts): Lock[] {
 function reindexLocks(node: Node, facts: Facts): Lock[] {
 	if (node["kind"] === "REINDEX_OBJECT_TABLE") return on(node["relation"], facts, SHARE)
 	if (node["kind"] !== "REINDEX_OBJECT_INDEX") return []
-	const table = facts.indexes.get(tableOf(node["relation"], facts.schema).key)
+	const table = facts.indexes.get(tableOf(node["relation"], facts.schema).key)?.table
 	return table === undefined ? [] : [[table, false]]
 }
 

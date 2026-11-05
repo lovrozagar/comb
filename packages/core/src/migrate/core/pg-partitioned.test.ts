@@ -6,7 +6,11 @@ import { extractSchema } from "./schema.ts"
 function partitioned(sql: string) {
 	const facts = historyFacts(extractSchema(sql, undefined, "postgres"), "public")
 	return {
-		indexes: Object.fromEntries([...facts.indexes].filter(([, table]) => facts.partitioned.has(table))),
+		indexes: Object.fromEntries(
+			[...facts.indexes]
+				.filter(([, index]) => facts.partitioned.has(index.table))
+				.map(([key, index]) => [key, index.table]),
+		),
 		tables: [...facts.partitioned],
 	}
 }
@@ -15,9 +19,9 @@ const PT = "CREATE TABLE pt (id int, at date) PARTITION BY RANGE (at);\nCREATE T
 
 /* P18 and P19 of r19: what rating reads of a partitioned table and its indexes, through every rename, move and drop */
 describe("followPartitioned", () => {
-	it("keeps a partitioned table and each named index on it, but an index Postgres names, and a plain table's", () => {
+	it("keeps a partitioned table and each index on it, one Postgres names among them, but a plain table's", () => {
 		const sql = `${PT}CREATE INDEX pt_at ON pt (at);\nCREATE INDEX ON pt (id);\nCREATE INDEX plain_id ON plain (id);`
-		expect(partitioned(sql)).toEqual({ indexes: { pt_at: "pt" }, tables: ["pt"] })
+		expect(partitioned(sql)).toEqual({ indexes: { pt_at: "pt", pt_id_idx: "pt" }, tables: ["pt"] })
 	})
 
 	it("follows an index renamed, and leaves a plain index's rename alone", () => {

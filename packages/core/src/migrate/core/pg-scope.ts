@@ -15,7 +15,7 @@ const partitionedIn =
 	(facts: Facts) =>
 	(relation: unknown, index: boolean): boolean => {
 		const { key } = tableOf(relation, facts.schema)
-		return facts.partitioned.has(index ? (facts.indexes.get(key) ?? "") : key)
+		return facts.partitioned.has(index ? (facts.indexes.get(key)?.table ?? "") : key)
 	}
 
 /** A reader of a file's statements in order, the file outside a transaction when `bare` */

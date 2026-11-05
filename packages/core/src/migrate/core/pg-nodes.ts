@@ -5,6 +5,7 @@
  */
 import type { TriggerEvent } from "../migration-types.ts"
 import type { ForeignKey, PrimaryKey } from "./pg-foreign.ts"
+import type { IndexFact } from "./pg-index-facts.ts"
 
 type Node = Record<string, unknown>
 
@@ -123,8 +124,11 @@ type Facts = {
 	partitioned: Set<string>
 	/** each table's primary key, which a REFERENCES without columns names */
 	primaryKeys: Map<string, PrimaryKey>
-	/** each index the history names, with its table: one on a partitioned table has no storage of its own (P19 of r19) */
-	indexes: Map<string, string>
+	/**
+	 * each index the history leaves, under the name Postgres gives it, with its table: one on a
+	 * partitioned table has no storage of its own (P19 of r19, PA12 of r22b)
+	 */
+	indexes: Map<string, IndexFact>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
 	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */
