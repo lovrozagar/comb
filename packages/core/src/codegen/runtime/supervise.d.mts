@@ -1,4 +1,6 @@
 /** The types of supervise.mjs, which runs as plain JavaScript */
+export const GROUPS: boolean
+
 export function supervise(job: {
 	args: readonly string[]
 	cmd: string

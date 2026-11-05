@@ -5,13 +5,16 @@
  * signal reaches this supervisor: a terminal's Ctrl-C reaches codegen and the supervisor, never the
  * child's own group. The supervisor's own stdin is a pipe codegen holds and never writes (run's
  * lifeline): its end means codegen is gone, a SIGKILL included, and the group goes then too. The
- * child also exits when the pipe on its stdin closes, should the supervisor die unseen. A timeout is written to the status file, which codegen reads, as an exit code a module
+ * child takes its group when the pipe on its stdin closes, should the supervisor die unseen. A timeout is written to the status file, which codegen reads, as an exit code a module
  * may also use proves nothing. Plain JavaScript, run by node or bun before any hook loads. POSIX
  * only: a negative pid names a process group.
  */
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import { constants } from "node:os"
+
+/** Whether the child leads a process group of its own: on POSIX, where it is spawned detached; Windows has no groups */
+const GROUPS = process.platform !== "win32"
 
 /** The signals that stop the supervisor, each killing the child's group first */
 const SIGNALS = /** @type {const} */ (["SIGHUP", "SIGINT", "SIGTERM"])
@@ -25,7 +28,7 @@ const SIGNALS = /** @type {const} */ (["SIGHUP", "SIGINT", "SIGTERM"])
  * @returns {{ done: Promise<{ code: number } | { timedOut: true }>, stop: () => void }}
  */
 function supervise({ args, cmd, kill = (pid, signal) => process.kill(pid, signal), spawn: start = spawn, timeoutMs }) {
-	const child = start(cmd, args, { detached: true, stdio: ["pipe", "inherit", "inherit"] })
+	const child = start(cmd, args, { detached: GROUPS, stdio: ["pipe", "inherit", "inherit"] })
 	let started = false
 	child.on("spawn", () => {
 		started = true
@@ -90,4 +93,4 @@ async function main(proc) {
 	} else proc.exit(ended.code)
 }
 
-export { main, supervise }
+export { GROUPS, main, supervise }

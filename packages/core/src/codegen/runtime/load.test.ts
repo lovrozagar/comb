@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type Run, type RunOptions, run as realRun } from "../../migrate/core/process.ts"
 import { running, runs, type Seen, send, sendGroup } from "../../../tests/support/pid.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
-import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot } from "./load.ts"
+import { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, watchSupervisor } from "./load.ts"
 
 let dir: string
 
@@ -63,6 +63,35 @@ describe("childArgs", () => {
 
 /** The tables file of the fixture directory */
 const tables = () => path.join(dir, "db.core.tables.ts")
+
+/** The loader's watch alone, as `groups` writes it, in a process leading a group of its own, with a grandchild; its end once its stdin closes */
+async function watchedEnd(groups: boolean): Promise<{ end: NodeJS.Signals | number | null; left: number[] }> {
+	const file = path.join(dir, "grandchild.json")
+	const script = `${watchSupervisor(groups)}const { spawn } = await import("node:child_process"); const g = spawn("sleep", ["600"], { stdio: "ignore" }); (await import("node:fs")).writeFileSync(${JSON.stringify(file)}, String(g.pid))`
+	const loader = spawn(process.execPath, ["--input-type=module", "-e", script], {
+		detached: true,
+		stdio: ["pipe", "ignore", "ignore"],
+	})
+	const ended = new Promise<NodeJS.Signals | number | null>((resolve) =>
+		loader.on("exit", (code, signal) => resolve(signal ?? code)),
+	)
+	for (let tries = 0; tries < 400 && !fs.existsSync(file); tries++) await new Promise((r) => setTimeout(r, 50))
+	const grandchild = running(Number(fs.readFileSync(file, "utf8")), loader.pid)
+	loader.stdin.end()
+	const end = await ended
+	return { end, left: await leftOf([grandchild]) }
+}
+
+describe("the loader's watch on its supervisor", () => {
+	it("kills the loader's group, its grandchild included, where it leads one", async () => {
+		expect(await watchedEnd(true)).toEqual({ end: "SIGKILL", left: [] })
+	})
+
+	it("exits 1 alone where it leads no group (Windows)", async () => {
+		const { end, left } = await watchedEnd(false)
+		expect([end, left.length]).toEqual([1, 1])
+	})
+})
 
 describe("loadSnapshot", () => {
 	/* F58: the child runs where comb runs, as the app and drizzle-kit do, never beside the tables file */
@@ -226,6 +255,24 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 		expect(codegen.kill("SIGKILL")).toBe(true)
 		await ended
 		expect(await leftOf([supervisor, loader, grandchild])).toEqual([])
+	})
+})
+
+/*
+ * AA4-3 of area A round four: the supervisor dies unseen (killed by pid, the OOM killer) while the
+ * module waits on its event loop. The loader, its group's leader, takes its group with it.
+ */
+describe("loadSnapshot when the supervisor dies unseen while the module waits", () => {
+	it("leaves neither the loader nor its grandchild", async () => {
+		fs.writeFileSync(
+			tables(),
+			`import { spawn } from "node:child_process"\nimport fs from "node:fs"\nconst grandchild = spawn("sleep", ["600"], { stdio: "ignore" })\nfs.writeFileSync(${JSON.stringify(path.join(dir, "pids.json"))}, JSON.stringify({ grandchild: grandchild.pid, loader: process.pid, supervisor: process.ppid }))\nawait new Promise(() => setInterval(() => {}, 1000))\n`,
+		)
+		const loading = loadSnapshot(tables(), { run: realRun })
+		const { grandchild, loader, supervisor } = await pidsOf()
+		expect(send(supervisor, "SIGKILL")).toBe(true)
+		await expect(loading).rejects.toThrow(`comb could not load ${tables()}`)
+		expect(await leftOf([loader, grandchild])).toEqual([])
 	})
 })
 

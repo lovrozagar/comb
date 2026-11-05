@@ -12,6 +12,7 @@ import { resolvePeer } from "../../migrate/core/optional-peer.ts"
 import { type Run, run as defaultRun } from "../../migrate/core/process.ts"
 import type { Snapshot } from "./snapshot-types.ts"
 import { scratchDir } from "../../migrate/core/cleanup.ts"
+import { GROUPS } from "./supervise.mjs"
 
 /** How long the child may take to load the tables module */
 const LOAD_TIMEOUT_MS = 60_000
@@ -26,9 +27,15 @@ function childEnv(): Record<string, string> {
 	return env
 }
 
-/* the child's stdin is a pipe its supervisor holds and never writes: its close means the supervisor
-   is gone, and the child goes too (F43) */
-const WATCH_SUPERVISOR = `process.stdin.on("end", () => process.exit(1)); process.stdin.resume(); `
+/**
+ * The child's watch on its stdin, a pipe its supervisor holds and never writes: its close means the
+ * supervisor is gone, however it died, and the child goes too (F43). Where it leads a group of its
+ * own (`groups`, as the supervisor spawns it), it takes the group, every process a module started
+ */
+function watchSupervisor(groups: boolean): string {
+	const end = groups ? `process.kill(0, "SIGKILL")` : "process.exit(1)"
+	return `process.stdin.on("end", () => ${end}); process.stdin.resume(); `
+}
 
 /** How long the supervisor gets past the child's timeout before codegen stops it in turn */
 const SUPERVISOR_GRACE_MS = 10_000
@@ -55,7 +62,7 @@ function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 	const child = new URL("child.ts", import.meta.url).href
 	/* writeSnapshot has written and closed the result file when it returns, so the exit drops nothing; a
 	   module's timer or pool would otherwise keep the child alive past it (F42) */
-	const script = `${WATCH_SUPERVISOR}const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2)); process.exit(0)`
+	const script = `${watchSupervisor(GROUPS)}const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2)); process.exit(0)`
 	/* bun reads .env and .env.local from the working directory unless told not to (F41) */
 	if (runtime === "bun") return ["--no-env-file", "-e", script, ...rest]
 	const hooks = new URL("node-hooks.mjs", import.meta.url).href
@@ -135,4 +142,4 @@ async function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Prom
 	}
 }
 
-export { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, supervisorArgs }
+export { childArgs, LOAD_TIMEOUT_MS, loadSnapshot, supervisorArgs, watchSupervisor }
