@@ -60,8 +60,10 @@ const emptyFacts = (schema: string): Facts => ({
 	foreignKeys: [],
 	operators: new Map(),
 	parents: new Map(),
+	partitionKeys: new Map(),
 	partitioned: new Set(),
 	primaryKeys: new Map(),
+	proofs: new Map(),
 	indexes: new Map(),
 	reads: new Map(),
 	routines: new Map(),
@@ -106,6 +108,15 @@ type Volatility = "immutable" | "stable" | "volatile"
 
 /** Each routine by key: its kind, and its signatures, each with its volatility */
 type Routines = Map<string, { kind: "function" | "procedure"; signatures: Map<string, Volatility> }>
+
+/**
+ * One term of a CHECK: a comparison of `column` with the constant in `values`, the constants of an
+ * IN list, or an IS NOT NULL of it, each constant `i:` an integer or `s:` a string as written
+ */
+type Term = { column: string; op: "<" | "<=" | "=" | ">" | ">=" | "in" | "notnull"; values: string[] }
+
+/** What a table's constraints prove of its rows: its CHECKs that are every one terms, named or not, validated or not, and its NOT NULL columns */
+type Proof = { checks: Array<{ name: string | undefined; terms: Term[]; valid: boolean }>; notNull: Set<string> }
 
 /** What the history attached to its tables, keyed as nameKey keys a Postgres name */
 type Facts = {
@@ -158,6 +169,10 @@ type Facts = {
 	reads: Map<string, Reads>
 	/** where each table and materialized view keeps its rows, by its key (PA17 of r22b) */
 	storage: Map<string, Storage>
+	/** each partitioned table's one plain RANGE or LIST key column and its strategy as a bound writes it, by its key, whose bounds comb proves (PA16 of r22b) */
+	partitionKeys: Map<string, { column: string; strategy: "l" | "r" }>
+	/** what each table's constraints prove of its rows, by its key (PA16 of r22b, pg-bounds.ts) */
+	proofs: Map<string, Proof>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */
@@ -248,7 +263,9 @@ export {
 	names,
 	type Node,
 	nodesOf,
+	type Proof,
 	type Storage,
+	type Term,
 	num,
 	type Reads,
 	type Routines,

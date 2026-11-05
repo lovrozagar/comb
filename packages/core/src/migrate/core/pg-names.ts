@@ -22,6 +22,8 @@ function moveTable(facts: Facts, from: string, to: string): void {
 		facts.code,
 		facts.columnTypes,
 		facts.parents,
+		facts.partitionKeys,
+		facts.proofs,
 		facts.reads,
 		facts.storage,
 		facts.tables,
@@ -70,6 +72,8 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.operators,
 		facts.parents,
 		facts.indexes,
+		facts.partitionKeys,
+		facts.proofs,
 		facts.reads,
 		facts.storage,
 		facts.tables,
@@ -205,6 +209,8 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.views.delete(table)
 		facts.reads.delete(table)
 		facts.storage.delete(table)
+		facts.proofs.delete(table)
+		facts.partitionKeys.delete(table)
 		facts.defaultPartitions.delete(table)
 		for (const [parent, partition] of Array.from(facts.defaultPartitions))
 			if (partition === table) facts.defaultPartitions.delete(parent)

@@ -12,6 +12,7 @@
  */
 import type { ExtractedSchema } from "../migration-types.ts"
 import { followEventTrigger } from "./pg-events.ts"
+import { followBounds } from "./pg-bounds.ts"
 import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
@@ -238,6 +239,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 		followForeign(type, node, facts)
 		followRoutine(type, node, facts)
 		followStorage(type, node, facts)
+		followBounds(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followEventTrigger(type, node, facts) || followNames(type, node, facts)) continue
 		else if (type === "CreateStmt") followCreate(node, facts)

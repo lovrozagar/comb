@@ -5,7 +5,8 @@
  * an ATTACH PARTITION, which scans the partition (P1 of the 0.15.0 review).
  */
 import type { Finding } from "./classify-alter.ts"
-import { type Facts, flag, type Node, nodesOf, num, tableOf } from "./pg-nodes.ts"
+import { boundImplied } from "./pg-bounds.ts"
+import { type Facts, flag, type Node, nodesOf, num, tableOf, written } from "./pg-nodes.ts"
 
 const LOCKED: Finding = { level: "lock", note: "holds an exclusive lock while it runs" }
 
@@ -29,6 +30,35 @@ const turnsOn = (options: unknown, name: string): boolean =>
  */
 function attachFindings(partition: string, defaulted?: string): Finding[] {
 	return [{ level: "lock", note: attachNote(partition, defaulted) }]
+}
+
+/**
+ * An ATTACH whose bound the history's validated CHECKs on `partition` imply, so Postgres skips its scan
+ * (PA16 of r22b): nothing, or the scan of the parent's default partition `defaulted`, which Postgres
+ * still checks for rows the bound takes
+ */
+const impliedFindings = (partition: string, defaulted: string | undefined): Finding[] =>
+	defaulted === undefined
+		? []
+		: [
+				{
+					level: "lock",
+					note: `scans the default partition ${defaulted} under an exclusive lock for rows ${partition}'s bound takes; add a CHECK constraint excluding the bound to ${defaulted} NOT VALID, VALIDATE it in a later file, then ATTACH`,
+				},
+			]
+
+/**
+ * An ALTER TABLE `parent` ATTACH PARTITION's findings, `cmd` its PartitionCmd: the default
+ * partition's own scan, none of the partition when the history proves its bound, or the scan of it
+ */
+function attachedFindings(cmd: Node, parent: string, facts: Facts): Finding[] {
+	const [bound, partition] = [cmd["bound"] as Node, written(cmd["name"])]
+	const defaulted = facts.defaultPartitions.get(parent)
+	if (flag(bound["is_default"])) return attachFindings(partition, "default")
+	const child = tableOf(cmd["name"], facts.schema).key
+	return boundImplied(facts, { bound, parent, partition: child })
+		? impliedFindings(partition, defaulted)
+		: attachFindings(partition, defaulted)
 }
 
 /** What an ATTACH of `partition` scans, and how to have it scan nothing; `defaulted` is "default" when it attaches as the default */
@@ -93,4 +123,4 @@ function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	return type === "ClusterStmt" ? [LOCKED] : undefined
 }
 
-export { attachFindings, createFindings, maintenanceFindings }
+export { attachedFindings, createFindings, maintenanceFindings }

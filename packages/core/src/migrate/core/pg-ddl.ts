@@ -17,7 +17,7 @@ import type { Finding } from "./classify-alter.ts"
 import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, foreignScan, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
-import { attachFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
+import { attachedFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { partitionedKeyRecipe } from "./pg-partitioned.ts"
 import { retypeFindings } from "./pg-retype.ts"
 import { staysPut } from "./pg-storage.ts"
@@ -109,11 +109,8 @@ type On = { facts: Facts; key: string }
 
 const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) => Finding[] | undefined>> = {
 	AT_AddColumn: addColumn,
-	AT_AttachPartition: (cmd, _table, { facts, key }) => {
-		const partition = (cmd["def"] as Node)["PartitionCmd"] as Node
-		const isDefault = flag((partition["bound"] as Node | undefined)?.["is_default"])
-		return attachFindings(written(partition["name"]), isDefault ? "default" : facts.defaultPartitions.get(key))
-	},
+	AT_AttachPartition: (cmd, _table, { facts, key }) =>
+		attachedFindings((cmd["def"] as Node)["PartitionCmd"] as Node, key, facts),
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_AlterColumnType: (cmd, _table, on) => retypeFindings(cmd, on),

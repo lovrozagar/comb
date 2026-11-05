@@ -15,6 +15,8 @@ const FACTS: Facts = {
 	operators: new Map([["===", "eq3"]]),
 	routines: new Map(),
 	schema: "public",
+	partitionKeys: new Map(),
+	proofs: new Map(),
 	storage: new Map(),
 	tables: new Map(),
 	views: new Map(),
