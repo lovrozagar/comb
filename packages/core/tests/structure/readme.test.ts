@@ -340,13 +340,20 @@ describe("README D1 provider's local lock", () => {
 })
 
 describe("README peer install upgrade item's reason", () => {
-	/* AD7-12 of the area D round-seven review: the reason named the FTS command's child process unpinned */
-	it("gives a child process as the reason for each command a declared FTS adds a child-loaded need to", () => {
-		const reason =
-			/each with the reason: ([^,]+(?:, [^,]+)*?) run a child process/.exec(installRefused ?? "")?.[1] ?? ""
+	/* AD7-12 and AD7-9 of the area D round-seven review: the reason left the FTS diff unpinned, and gave it to D1's
+	   check, which requirePeers refuses first for loading wrangler; codegen and each command a declared FTS adds a
+	   child-loaded need to are what run a child the executable cannot feed */
+	it("gives a child process as the reason for codegen and each FTS command, and for nothing else", () => {
+		const reason = /each with the reason: (.+?) runs? a child process/.exec(installRefused ?? "")?.[1] ?? ""
 		const verbs = [...new Set(ftsAdds().map(([, command]) => command))]
-		expect(verbs.filter((verb) => !reason.includes(`an FTS ${verb}`))).toEqual([])
-		expect(verbs.length).toBeGreaterThan(0)
+		expect(reason.split(/, | and /)).toEqual(["codegen", ...verbs.map((verb) => `an FTS ${verb}`)])
+	})
+
+	/* AD7-10 of the area D round-seven review: a compiled app refuses `comb --version` (D5-5), which the list left out */
+	it("names `comb --version` while version.ts refuses it in a compiled executable", () => {
+		const refuses = readFileSync(join(ROOT, "src/cli/version.ts"), "utf8").includes("refuseCompiled(")
+		const named = installRefused?.includes("`comb --version`, which reads comb's package.json from disk")
+		expect([refuses, named]).toEqual([true, true])
 	})
 })
 
