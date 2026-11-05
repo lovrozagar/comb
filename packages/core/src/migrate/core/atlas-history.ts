@@ -5,7 +5,7 @@
  * or edited is named for what happened to it, checked in that order, before Atlas runs anything.
  */
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
-import { explainAtlasFailure } from "./atlas-failure.ts"
+import { explainAtlasFailure, failedStatement } from "./atlas-failure.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }
@@ -110,7 +110,7 @@ function refuseLate(status: AtlasStatus, scrub: Report["scrub"]): void {
 
 /** Where `partial`, a file Atlas ran halfway, stopped; only Atlas's text is scrubbed, the statement and its error */
 const stoppedAt = (partial: AtlasRevision, copy: string, scrub: Report["scrub"]): string =>
-	`${fileOf(copy, partial.version)} ran ${partial.applied} of its ${partial.total} statements before it failed at ${scrub(partial.errorStmt)} (${scrub(partial.error)})`
+	`${fileOf(copy, partial.version)} ran ${partial.applied} of its ${partial.total} statements before it failed at ${failedStatement(scrub(partial.errorStmt))} (${scrub(partial.error)})`
 
 /**
  * Where `partial`, a file Atlas ran halfway outside a transaction, stopped, refused when the file

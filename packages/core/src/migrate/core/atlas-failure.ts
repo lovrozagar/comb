@@ -6,6 +6,12 @@
  * secrets; comb's words are never.
  */
 
+/**
+ * A statement Atlas names as the one that failed, without its own `;`, which reads as part of the
+ * sentence comb puts it in (P17 of the 0.15.0 review, PA20)
+ */
+const failedStatement = (stmt: string): string => stmt.replace(/;\s*$/, "")
+
 /** comb's answer to a database Atlas calls not clean: objects but no history */
 const NOT_CLEAN =
 	"the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline"
@@ -74,4 +80,4 @@ function explainAtlasFailure(
 		: `Atlas OSS does not diff ${scrub(refused.replace(/^Error: /, ""))}: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro`
 }
 
-export { explainAtlasFailure, NOT_CLEAN }
+export { explainAtlasFailure, failedStatement, NOT_CLEAN }

@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { explainAtlasFailure } from "./atlas-failure.ts"
+import { explainAtlasFailure, failedStatement } from "./atlas-failure.ts"
 import { json, type Ran } from "./atlas-status.ts"
 import { outsideTransaction } from "./atlas-header.ts"
 
@@ -47,11 +47,10 @@ function reported(ran: Ran, command: string, copy: string): string[] {
 	const failed = files.find((file) => file.Error !== undefined)
 	if (failed?.Error !== undefined) {
 		const { Stmt, Text } = failed.Error
-		/* Atlas keeps the statement's own ;, which reads as part of the sentence before the colon (P17 of the 0.15.0 review) */
 		const at =
 			Stmt === undefined
 				? "once its statements ran, as Atlas wrote its revision"
-				: `at ${ran.scrub(Stmt).replace(/;\s*$/, "")}`
+				: `at ${failedStatement(ran.scrub(Stmt))}`
 		throw new Error(`${failed.Name} failed ${at}: ${ran.scrub(Text)}. ${aftermath(copy, failed)}`)
 	}
 	if (ran.code !== 0 || report.error !== "")

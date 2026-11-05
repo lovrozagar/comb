@@ -111,6 +111,21 @@ describe("what checkHistory prints of Atlas's text", () => {
 			"atlas migrate status: dial ***",
 		)
 	})
+
+	/* PA20; sibling: apply's failed statement (P17 of the 0.15.0 review) */
+	it("drops the failed statement's own semicolon, which reads as the sentence's before the (", () => {
+		snapshot({ "1_a.sql": "SELECT 1;\nINSERT INTO m VALUES (1);\n" })
+		const half = {
+			...applied("1_a.sql"),
+			applied: 1,
+			error: "pq: no m",
+			errorStmt: "INSERT INTO m VALUES (1);\n",
+			total: 2,
+		}
+		expect(checkHistory(history([half]), dir, { scrub: kept })).toBe(
+			"1_a.sql ran 1 of its 2 statements before it failed at INSERT INTO m VALUES (1) (pq: no m)",
+		)
+	})
 })
 
 describe("an applied file renamed under its version, or edited", () => {
