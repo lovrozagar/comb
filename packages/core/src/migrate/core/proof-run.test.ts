@@ -358,3 +358,18 @@ describe("provePending lets a signal in between files (S2 of r22; sibling: the r
 		expect(turns).toBeGreaterThanOrEqual(files.length)
 	})
 })
+
+/* r22b's pragma sweep: a pragma that renames a read's result columns renamed those of comb's own reads of the copy */
+describe("provePending on a file that renames result columns", () => {
+	it("proves a file after PRAGMA full_column_names = 1, and still sees what it changes", async () => {
+		const proof = await prove(
+			USERS,
+			"PRAGMA full_column_names = 1;\nALTER TABLE users ADD COLUMN note TEXT;\nUPDATE users SET tier = 'x';",
+		)
+		expect(proof.failed).toBeUndefined()
+		expect(proof.unsafe).toEqual([
+			"UPDATE users SET tier = 'x': updates existing rows of users (tier)",
+			"changes values of users.tier",
+		])
+	})
+})

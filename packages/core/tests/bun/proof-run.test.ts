@@ -31,6 +31,20 @@ describe("provePending on bun:sqlite", () => {
 		expect(proofs.get("2_filtered.sql")?.unsafe.join("\n")).toContain("loses")
 		await conn.close()
 	})
+
+	it("reads the copy by SQLite's default column names after a file's PRAGMA full_column_names = 1", async () => {
+		const conn = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
+		await conn.batch([{ sql: "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)" }])
+		const proofs = await provePending(conn, [
+			{ name: "1_names.sql", sql: "PRAGMA full_column_names = 1;\nUPDATE users SET email = 'x';" },
+		])
+		expect(proofs.get("1_names.sql")).toEqual({
+			cautious: [],
+			unproven: [],
+			unsafe: ["UPDATE users SET email = 'x': updates existing rows of users (email)", "changes values of users.email"],
+		})
+		await conn.close()
+	})
 })
 
 describe("the proof's engine pass on bun:sqlite", () => {

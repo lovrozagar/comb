@@ -153,7 +153,12 @@ export async function openScratch(engine: ScratchEngine = "runtime"): Promise<Sc
 			}
 		},
 		engine: engine === "libsql" ? `libsql's SQLite ${version}` : `SQLite ${version}`,
-		exec: (sql) => db.exec(sql),
+		/* comb's reads key rows by SQLite's default column names, which a file's PRAGMA full_column_names = 1
+		   renames (sqlite_master.name); the pragmas name a read's columns, never a view's or a table's */
+		exec: (sql) => {
+			db.exec(sql)
+			db.exec("PRAGMA full_column_names = 0; PRAGMA short_column_names = 1")
+		},
 		firstStatement: (sql) => db.firstStatement(sql),
 		reopen: () => {
 			db.close()
