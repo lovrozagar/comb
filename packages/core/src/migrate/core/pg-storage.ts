@@ -5,14 +5,15 @@
  * ATPrepSetAccessMethod for the access method it has, and CheckRelationTableSpaceMove for the
  * tablespace it is in. Its persistence is always the history's. Its access method and tablespace are
  * only where the history names them, at its CREATE or by an ALTER since: one made without USING or
- * TABLESPACE takes the target's default_table_access_method and default_tablespace, which check
- * cannot read. A tablespace renamed carries its relations' name with it; one emptied by an ALTER …
+ * TABLESPACE takes the target's default_table_access_method and default_tablespace, which only the
+ * target's catalog says (placeStorage, from pg-live-storage.ts). A tablespace renamed carries its relations' name with it; one emptied by an ALTER …
  * ALL IN TABLESPACE leaves where they went unknown, as an OWNED BY may have kept some. A REINDEX
  * with a TABLESPACE option rebuilds indexes there, so it leaves every index's tablespace unknown:
  * a SCHEMA, DATABASE or SYSTEM one reaches indexes the history may not name, and any index it may
  * reach is unknown alike.
  */
-import { type Facts, flag, type Node, type Storage, tableOf } from "./pg-nodes.ts"
+import { type Facts, flag, type Node, tableOf } from "./pg-nodes.ts"
+import type { Placed, Storage } from "./pg-storage-types.ts"
 
 /** Some of where a relation keeps its rows: what a move sets, or what a check of one knows */
 type Where = { [K in keyof Storage]?: Storage[K] | undefined }
@@ -104,4 +105,17 @@ function staysPut(cmd: Node, where: Where | undefined): boolean {
 	return Object.entries(move).every(([field, value]) => value !== undefined && where[field as keyof Storage] === value)
 }
 
-export { followStorage, staysPut }
+/**
+ * `facts` as the target holds them where its applied files end: where each relation of `placed` is,
+ * from its catalog, in place of what the history's text says or leaves unknown. A pending file's
+ * statements then follow it, so a relation one makes again is unknown again
+ */
+function placeStorage(facts: Facts, placed: Placed): void {
+	for (const [key, where] of placed.relations) facts.storage.set(key, { ...where })
+	for (const [key, tablespace] of placed.indexes) {
+		const index = facts.indexes.get(key)
+		if (index !== undefined) index.tablespace = tablespace
+	}
+}
+
+export { followStorage, placeStorage, staysPut }

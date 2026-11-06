@@ -26,6 +26,7 @@ import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts } from "./pg-history.ts"
+import type { Placing } from "./pg-storage-types.ts"
 import type { Node } from "./pg-nodes.ts"
 import { scopeReader } from "./pg-scope.ts"
 import { partitionedRecipe } from "./pg-partitioned.ts"
@@ -196,6 +197,9 @@ function statementReadings(
 	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, ...read.grammar }), ...read.findings]
 }
 
+/** What a caller holds of a Postgres file besides its text: its parse, its replay, where its relations are */
+type Given = { placing?: Placing | undefined; read?: PgRead | undefined; replayed?: Replayed | undefined }
+
 /**
  * The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema`; on a
  * check that `replayed` it on devUrl, with what Postgres held at each statement it measured
@@ -203,7 +207,7 @@ function statementReadings(
 function readFile(
 	sql: string,
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
-	{ read, replayed }: { read: PgRead | undefined; replayed: Replayed | undefined },
+	{ placing, read, replayed }: Given,
 ): Read[] {
 	refuseHeader(sql, dialect)
 	const naming = namingOf(dialect, schema)
@@ -221,7 +225,7 @@ function readFile(
 		before,
 		created,
 		dialect,
-		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
+		facts: historyFacts(dialect === "postgres" ? before : undefined, schema, placing),
 		held: heldStart(),
 		preparing: new Map(),
 		temps: new Map(),
@@ -260,18 +264,19 @@ function readFile(
 
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one, and what check's
- * replay on devUrl measured of it, when it `replayed` the file
+ * Postgres `read` is the file's one parse, its caller's when it holds one, what check's
+ * replay on devUrl measured of it, when it `replayed` the file, and where the target's catalog
+ * `placing` says its relations are
  */
 const readings = (
 	sql: string,
 	{ before, dialect, schema }: ClassifyOptions,
-	{ read, replayed }: { read?: PgRead | undefined; replayed?: Replayed | undefined } = {},
+	{ placing, read, replayed }: Given = {},
 ): Read[] =>
 	readFile(
 		sql,
 		{ before, dialect: dialect ?? "sqlite", schema: schema ?? "public" },
-		{ read: dialect === "postgres" ? (read ?? pgRead(sql)) : undefined, replayed },
+		{ placing, read: dialect === "postgres" ? (read ?? pgRead(sql)) : undefined, replayed },
 	)
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */

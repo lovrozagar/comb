@@ -7,6 +7,7 @@ import { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements
 import { takenOptions } from "./classify-options.ts"
 import { classificationOf } from "./classify-verdict.ts"
 import type { Replayed } from "./classify-file.ts"
+import type { Placing } from "./pg-storage-types.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
 import { hashedSql, splitSqlStatements } from "./sql-scan.ts"
@@ -117,19 +118,20 @@ function refuseStrayDirective(sql: string, filename: string): void {
 
 /**
  * parseMigration of a file its caller has read: on Postgres its one parse, with what check's
- * replay on devUrl measured of it when it `replayed` the file
+ * replay on devUrl measured of it when it `replayed` the file, and where the target's catalog
+ * `placing` says its relations are
  */
 export function parseRead(
 	file: FileRead & { filename: string },
 	{ before, kind, schema }: Omit<ClassifyOptions, "dialect">,
-	replayed?: Replayed,
+	{ placing, replayed }: { placing?: Placing | undefined; replayed?: Replayed | undefined } = {},
 ): ParsedMigration {
 	const { dialect, filename, sql } = file
 	refuseStrayDirective(sql, filename)
 	const reads = readings(
 		sql,
 		{ before, dialect, schema },
-		{ read: dialect === "postgres" ? file.read : undefined, replayed },
+		{ placing, read: dialect === "postgres" ? file.read : undefined, replayed },
 	)
 	return {
 		classification: classificationOf(reads, sql, { kind }),

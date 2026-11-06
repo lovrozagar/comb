@@ -73,11 +73,18 @@ describe("the README's Postgres lock warnings (AE2-12)", () => {
 		expect(warnings).toContain("and the parent's default partition, when it has one, either way")
 	})
 
-	it("names the storage moves that rewrite, and none to where the history left the relation", () => {
+	it("names the storage moves that rewrite, and none to where the relation already is", () => {
 		expect(warnings).toContain(
 			"a `SET TABLESPACE`, `SET ACCESS METHOD`, `SET LOGGED` or `SET UNLOGGED`, which rewrites",
 		)
-		expect(warnings).toContain("none for a move to where the history left it")
+		expect(warnings).toContain("none for a move to where the relation already is: where the history left it")
+	})
+
+	it("says check and apply read where the target's default put a relation (PA17 of r22b, 16.3 c)", () => {
+		expect(warnings).toContain(
+			"where the target's catalog says its default put it, which `check` and `apply` read when the `postgres` package is installed",
+		)
+		expect(warnings).toContain("for a relation a pending file makes, such a move warns")
 	})
 })
 

@@ -141,6 +141,18 @@ const fileEnds = (schema: { statements: readonly string[] }): readonly number[] 
 /** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
 const historyTrees = (schema: object): ReadonlyArray<RawStmt[] | undefined> | undefined => TREES.get(schema)
 
+/** A history statement's parse tree; throws for one the parser cannot read */
+function historyTree(statement: string): unknown {
+	try {
+		return parsePostgres(statement).stmts
+	} catch (error) {
+		/* what it defined or attached is unknown, so the facts after it are too */
+		throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
+			cause: error,
+		})
+	}
+}
+
 /** A first-line delimiter directive, which Atlas honors only there */
 const DELIMITER_DIRECTIVE = /^-- atlas:delimiter(?=[ \n])[^\n]*\n/
 
@@ -191,6 +203,7 @@ export {
 	fileEnds,
 	type FileRead,
 	fileRead,
+	historyTree,
 	historyTrees,
 	type PgRead,
 	pgRead,

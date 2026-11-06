@@ -21,7 +21,8 @@ import { followForeign } from "./pg-foreign.ts"
 import { followIndexes } from "./pg-indexes.ts"
 import { followPartitioned } from "./pg-partitioned.ts"
 import { followRoutine } from "./pg-routines.ts"
-import { followStorage } from "./pg-storage.ts"
+import type { Placing } from "./pg-storage-types.ts"
+import { followStorage, placeStorage } from "./pg-storage.ts"
 import {
 	columnTypeOf,
 	emptyFacts,
@@ -35,8 +36,7 @@ import {
 	typed,
 	typeOf,
 } from "./pg-nodes.ts"
-import { parsePostgres } from "./pg-parser.ts"
-import { fileEnds, historyTrees } from "./pg-split.ts"
+import { fileEnds, historyTree, historyTrees } from "./pg-split.ts"
 import { forgetTemps, resolveTemps, type Temps } from "./pg-temps.ts"
 
 /** What a value of `type` runs on its way into a column: its domain's CHECK, or an implicit or assignment cast */
@@ -250,47 +250,41 @@ function followTree(stmts: unknown, facts: Facts): void {
 	}
 }
 
-/** A history statement's parse tree; throws for one the parser cannot read */
-function historyTree(statement: string): unknown {
-	try {
-		return parsePostgres(statement).stmts
-	} catch (error) {
-		/* what it defined or attached is unknown, so the facts after it are too */
-		throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
-			cause: error,
-		})
-	}
-}
-
 // lru-cache: each history's facts under each schema, read once per schema object, released with it
 const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Map<string, Facts>>()
+
+/** `before`'s history followed, each file's temp relations forgotten at its end, and where `placing` says the target's relations are placed at its statement */
+function followHistory(before: ExtractedSchema, schema: string, placing?: Placing): Facts {
+	const facts = emptyFacts(schema)
+	/* the trees extractSchema kept; a statement without one is parsed here, which fails for one the parser cannot read */
+	const trees = historyTrees(before)
+	/* each file runs in a session of its own, whose temp relations die with it */
+	const ends = new Set(fileEnds(before))
+	let temps: Temps = new Map()
+	for (const [i, statement] of before.statements.entries()) {
+		if (i === placing?.at) placeStorage(facts, placing.placed)
+		followTree(resolveTemps(trees?.[i] ?? historyTree(statement), temps, facts.indexes), facts)
+		if (!ends.has(i + 1)) continue
+		forgetTemps(facts)
+		temps = new Map()
+	}
+	if (placing?.at === before.statements.length) placeStorage(facts, placing.placed)
+	return facts
+}
 
 /**
  * What `before`'s history attached to its tables, its names keyed under `schema`: a copy the file's
  * own statements then follow. Each history file's temp relations are keyed apart, and forgotten at
- * its end (pg-temps.ts)
+ * its end (pg-temps.ts). With `placing`, its relations are where the target's catalog says once its
+ * applied files end; that read is one run's, so those facts are not kept
  */
-function historyFacts(before: ExtractedSchema | undefined, schema: string): Facts {
-	const empty = emptyFacts(schema)
-	if (before === undefined) return empty
+function historyFacts(before: ExtractedSchema | undefined, schema: string, placing?: Placing): Facts {
+	if (before === undefined) return emptyFacts(schema)
+	if (placing !== undefined) return followHistory(before, schema, placing)
 	const read = CACHE.get(before) ?? new Map<string, Facts>()
 	CACHE.set(before, read)
-	let facts = read.get(schema)
-	if (facts === undefined) {
-		facts = empty
-		/* the trees extractSchema kept; a statement without one is parsed here, which fails for one the parser cannot read */
-		const trees = historyTrees(before)
-		/* each file runs in a session of its own, whose temp relations die with it */
-		const ends = new Set(fileEnds(before))
-		let temps: Temps = new Map()
-		for (const [i, statement] of before.statements.entries()) {
-			followTree(resolveTemps(trees?.[i] ?? historyTree(statement), temps, facts.indexes), facts)
-			if (!ends.has(i + 1)) continue
-			forgetTemps(facts)
-			temps = new Map()
-		}
-		read.set(schema, facts)
-	}
+	const facts = read.get(schema) ?? followHistory(before, schema)
+	read.set(schema, facts)
 	return structuredClone(facts)
 }
 

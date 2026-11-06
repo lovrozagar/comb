@@ -1,13 +1,16 @@
 /**
  * readPending (atlas-pending.ts): each pending file of a Postgres snapshot read once and
  * classified against the schema the files before it leave, keyed under the target's schema, and a
- * file that cannot run refused from the file alone, before anything replays it (PA2 of r22b)
+ * file that cannot run refused from the file alone, before anything replays it (PA2 of r22b); and
+ * where the target's catalog places its relations taken where the applied files end (PA17 of r22b,
+ * 16.3 c of plan 21), which a relation a pending file makes again does not keep
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { readPending } from "./atlas-pending.ts"
+import type { Placed } from "./pg-storage-types.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 
 beforeAll(loadPostgresParser)
@@ -25,7 +28,7 @@ function write(files: readonly string[]): void {
 
 /** The pending `names` of the snapshot classified for a target in `schema` */
 const classify = (names: readonly string[], schema = "public") =>
-	readPending({ target: { schema } }, copy, new Set(names))()
+	readPending({ target: { schema } }, copy, new Set(names)).classify({})
 
 describe("readPending", () => {
 	it("classifies the pending files alone, in order, each against the schema the files before it leave", () => {
@@ -76,5 +79,40 @@ describe("readPending", () => {
 		expect(() => classify(["1_a.sql"])).toThrow(
 			"comb could not read 1_a.sql: Atlas cannot split this file: 1:8: unclosed '('",
 		)
+	})
+})
+
+/* the target's catalog after 1_a.sql: a and its index a_id where Postgres's defaults put them */
+const PLACED: Placed = {
+	indexes: new Map([["a_id", "pg_default"]]),
+	relations: new Map([["a", { accessMethod: "heap", logged: true, tablespace: "pg_default" }]]),
+}
+
+/** The lock warnings of the pending `names`, with the target's relations where `placed` says, and whether one moves a relation */
+function placedWarnings(names: readonly string[], placed?: Placed): { moves: boolean; warned: string[][] } {
+	const { classify: rated, moves } = readPending({ target: { schema: "public" } }, copy, new Set(names))
+	return { moves, warned: rated({ placed }).map(({ classification }) => classification.lockWarnings) }
+}
+
+describe("readPending's moves (PA17 of r22b, 16.3 c)", () => {
+	const MADE = "CREATE TABLE a (id int);\nCREATE INDEX a_id ON a (id);\n"
+	const STAY =
+		"ALTER TABLE a SET ACCESS METHOD heap, SET TABLESPACE pg_default;\nALTER INDEX a_id SET TABLESPACE pg_default;\n"
+
+	it("warns of nothing for a move to where the target's catalog says it is, once the applied files end", () => {
+		write([MADE, STAY])
+		expect(placedWarnings(["2_b.sql"], PLACED)).toEqual({ moves: true, warned: [[]] })
+	})
+
+	it("warns of each move it cannot place: without the catalog, and of a relation a pending file made again", () => {
+		write([MADE, STAY])
+		expect(placedWarnings(["2_b.sql"]).warned[0]).toHaveLength(2)
+		write([MADE, `DROP TABLE a;\n${MADE}`, STAY])
+		expect(placedWarnings(["2_b.sql", "3_c.sql"], PLACED).warned[1]).toHaveLength(2)
+	})
+
+	it("says no pending file moves a relation for a SET LOGGED, whose no-op the history alone reads", () => {
+		write([MADE, "ALTER TABLE a SET LOGGED;\n"])
+		expect(placedWarnings(["2_b.sql"], PLACED)).toEqual({ moves: false, warned: [[]] })
 	})
 })

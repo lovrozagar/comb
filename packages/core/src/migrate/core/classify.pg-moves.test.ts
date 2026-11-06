@@ -6,7 +6,8 @@
  * .tmp/grunt/r22b/migrate-pg-atlas/lock/matrix.log. comb reads where a relation is from the history,
  * as PA11 reads a retype: its persistence always, and its access method or tablespace only where the
  * history names it, since one made without USING or TABLESPACE takes the target's
- * default_table_access_method and default_tablespace, which check cannot read. Siblings: a move
+ * default_table_access_method and default_tablespace, which the history cannot say; check and apply
+ * read those from the target's catalog (pg-live-storage.ts, check-storage.test.ts). Siblings: a move
  * elsewhere, to a place the history never named, after a rename of the tablespace or a move of all
  * of it, and of a relation dropped and made again.
  */

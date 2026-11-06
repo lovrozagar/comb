@@ -6,6 +6,7 @@
 import type { TriggerEvent } from "../migration-types.ts"
 import type { ForeignKey, PrimaryKey } from "./pg-foreign.ts"
 import type { IndexFact } from "./pg-index-facts.ts"
+import type { Storage } from "./pg-storage-types.ts"
 
 type Node = Record<string, unknown>
 
@@ -26,14 +27,6 @@ type Domain = {
 	fill: unknown
 	over: ColumnType
 }
-
-/**
- * Where a table or materialized view keeps its rows, as far as the history shows it:
- * whether it is logged, and its access method and tablespace, each undefined where the history
- * leaves it to the target (a temporary table, one made without USING or TABLESPACE, SET ACCESS
- * METHOD DEFAULT)
- */
-type Storage = { accessMethod: string | undefined; logged: boolean | undefined; tablespace: string | undefined }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
 /**
@@ -270,7 +263,6 @@ export {
 	type Node,
 	nodesOf,
 	type Proof,
-	type Storage,
 	type Term,
 	num,
 	type Reads,

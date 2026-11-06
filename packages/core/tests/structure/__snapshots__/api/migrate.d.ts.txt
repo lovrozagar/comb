@@ -155,6 +155,7 @@ export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExpor
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
 import type { Replayed } from "./classify-file.ts";
+import type { Placing } from "./pg-storage-types.ts";
 import { type FileRead } from "./pg-split.ts";
 import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
@@ -205,11 +206,15 @@ export { classifyMigration, extractDropStatements };
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
 /**
  * parseMigration of a file its caller has read: on Postgres its one parse, with what check's
- * replay on devUrl measured of it when it `replayed` the file
+ * replay on devUrl measured of it when it `replayed` the file, and where the target's catalog
+ * `placing` says its relations are
  */
 export declare function parseRead(file: FileRead & {
     filename: string;
-}, { before, kind, schema }: Omit<ClassifyOptions, "dialect">, replayed?: Replayed): ParsedMigration;
+}, { before, kind, schema }: Omit<ClassifyOptions, "dialect">, { placing, replayed }?: {
+    placing?: Placing | undefined;
+    replayed?: Replayed | undefined;
+}): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -687,6 +692,7 @@ import type { Dialect } from "../types.ts";
 import { type Replayed } from "./classify-file.ts";
 import type { TargetKind } from "./classify-target.ts";
 import { type Read } from "./classify-verdict.ts";
+import type { Placing } from "./pg-storage-types.ts";
 import { type PgRead } from "./pg-split.ts";
 /** How `parseMigration`, `classifyMigration` and `extractDropStatements` read a migration file */
 type ClassifyOptions = {
@@ -699,15 +705,19 @@ type ClassifyOptions = {
     /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; default `public` */
     schema?: string | undefined;
 };
-/**
- * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one, and what check's
- * replay on devUrl measured of it, when it `replayed` the file
- */
-declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, { read, replayed }?: {
+/** What a caller holds of a Postgres file besides its text: its parse, its replay, where its relations are */
+type Given = {
+    placing?: Placing | undefined;
     read?: PgRead | undefined;
     replayed?: Replayed | undefined;
-}) => Read[];
+};
+/**
+ * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
+ * Postgres `read` is the file's one parse, its caller's when it holds one, what check's
+ * replay on devUrl measured of it, when it `replayed` the file, and where the target's catalog
+ * `placing` says its relations are
+ */
+declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, { placing, read, replayed }?: Given) => Read[];
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
 /** The drops the readings of a file find */
@@ -1052,6 +1062,35 @@ type Replayed = {
 declare const createdOf: (codes: readonly string[], naming: ReturnType<typeof namingOf>) => Set<string>;
 export { createdOf, ftsCommandFindings, outsideRefusal, preview, PROCESS_PRAGMAS, type ReadStatement, refuseHeader, refuseOpenBlock, refuseUnrunnable, reindexedOf, type Replayed, };
 
+// migrate/core/pg-storage-types.d.ts
+/**
+ * Where Postgres keeps a relation's rows, as the history shows it (pg-storage.ts) and as the target's
+ * catalog says it (pg-live-storage.ts). Types only, so the declarations parse.ts and classify.ts
+ * publish reach no further.
+ */
+/**
+ * Where a table or materialized view keeps its rows, as far as the history shows it:
+ * whether it is logged, and its access method and tablespace, each undefined where the history
+ * leaves it to the target (a temporary table, one made without USING or TABLESPACE, SET ACCESS
+ * METHOD DEFAULT)
+ */
+type Storage = {
+    accessMethod: string | undefined;
+    logged: boolean | undefined;
+    tablespace: string | undefined;
+};
+/** Where the target keeps its tables' and materialized views' rows, and its indexes', by key */
+type Placed = {
+    indexes: ReadonlyMap<string, string>;
+    relations: ReadonlyMap<string, Storage>;
+};
+/** Where the target's catalog says its relations are, and the statement of the history its applied files end before */
+type Placing = {
+    at: number;
+    placed: Placed;
+};
+export type { Placed, Placing, Storage };
+
 // migrate/core/pg-split.d.ts
 import type { Dialect } from "../types.ts";
 type RawStmt = {
@@ -1108,6 +1147,8 @@ declare const fileEnds: (schema: {
 }) => readonly number[];
 /** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
 declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefined> | undefined;
+/** A history statement's parse tree; throws for one the parser cannot read */
+declare function historyTree(statement: string): unknown;
 /**
  * The migration file of `statements` under `head`, its directives kept as they are (Atlas honors
  * one only when a blank line follows), a delimiter directive dropped: one Atlas sends each
@@ -1115,7 +1156,7 @@ declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefi
  * the file's own, which its first line sets
  */
 declare function atlasFile(statements: readonly string[], head?: string): string;
-export { atlasFile, fileEnds, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
+export { atlasFile, fileEnds, type FileRead, fileRead, historyTree, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
 
 // migrate/core/schema.d.ts
 import { type FileRead } from "./pg-split.ts";

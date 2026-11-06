@@ -39,10 +39,15 @@ import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { sweepDev } from "./pg-replay-drops.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { readPending } from "./atlas-pending.ts"
+import { type ReadPlaced, readPlaced } from "./pg-live-storage.ts"
 import type { ReadHeld } from "./pg-schema-members.ts"
 
 /** What Postgres's adoption reads beside Atlas: the catalog, the replay, the dev schema and whether the schema holds anything, comb's own unless a test says otherwise */
-type Reads = Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev"> & { readHeld?: ReadHeld | undefined }
+type Reads = Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev"> & {
+	readHeld?: ReadHeld | undefined
+	/** where the target keeps its relations, for a pending move: comb's own (pg-live-storage.ts) unless a test says otherwise */
+	readPlaced?: ReadPlaced | undefined
+}
 
 type ApplyOptions = AtlasCommand &
 	Reads & {
@@ -109,8 +114,10 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 	const waiting = new Set(pending.map((file) => file.Name))
 	const check = options.checkOnly === true
 	/* what the file alone refuses goes before the replay, which never runs it; what the history decides waits for it */
-	const classify = readPending(options, copy, waiting)
-	let migrations = classify(check ? new Map() : undefined)
+	const { classify, moves } = readPending(options, copy, waiting)
+	/* where the target keeps a relation a pending file moves, which no history made without USING or TABLESPACE says */
+	const placed = moves ? await (options.readPlaced ?? readPlaced)(options.target) : undefined
+	let migrations = classify({ measured: check ? new Map() : undefined, placed })
 	/* a check lets Postgres decide what no database runs, before any file is approved */
 	if (check) {
 		const names = pending.map((file) => file.Name)
@@ -118,7 +125,7 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 			files: throughPending(copy, names),
 			pending: names,
 		})
-		migrations = classify(measured)
+		migrations = classify({ measured, placed })
 	}
 	for (const migration of migrations) {
 		const Name = migration.filename
