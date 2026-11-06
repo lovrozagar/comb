@@ -158,6 +158,21 @@ function refuseUnresumable(status: AtlasStatus, copy: string, partial: AtlasRevi
 	}
 }
 
+/**
+ * The file whose version `atlas migrate set` takes to record the snapshot's first `count` files by
+ * name, at least one: Atlas records each file in name order until the first whose version, compared
+ * as text, sorts above the one it is given, so the one of the highest version among them. `over` is
+ * the file after them that it would record as well, its version sorting no higher
+ */
+function setTo(copy: string, count: number): { over: AtlasFile | undefined; top: AtlasFile } {
+	const files = filesOf(copy)
+	const top = files
+		.slice(1, count)
+		.reduce((max, file) => (file.Version > max.Version ? file : max), files[0] as AtlasFile)
+	const next = files[count]
+	return { over: next !== undefined && next.Version <= top.Version ? next : undefined, top }
+}
+
 /** Where `partial`, a file Atlas ran halfway, stopped; only Atlas's text is scrubbed, the statement and its error */
 const stoppedAt = (partial: AtlasRevision, copy: string, scrub: Report["scrub"]): string =>
 	`${fileOf(copy, partial.version)} ran ${partial.applied} of its ${partial.total} statements before it failed at ${failedStatement(scrub(partial.errorStmt))} (${scrub(partial.error)})`
@@ -211,4 +226,14 @@ function checkHistory(
 	return partial === undefined ? undefined : resumable(partial, copy, scrub)
 }
 
-export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, filesOf, lastApplied, versionOf }
+export {
+	type AtlasFile,
+	type AtlasRevision,
+	type AtlasStatus,
+	checkHistory,
+	fileOf,
+	filesOf,
+	lastApplied,
+	setTo,
+	versionOf,
+}

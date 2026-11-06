@@ -3,9 +3,10 @@
  * private snapshot of the migrations directory (atlas-dir.ts), so Atlas executes exactly the bytes
  * comb classified. In order: Atlas's status, which must report no error except a file it ran
  * halfway outside a transaction; a dry run, so a database that needs a baseline fails before anyone
- * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each pending file classified and approved (approval.ts); then the apply. comb passes no
- * flag that would skip a check (--allow-dirty, --tx-mode, --baseline), and gives each file a call
- * of its own (atlas-apply-runs.ts), so no session setting of one file reaches the next.
+ * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each
+ * pending file classified and approved (approval.ts); then the apply. comb passes no flag that
+ * would skip a check (--allow-dirty, --tx-mode, --baseline), and gives each file a call of its own
+ * (atlas-apply-runs.ts), so no session setting of one file reaches the next.
  * The dry run and every apply pass `--exec-order non-linear`, so Atlas runs files by name, as
  * comb orders them on SQLite: its linear order also compares versions, which refuses a later name
  * with a lower version (20260101_a.sql after 20260101000000_b.sql). checkHistory refuses what that
@@ -14,7 +15,7 @@
 import type { ParsedMigration } from "../migration-types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
-import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"
+import { adopted, adopts, holdsNothing, proveAdoption, proven, settable, sharedPrefix, theirs } from "./atlas-adopt.ts"
 import { type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
 import {
 	type AtlasFile,
@@ -23,7 +24,7 @@ import {
 	checkHistory,
 	fileOf,
 	filesOf,
-	versionOf,
+	setTo,
 } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
 import { APPLY_FORMAT, NON_LINEAR, reported } from "./atlas-report.ts"
@@ -70,7 +71,8 @@ async function sharedRan(options: AtlasCommand & Reads, copy: string, own: Atlas
 		await atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }),
 		copy,
 	)
-	if (prefix.length === 0 || !(await holdsNothing(options))) return prefix
+	if (prefix.length === 0) return prefix
+	if (!(await holdsNothing(options))) return settable(copy, prefix)
 	options.print(theirs(options.target.schema, prefix))
 	return []
 }
@@ -95,7 +97,7 @@ async function ownOf(
 /** Record `ran` in the schema's own history, without running it, once the schema proves it holds what they leave: Atlas writes the rows in one transaction */
 async function adopt(options: AtlasCommand & Reads, copy: string, ran: readonly string[]): Promise<void> {
 	await proveAdoption({ ...options, exec: options.exec ?? run }, copy, ran)
-	const set = await atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
+	const set = await atlas(options, copy, ["set", setTo(copy, ran.length).top.Version])
 	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 	options.print(adopted(ran))
 }
@@ -200,9 +202,9 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
 
 /**
  * Record every migration of the directory as applied without running any (`atlas migrate set` to
- * the latest file's version), for a database whose schema was set up some other way. Refused when
- * the database already records migrations, and when its tables, functions or triggers are not the
- * ones the migrations leave. Returns the files marked.
+ * the highest version, which records every file), for a database whose schema was set up some
+ * other way. Refused when the database already records migrations, and when its tables, functions
+ * or triggers are not the ones the migrations leave. Returns the files marked.
  */
 async function baselineWithAtlas(options: AtlasCommand & Reads): Promise<string[]> {
 	return onSnapshot(options, async (copy) => {
@@ -219,14 +221,13 @@ async function baselineWithAtlas(options: AtlasCommand & Reads): Promise<string[
 			return ran
 		}
 		const files = sqlFiles(copy)
-		const latest = files.at(-1)
-		if (latest === undefined) throw new Error("there are no migrations to record")
+		if (files.length === 0) throw new Error("there are no migrations to record")
 		/* the replay runs on a dev database holding the schema */
 		await (options.readyDev ?? readyDevSchema)(options.target)
 		/* comb's replay, in a database of its own, dropped after it, and Atlas reading what it left */
 		await refuseHistoryDrift(options, copy)
-		/* the version as Atlas reads the name, the reader status and adoption use */
-		const set = await atlas(options, copy, ["set", versionOf(latest).version])
+		/* the highest version as Atlas reads the names, so Atlas records every file, as it prints */
+		const set = await atlas(options, copy, ["set", setTo(copy, files.length).top.Version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 		for (const name of files) options.print(`Marked applied: ${name}`)
 		return files

@@ -160,3 +160,24 @@ describe("the README on the order Postgres applies files in", () => {
 		expect(item).toContain("**Fix:**")
 	})
 })
+
+/* leaf 16.3 (set) of plan 21: atlas migrate set records by name until a version above its
+   argument (exo/probe6.log), so baseline sets the highest version, and adoption refuses a file
+   set would record with what 0.12 ran */
+describe("the README on what baseline and adoption record", () => {
+	const baseline = sentence(paragraph("`baseline <db>` records every file"), "`baseline <db>` records")
+
+	it("says baseline records every file, by the highest version, not up to the latest", () => {
+		expect(baseline).toContain("records every file of the directory as applied")
+		expect(baseline).toContain("setting Atlas's history to the highest version among them")
+		expect(baseline).not.toContain("up to the directory's latest")
+	})
+
+	it.each([
+		"Rerun baseline on a Postgres directory whose versions differ in length.",
+		"Expect adoption of 0.12's shared history to refuse a file whose version sorts below the files 0.12 ran, on Postgres.",
+	])("holds the 0.21 item %s, with its fix", (title) => {
+		const item = upgrade.split("\n").find((line) => /^\d+\. \*\*/.test(line) && line.includes(`**${title}**`))
+		expect(item).toContain("**Fix:**")
+	})
+})

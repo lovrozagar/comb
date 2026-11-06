@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"
+import { adopted, adopts, holdsNothing, proveAdoption, proven, settable, sharedPrefix, theirs } from "./atlas-adopt.ts"
 import { applyWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import type { AtlasRevision, AtlasStatus } from "./atlas-history.ts"
@@ -99,6 +99,16 @@ describe("sharedPrefix: the files 0.12's shared history ran", () => {
 		expect(() => sharedPrefix(shared([row("1_a.sql"), row("2_b.sql", { hash: "other=" })]), dir)).toThrow(
 			"2_b.sql is not the file 0.12 ran: its hash is not the one the shared history recorded; restore it, and apply adopts it",
 		)
+	})
+
+	/* exo/probe6.log: set records by name until a version above its argument, so a lower one after them too */
+	it("refuses a file after them whose version set would record with them, and passes one above them", () => {
+		snapshot({ "20260101000000_b.sql": "SELECT 1;\n", "20260101_a.sql": "SELECT 1;\n" })
+		expect(() => settable(dir, ["1_a.sql", "20260101000000_b.sql"])).toThrow(
+			"20260101_a.sql sorts after the files 0.12 ran, yet its version sorts below 20260101000000_b.sql's, so atlas migrate set would record it with them, though it never ran; rename it so its version sorts above 20260101000000 and run atlas migrate hash",
+		)
+		const below = ["1_a.sql", "20260101000000_b.sql", "20260101_a.sql", "2_b.sql"]
+		expect(settable(dir, below)).toEqual(below)
 	})
 
 	it("says how many files ran, and which it recorded", () => {
@@ -278,7 +288,6 @@ describe("proveAdoption", () => {
 })
 
 describe("proveAdoption: what it refuses", () => {
-	/* a ruling on P2: proof replays on the dev database, so one Atlas cannot reach refuses by its name */
 	it("refuses, naming devUrl, when Atlas cannot replay the files on the dev database", async () => {
 		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')

@@ -15,7 +15,7 @@
 import { copyFileSync } from "node:fs"
 import { join } from "node:path"
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
-import { type AtlasStatus, versionOf } from "./atlas-history.ts"
+import { type AtlasStatus, setTo, versionOf } from "./atlas-history.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
@@ -30,7 +30,10 @@ function sharedPrefix(shared: AtlasStatus, copy: string): string[] {
 	const files = sqlFiles(copy)
 	const named = new Map(files.map((name) => [versionOf(name).version, name]))
 	const hashes = sumHashes(copy)
-	const rows = shared.applied.filter((row) => named.has(row.version))
+	/* by name, as Atlas ran them: Atlas lists the rows by version */
+	const rows = shared.applied
+		.filter((row) => named.has(row.version))
+		.sort((one, other) => ((named.get(one.version) as string) < (named.get(other.version) as string) ? -1 : 1))
 	for (const [i, row] of rows.entries()) {
 		const name = named.get(row.version) as string
 		const due = files[i] as string
@@ -61,6 +64,19 @@ async function replayed<T>(step: () => T | Promise<T>, schema: string, ran: read
 			{ cause: error },
 		)
 	}
+}
+
+/**
+ * `ran`, the files of the snapshot `copy` 0.12's shared history ran, at least one, refused when
+ * `atlas migrate set`, recording them, would record the file after them too, which never ran
+ */
+function settable(copy: string, ran: string[]): string[] {
+	const { over, top } = setTo(copy, ran.length)
+	if (over !== undefined)
+		throw new Error(
+			`${over.Name} sorts after the files 0.12 ran, yet its version sorts below ${top.Name}'s, so atlas migrate set would record it with them, though it never ran; rename it so its version sorts above ${top.Version} and run atlas migrate hash`,
+		)
+	return ran
 }
 
 /** Refuse to adopt `ran`, the files of the snapshot `copy` 0.12's shared history ran, unless the schema holds what replaying them leaves */
@@ -107,4 +123,4 @@ const proven = (ran: readonly string[]): string =>
 /** What apply and baseline say once they recorded them */
 const adopted = (ran: readonly string[]): string => `Adopted from 0.12's shared history: ${ran.join(", ")}`
 
-export { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs }
+export { adopted, adopts, holdsNothing, proveAdoption, proven, settable, sharedPrefix, theirs }

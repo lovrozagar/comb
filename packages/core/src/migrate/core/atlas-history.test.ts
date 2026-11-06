@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { sqlFiles } from "./atlas-dir.ts"
-import { type AtlasRevision, type AtlasStatus, checkHistory, fileOf } from "./atlas-history.ts"
+import { type AtlasRevision, type AtlasStatus, checkHistory, fileOf, setTo } from "./atlas-history.ts"
 import { file } from "../../../tests/support/fake-atlas.ts"
 
 let dir = ""
@@ -325,5 +325,21 @@ describe("a txmode none file Atlas would not resume", () => {
 			"20260102_none.sql",
 		)
 		expect(checkHistory(resuming, dir, { scrub: kept })).toContain("20260102_none.sql ran 1 of its 3 statements")
+	})
+})
+
+/* exo/probe6.log: atlas migrate set records files by name until one whose version sorts above its argument */
+describe("setTo: the version atlas migrate set records a prefix by", () => {
+	const mixed = { "20260101000000_b.sql": "", "20260101_a.sql": "", "20260102_c.sql": "" }
+	it("takes the highest version among the files, compared as text, not the name-last one's", () => {
+		snapshot(mixed)
+		expect(setTo(dir, 2).top.Name).toBe("20260101000000_b.sql")
+		expect(setTo(dir, 3)).toEqual({ over: undefined, top: expect.objectContaining({ Name: "20260102_c.sql" }) })
+	})
+
+	it("names the next file when its version sorts below the prefix's top, so set would record it too", () => {
+		snapshot(mixed)
+		expect(setTo(dir, 1).over?.Name).toBe("20260101_a.sql")
+		expect(setTo(dir, 2).over).toBeUndefined()
 	})
 })
