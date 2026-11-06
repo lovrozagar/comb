@@ -4,6 +4,7 @@ import type { FieldMeta } from "../../analyzer-types.ts"
 import { type Base, type Build, plain } from "./build-types.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import { isMutative } from "./schema-type.ts"
+import { regexExpression } from "../../utils/pattern.ts"
 
 /* the text guard every written text takes: comb's own isStorableText, which the shared file imports, as a
    refine sits in the structural core the shared schemas share there */
@@ -120,7 +121,7 @@ const rangeChecks = ({ max, min }: TextRange): string =>
 
 /** A written email's bounds and the pattern it declares, checked after the format */
 function emailBounds(annotations: FieldConstraints, range: TextRange): string {
-	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
+	const pattern = annotations.pattern === null ? "" : `.regex(${regexExpression(annotations.pattern)})`
 	/* z.email() publishes its pattern, the check, beside format email, whose grammar refuses a@b-.cc
 	   the pattern takes: the pattern publishes alone */
 	return `${rangeChecks(range)}${pattern}.meta({ format: void 0 })`
@@ -187,7 +188,7 @@ function textBounds(build: Build, range: TextRange): string {
  * 500 or another value there
  */
 function writeChecks(annotations: FieldConstraints): string {
-	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
+	const pattern = annotations.pattern === null ? "" : `.regex(${regexExpression(annotations.pattern)})`
 	const https = annotations.url ? `.regex(${HTTPS}, { message: "Must be an HTTPS URL" })` : ""
 	/* z.url() checks by the WHATWG parser, which takes https://a/b c that format uri refuses, and zod
 	   drops its format once a regex follows: the https pattern publishes, and no format */

@@ -16,6 +16,7 @@ const DECLARED = `export const row = sqliteTable("row", {
 	letters: c.text("letters", { pattern: "/^\\\\p{L}+$/u" }),
 	other: c.text("other", { pattern: "/^[^\\\\P{L}\\\\p{Nd}]$/u" }),
 	label: c.text("label", { name: true }),
+	accented: c.text("accented", { pattern: "/^[é😀]€$/u" }),
 })`
 
 /** Each field's published patterns, keyed by field, from the create DTO's JSON Schema under Bun */
@@ -49,5 +50,9 @@ describe("the patterns comb publishes, read under Bun (CS3 of r22b)", () => {
 			["^[^\\P{L}\\p{Nd}]$"],
 			["^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$"],
 		])
+	})
+
+	it("publish a declared non-ASCII character as itself, the one spelling ECMAScript, Go and Rust share", async () => {
+		expect((await publishedPatterns())["accented"]).toEqual(["^[é😀]€$"])
 	})
 })

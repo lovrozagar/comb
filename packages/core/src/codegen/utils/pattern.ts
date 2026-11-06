@@ -54,4 +54,15 @@ function patternLiteral(pattern: string, place: string): string {
 	return `/${compiled.source}/u`
 }
 
-export { patternLiteral }
+/**
+ * The expression that builds the regex of `literal`, one patternLiteral made. Bun's transpiler
+ * writes each non-ASCII character of a regex literal as a \u escape, a surrogate pair past U+FFFF,
+ * and zod publishes the regex's source, where Go's RE2 reads no \u and Rust's regex no surrogate:
+ * a source holding one is handed to RegExp as a string, whose value a transpiler keeps
+ */
+function regexExpression(literal: string): string {
+	if ([...literal].every((char) => (char.codePointAt(0) as number) < 0x80)) return literal
+	return `new RegExp(${JSON.stringify(literal.slice(1, literal.lastIndexOf("/")))}, "u")`
+}
+
+export { patternLiteral, regexExpression }

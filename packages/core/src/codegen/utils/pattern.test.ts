@@ -1,6 +1,6 @@
 import { RE2JS } from "re2js"
 import { describe, expect, it } from "vitest"
-import { patternLiteral as emitted } from "./pattern.ts"
+import { patternLiteral as emitted, regexExpression } from "./pattern.ts"
 
 /* A3-2 of r23: every pattern comb takes here compiles under RE2's syntax, as Go's validators read it */
 function patternLiteral(pattern: string, place: string): string {
@@ -211,5 +211,15 @@ describe("patternLiteral: only the escapes and classes every engine reads alike 
 			String.raw`/^[\-\[\]&~]a{1000}b{2,1000}c{3,}$/u`,
 		])
 			expect(patternLiteral(pattern, "x")).toBe(pattern)
+	})
+})
+
+/* CS3 of r22b: Bun writes a regex literal's non-ASCII characters as \u escapes in its source */
+describe("regexExpression: the regex a generated DTO builds", () => {
+	it("keeps an ASCII literal, and builds a non-ASCII one from a string, its source the characters", () => {
+		expect(regexExpression(String.raw`/^\p{L}\/$/u`)).toBe(String.raw`/^\p{L}\/$/u`)
+		const expression = regexExpression(emitted("/^[é😀]\\/€$/u", "x"))
+		expect(expression).toBe(String.raw`new RegExp("^[é😀]\\/€$", "u")`)
+		expect((new Function(`return ${expression}`)() as RegExp).source).toBe(String.raw`^[é😀]\/€$`)
 	})
 })
