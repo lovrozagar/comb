@@ -323,7 +323,8 @@ describe("the newest upgrade section's exports", () => {
 	/* D6-4 of the area D round-six review: a runner an embedder passes, `CliIo.run`, became async too */
 	it("names in that paragraph each member of a public type that returns a promise since then", () => {
 		const became = becamePromises(RELEASED.exports).filter((name) => name.includes("."))
-		expect(released ? [] : became).toContain("CliIo.run")
+		/* only the unreleased section guards it: once released, the snapshot holds CliIo.run's promise */
+		expect(released || became.includes("CliIo.run"), `CliIo.run among ${JSON.stringify(became)}`).toBe(true)
 		const paragraph = released ? "" : promiseParagraph(section).paragraph
 		expect(became.filter((name) => !paragraph.includes(`\`${name}\``))).toEqual([])
 	})
