@@ -51,7 +51,7 @@ describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 	/* CS1 of r22b: a source read without u is another rule than the one JSON Schema publishes */
 	it("reads a pattern written without u under u, so zod runs the rule a reader runs", () => {
 		const literal = patternLiteral(String.raw`/^\p{L}[^\n\r]$/`, "t.name")
-		expect(literal.endsWith(String.raw`][^\n\r]$/u`)).toBe(true)
+		expect(literal).toBe(String.raw`/^\p{L}[^\n\r]$/u`)
 		const regex = new Function(`return ${literal}`)() as RegExp
 		expect(["é😀", "ж𝒜"].map((text) => regex.test(text))).toEqual([true, true])
 		expect(regex.test("p{L}x")).toBe(false)
@@ -84,7 +84,7 @@ describe("patternLiteral: a pattern with no shorthand class (AA7 of r22)", () =>
 
 	it("takes an escaped backslash before a letter, and a letter escape outside the shorthand set", () => {
 		expect(patternLiteral(String.raw`/^\\d$/`, "x")).toBe(String.raw`/^\\d$/u`)
-		expect(patternLiteral(String.raw`/^[0-9]\.\x41\n$/`, "x")).toBe(String.raw`/^[0-9]\.\x41\n$/u`)
+		expect(patternLiteral(String.raw`/^[0-9]\.\p{L}\n$/`, "x")).toBe(String.raw`/^[0-9]\.\p{L}\n$/u`)
 	})
 })
 
@@ -201,10 +201,11 @@ describe("patternLiteral: only the escapes and classes every engine reads alike 
 		expect(() => emitted(pattern, "t.code")).toThrow(`t.code: pattern ${pattern} holds ${held}`)
 	})
 
-	it("takes \\xHH, \\t \\n \\r \\f \\v and an escaped syntax character as written", () => {
+	it("takes a General_Category, \\xHH, \\t \\n \\r \\f \\v and an escaped syntax character", () => {
 		for (const pattern of [
+			String.raw`/^\p{Lu}+$/u`,
 			String.raw`/^\x41$/u`,
-			String.raw`/^\p{Zl}\p{Zp}$/u`,
+			String.raw`/^\P{Nd}\p{LC}[\p{L}\P{L}]\p{Zl}\p{Zp}$/u`,
 			String.raw`/^[\t\n\r\f\v]\t\n\r\f\v$/u`,
 			String.raw`/^\^\$\\\.\*\+\?\(\)\[\]\{\}\|\/$/u`,
 			String.raw`/^[\-\[\]&~]a{1000}b{2,1000}c{3,}$/u`,

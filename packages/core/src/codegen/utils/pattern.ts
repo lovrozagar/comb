@@ -17,7 +17,6 @@
  */
 
 import { unportableOf } from "./pattern-grammar.ts"
-import { publishedSource } from "./pattern-ranges.ts"
 
 /* a lone surrogate, which the engine's source holds as written; a pair is one scalar value */
 function loneSurrogateOf(source: string): string | null {
@@ -52,7 +51,7 @@ function patternLiteral(pattern: string, place: string): string {
 	if (unportable !== null) throw new Error(`${place}: pattern ${pattern} holds ${unportable}`)
 	/* the engine's own source, the text a regex literal holds: a slash escaped outside a class only, a
 	 * line terminator as its escape, so the pattern publishes as the regex in the tables file would */
-	return `/${publishedSource(compiled.source)}/u`
+	return `/${compiled.source}/u`
 }
 
 export { patternLiteral }

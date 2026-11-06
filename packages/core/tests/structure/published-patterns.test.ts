@@ -39,7 +39,6 @@ const DECLARED = `
 	other: c.text("other", { pattern: "/^[^x]$/" }),
 	letters: c.text("letters", { pattern: "/^\\\\p{L}+$/" }),
 	lettersU: c.text("letters_u", { pattern: "/^\\\\p{L}+$/u" }),
-	letter: c.text("letter", { pattern: "/^\\\\p{L}$/u" }),
 	lower: c.text("lower", { lowercase: true, pattern: "/^[a-z]+$/" }),
 	label: c.text("label", { name: true }),
 	image: c.text("image", { imageUri: true }),
@@ -348,28 +347,5 @@ describe("the patterns comb publishes (CS1, CS2, CS3; siblings: the id, the MAC,
 		const fields = Object.entries(published((create as Lane).schema)["properties"] as Record<string, Node>)
 		const patterned = fields.filter(([, field]) => patternsOf(field).length > 0).map(([key]) => key)
 		expect(patterned).toEqual(expect.arrayContaining(PATTERNED))
-	})
-})
-
-describe("the categories comb publishes, as ranges (AA4-2)", () => {
-	/* AA4-2 of r24: engines on other Unicode versions read one \\p{…} name as other sets, so each is
-	   published as the ranges of the codegen runtime's tables; U+2028 and U+2029 stay \\p{Zl} and
-	   \\p{Zp}, the one spelling of each that ECMAScript, Go's RE2 and Rust's regex read alike */
-	it("hold no \\p{…} or \\P{…} but \\p{Zl} and \\p{Zp}, each category written out as ranges", async () => {
-		const held: string[] = []
-		for (const { dialect, name, schema } of await lanes())
-			for (const pattern of new Set(patternsOf(published(schema))))
-				if (/\\[pP]\{(?!Z[lp]\})/u.test(pattern)) held.push(`${dialect} ${name}: ${pattern.slice(0, 80)}`)
-		expect(held).toEqual([])
-	})
-
-	/* re2js and the runtime read Unicode 17, so the ranges are what holds U+A7CE for an engine on 16,
-	   as Rust's regex 1.13.1 and Node 22 are: the pattern takes it with every category name struck */
-	it("publish a declared \\p{L} that takes U+A7CE, a letter since Unicode 17, by its ranges alone", async () => {
-		for (const { schema } of await lanes()) {
-			const [pattern] = patternsOf((published(schema)["properties"] as Record<string, Node>)["letter"]) as [string]
-			const ranges = pattern.replaceAll(/\\[pP]\{[^}]*\}/gu, "")
-			expect([RE2JS.compile(ranges).matches("\uA7CE"), new RegExp(ranges, "u").test("\uA7CE")]).toEqual([true, true])
-		}
 	})
 })

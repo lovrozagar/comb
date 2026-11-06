@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CATEGORIES, escapeAt, hexOf, LOOKAROUND, refuse, Unportable } from "./pattern-escape.ts"
+import { escapeAt, hexOf, LOOKAROUND, refuse, Unportable } from "./pattern-escape.ts"
 
 describe("escapeAt", () => {
 	it("takes an escape every engine reads alike, and gives its last index", () => {
@@ -21,7 +21,11 @@ describe("escapeAt", () => {
 
 describe("the escape tables", () => {
 	it("names the categories every engine compiles, Cs not among them", () => {
-		expect(CATEGORIES.has("L") && CATEGORIES.has("Lu") && !CATEGORIES.has("Cs")).toBe(true)
+		expect(["\\p{L}", "\\P{Lu}", "\\p{Cs}"].map((escape) => escapeAt(escape, 0).refused === null)).toEqual([
+			true,
+			true,
+			false,
+		])
 	})
 
 	it("spells a code as \\xHH, and tells a lookaround from a named group", () => {

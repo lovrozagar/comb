@@ -5,7 +5,6 @@ import type { FieldMeta } from "../../analyzer-types.ts"
 import type { Build } from "./build-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { isStorableText, STORABLE_TEXT_RULE } from "../../../storable-text.ts"
-import { patternLiteral } from "../../utils/pattern.ts"
 import { stated, textBase } from "./text-schema.ts"
 
 type Pin = Partial<FieldMeta> & { dialect?: Build["dialect"] }
@@ -26,24 +25,6 @@ function text(raw: string, schemaType: SchemaType, { dialect = "sqlite", ...over
 
 /* generated code names comb's isStorableText under comb's namespace, which the generated file imports (C2 of r17) */
 const parse = (code: string) => new Function("z", "comb", `return ${code}`)(z, { isStorableText }) as z.ZodString
-
-/* F3, AA4-2 of r24: a name takes letters, marks, numbers, spaces and punctuation, its categories
-   published as the ranges a declared pattern's are */
-describe("textBase on a name", () => {
-	it("checks a written name's characters by the ranges of its categories", () => {
-		const code = text('c.text("t", { name: true }).notNull()', "create")
-		expect(code).toContain(
-			`.regex(${patternLiteral("/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u", "x")}, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })`,
-		)
-		expect(code).not.toMatch(/\\p\{/u)
-		expect(["Jo O'Neil", "Zoë \uA7CE", "a<b", "a\nb"].map((name) => parse(code).safeParse(name).success)).toEqual([
-			true,
-			true,
-			false,
-			false,
-		])
-	})
-})
 
 /* F65: a read never refuses a stored row; it states the declared bounds and enforces what the engine holds */
 describe("textBase on a read (F65)", () => {

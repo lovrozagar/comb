@@ -276,9 +276,11 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 	})
 })
 
-describe("generateFieldSchema: imageUri (F3)", () => {
-	/* a name's rule is text-schema.test.ts's to read */
-	it("checks an image URI's scheme on writes, and reads it as a string", () => {
+describe("generateFieldSchema: name and imageUri (F3)", () => {
+	it("checks a name's characters and an image URI's scheme on writes, and reads either as a string", () => {
+		expect(schema("n", 'c.text("n", { name: true }).notNull()', "create")).toBe(
+			'z.string().min(1).regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" }).meta(_m.string)',
+		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "update")).toBe(
 			'z.string().min(8).regex(/^(?:https:\\/\\/|data:image\\/)/u, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
 		)
