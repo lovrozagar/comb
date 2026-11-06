@@ -5,9 +5,9 @@
  * or code the target holds can each run a SET that outlives its COMMIT.
  */
 import { hold } from "./cleanup.ts"
-import { execOrder, type Foreign, ownHistory } from "./atlas-foreign.ts"
+import { type Foreign, ownHistory } from "./atlas-foreign.ts"
 import { type AtlasFile, type AtlasStatus, checkHistory } from "./atlas-history.ts"
-import { APPLY_FORMAT, reported } from "./atlas-report.ts"
+import { APPLY_FORMAT, NON_LINEAR, reported } from "./atlas-report.ts"
 import { atlas, type AtlasCommand, atlasStatus } from "./atlas-status.ts"
 
 /**
@@ -86,7 +86,7 @@ async function callEach(
 	let next = [...approved][0] as string
 	for (;;) {
 		const ran = reported(
-			await atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT, "1"]),
+			await atlas(options, copy, ["apply", ...NON_LINEAR, "--format", APPLY_FORMAT, "1"]),
 			"apply",
 			copy,
 		)

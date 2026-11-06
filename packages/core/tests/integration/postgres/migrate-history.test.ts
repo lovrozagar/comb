@@ -132,3 +132,52 @@ describe("migrate status, check and apply on Postgres: an applied file renamed u
 		}, 60_000)
 	})
 })
+
+/** The public tables of the database at `url` */
+const tables = async (url: string): Promise<string[]> =>
+	(
+		await query<{ tablename: string }>(url, "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1")
+	).map((row) => row.tablename)
+
+/*
+ * leaf 16.3 (a) of plan 21 (migrate-pg-atlas_flow_names): the name is the only order, as on SQLite.
+ * Atlas runs files by name; its linear order refused a later name with a lower version, and it skips a
+ * file named before the last applied one without a word (.tmp/grunt/p21/areas/ae3/exo/probe2.log)
+ */
+describe("migrate on Postgres orders files by name alone", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("applies 20260101_a, 20260101000000_b and 20260102_c by name: b, a, c", async () => {
+			await withScratchDb(async (url) => {
+				await migrations({
+					"20260101000000_b.sql": "CREATE TABLE t_b (id int);\n",
+					"20260101_a.sql": "CREATE TABLE t_a (id int);\n",
+					"20260102_c.sql": "CREATE TABLE t_c (id int);\n",
+				})
+				expect(await applyWithAtlas(command(url))).toEqual(["20260101000000_b.sql", "20260101_a.sql", "20260102_c.sql"])
+				expect(await tables(url)).toEqual(["t_a", "t_b", "t_c"])
+				expect(await applyWithAtlas(command(url))).toEqual([])
+				expect((await statusWithAtlas(command(url))).pending).toEqual([])
+			})
+		}, 60_000)
+
+		it.each([
+			["1_b.sql", "1.5_a.sql"],
+			["20260102_b.sql", "20260101_a.sql"],
+		])(
+			"refuses %s's later file %s, named before it, in status, check and apply before any write",
+			async (first, late) => {
+				await withScratchDb(async (url) => {
+					await migrations({ [first]: "CREATE TABLE t_b (id int);\n" })
+					await applyWithAtlas(command(url))
+					await migrations({ [late]: "CREATE TABLE t_a (id int);\n", "3_c.sql": "CREATE TABLE t_c (id int);\n" })
+					const refusal = `${late} was never applied, yet it sorts before ${first}, which was; rename it to sort after`
+					await expect(statusWithAtlas(command(url))).rejects.toThrow(refusal)
+					await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(refusal)
+					await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
+					expect(await tables(url)).toEqual(["t_b"])
+				})
+			},
+			60_000,
+		)
+	})
+})

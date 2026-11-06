@@ -132,3 +132,31 @@ describe("the README on status and an applied file edited since (PA21 of r22b)",
 		expect(status).not.toContain("warns")
 	})
 })
+
+/* leaf 16.3 (a) of plan 21: Postgres orders the files by name alone, as SQLite does, and Atlas
+   resumes a half-run txmode none file only while its version is the highest applied */
+describe("the README on the order Postgres applies files in", () => {
+	const apply = paragraph("`apply` works on a private copy of the migrations directory")
+
+	it("says Postgres orders by name, as SQLite does, and refuses a file named before an applied one", () => {
+		expect(sentence(apply, "by name alone")).toContain("Postgres orders the files by name alone, as SQLite does")
+		expect(sentence(apply, "skip without a word")).toContain(
+			"a file never applied whose name sorts before an applied one's, which Atlas would skip without a word",
+		)
+		expect(apply).not.toContain("older than the latest applied one")
+	})
+
+	it("says a txmode none file resumes only while its version is the highest applied", () => {
+		expect(sentence(apply, "statement count")).toContain(
+			"only while its version, compared as text, is the highest applied",
+		)
+	})
+
+	it.each([
+		"Expect a file named before an applied one to be refused, on Postgres.",
+		"Give a `-- atlas:txmode none` file a version above every file before it, on Postgres.",
+	])("holds the 0.21 item %s, with its fix", (title) => {
+		const item = upgrade.split("\n").find((line) => /^\d+\. \*\*/.test(line) && line.includes(`**${title}**`))
+		expect(item).toContain("**Fix:**")
+	})
+})

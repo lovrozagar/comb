@@ -6,16 +6,16 @@
  * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each pending file classified and approved (approval.ts); then the apply. comb passes no
  * flag that would skip a check (--allow-dirty, --tx-mode, --baseline), and gives each file a call
  * of its own (atlas-apply-runs.ts), so no session setting of one file reaches the next.
- * The one
- * --exec-order it passes, non-linear, goes only to public's dry run and apply while public's
- * history holds another schema's 0.12 row (atlas-foreign.ts): Atlas would count that row as
- * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
+ * The dry run and every apply pass `--exec-order non-linear`, so Atlas runs files by name, as
+ * comb orders them on SQLite: its linear order also compares versions, which refuses a later name
+ * with a lower version (20260101_a.sql after 20260101000000_b.sql). checkHistory refuses what that
+ * order would skip, a file named before the last applied one (atlas-foreign.ts's ownHistory).
  */
 import type { ParsedMigration } from "../migration-types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
 import { adopted, adopts, holdsNothing, proveAdoption, proven, sharedPrefix, theirs } from "./atlas-adopt.ts"
-import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
+import { type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
 import {
 	type AtlasFile,
 	type AtlasRevision,
@@ -26,7 +26,7 @@ import {
 	versionOf,
 } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
-import { APPLY_FORMAT, reported } from "./atlas-report.ts"
+import { APPLY_FORMAT, NON_LINEAR, reported } from "./atlas-report.ts"
 import { applyRuns } from "./atlas-apply-runs.ts"
 import { NOT_CLEAN } from "./atlas-failure.ts"
 import { SHARED_REVISIONS } from "./atlas-target.ts"
@@ -169,7 +169,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		if (options.checkOnly === true && status.applied.length === 0)
 			await refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		else {
-			const dry = await atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
+			const dry = await atlas(options, copy, ["apply", "--dry-run", ...NON_LINEAR, "--format", APPLY_FORMAT])
 			reported(dry, "apply --dry-run", copy)
 		}
 		await approvePending(options, copy, status.pending)

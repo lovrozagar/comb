@@ -141,14 +141,15 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 			})
 		})
 
-		it("applies a later file of public's after c, and refuses one older than public's own latest", async () => {
+		it("applies a later file of public's after c, and refuses one named before public's own latest", async () => {
 			await withDevAndTarget(async (dev, url) => {
 				await reportCase(url, dev)
 				await applyWithAtlas(command(url, "public", pub))
 				await migrations(pub, { "20260110000000_d.sql": 'CREATE TABLE "d" ("id" integer);\n' })
 				expect(await applyWithAtlas(command(url, "public", pub))).toEqual(["20260110000000_d.sql"])
 				await migrations(pub, { "20260102000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
-				const late = "20260102000000_late.sql is older than a migration already applied; rename it to a newer version"
+				const late =
+					"20260102000000_late.sql was never applied, yet it sorts before 20260110000000_d.sql, which was; rename it to sort after"
 				await expect(statusWithAtlas(command(url, "public", pub))).rejects.toThrow(late)
 				await expect(applyWithAtlas(command(url, "public", pub))).rejects.toThrow(late)
 				expect(await query(url, "SELECT to_regclass('public.late') IS NULL AS absent")).toEqual([{ absent: true }])

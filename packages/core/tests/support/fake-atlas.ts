@@ -2,7 +2,7 @@
  * A fake Atlas for the apply tests: hash writes atlas.sum from the files' name lengths, a schema
  * diff records the history it replayed, and status, inspect, dry run and apply answer as told. An
  * apply of n files, as comb runs each run of files that may share a session (PA1 of r22b), answers
- * with the report's next n files, and status then leaves the files reported out of its pending.
+ * with the report's next n files, and status then records the files reported as applied, not pending.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -62,13 +62,29 @@ function nextOf(whole: RunResult, taken: string[], amount: number): RunResult {
 	return last ? { ...whole, stdout } : ok(stdout)
 }
 
-/** `answer`, a status, with the files an apply reported left out of its pending */
+/** A revision as Atlas records `name` once an apply ran it whole, its hash the fake atlas.sum's */
+const ranWhole = (name: string) => ({
+	...revision(name.split("_")[0] as string),
+	description: name.replace(/\.sql$/, "").split("_")[1] ?? "",
+	hash: `${name.length}=`,
+})
+
+/** `answer`, a status, with the files an apply reported left out of its pending and recorded as applied */
 function pendingAfter(answer: RunResult, taken: readonly string[]): RunResult {
 	if (taken.length === 0 || !answer.stdout.startsWith("{")) return answer
-	const body = JSON.parse(answer.stdout) as { pending?: Array<{ Name: string }> | null }
+	const body = JSON.parse(answer.stdout) as {
+		applied?: Array<{ version: string }> | null
+		pending?: Array<{ Name: string }> | null
+	}
+	const recorded = new Set((body.applied ?? []).map((entry) => entry.version))
+	const ran = taken.filter((name) => !recorded.has(name.split("_")[0] as string)).map(ranWhole)
 	return {
 		...answer,
-		stdout: JSON.stringify({ ...body, pending: (body.pending ?? []).filter((entry) => !taken.includes(entry.Name)) }),
+		stdout: JSON.stringify({
+			...body,
+			applied: [...(body.applied ?? []), ...ran],
+			pending: (body.pending ?? []).filter((entry) => !taken.includes(entry.Name)),
+		}),
 	}
 }
 
@@ -113,4 +129,4 @@ function fakeAtlas(answers: Answers): Fake {
 const status = (body: Record<string, unknown>) =>
 	ok(JSON.stringify({ applied: [], available: [], current: "", error: "", pending: [], status: "OK", ...body }))
 
-export { type Answers, fail, type Fake, fakeAtlas, file, ok, revision, status }
+export { type Answers, fail, type Fake, fakeAtlas, file, ok, ranWhole, revision, status }

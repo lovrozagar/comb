@@ -184,10 +184,6 @@ describe("comb's own words, whatever the password spells (M79)", () => {
 		const explained: Array<[string, string]> = [
 			["Error: docker: Cannot connect to the Docker daemon", "set devUrl to an empty Postgres database instead"],
 			["Error: lock is held by other session", "run it again once that one finishes"],
-			[
-				"Error: migration file 2_b.sql was added out of order",
-				"is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
-			],
 			['Error: dropping value "x" from enum "e" is not supported', "write that migration by hand"],
 			["Error: functions are available to logged-in users only", "take them out of the drizzle schema"],
 		]

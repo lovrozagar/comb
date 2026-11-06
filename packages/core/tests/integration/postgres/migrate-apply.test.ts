@@ -200,13 +200,13 @@ describe("migrate check on Postgres reads only (M11)", () => {
 
 describe("migrate apply on Postgres: history it refuses", () => {
 	describe("with Atlas v1.3.0", () => {
-		it("refuses a file added before one already applied", async () => {
+		it("refuses a file added with a name before one already applied", async () => {
 			await withScratchDb(async (url) => {
 				await migrations({ "20260102000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
 				await migrations({ "20260101000000_late.sql": 'CREATE TABLE "late" ("id" integer);\n' })
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(
-					"20260101000000_late.sql is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
+					"20260101000000_late.sql was never applied, yet it sorts before 20260102000000_b.sql, which was; rename it to sort after the applied files and run atlas migrate hash",
 				)
 				expect(await tables(url)).toEqual(["b"])
 			})

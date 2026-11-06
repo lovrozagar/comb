@@ -9,7 +9,7 @@ import { sumHashes } from "./atlas-dir.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
-import { fail, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
+import { fail, fakeAtlas, file, ok, ranWhole, revision, status } from "../../../tests/support/fake-atlas.ts"
 import { FAKE_REPLAY, holdingRelations, noLive, replaying } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
 
@@ -115,13 +115,19 @@ describe("applyWithAtlas: how many files one Atlas call runs (PA1 of r22b)", () 
 		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
 		await applyWithAtlas(options(atlas))
 		const args = atlas.calls.flatMap((call) => call.args)
-		for (const flag of ["--exec-order", "--allow-dirty", "--tx-mode", "--baseline", "--to-version"])
-			expect(args).not.toContain(flag)
-		const bare = atlas.calls
-			.filter((c) => c.args[1] === "apply")
-			.map((call) => call.args.slice(2).filter((arg, i, all) => !arg.startsWith("--") && !all[i - 1]?.startsWith("--")))
+		for (const flag of ["--allow-dirty", "--tx-mode", "--baseline", "--to-version"]) expect(args).not.toContain(flag)
+		const applies = atlas.calls.filter((c) => c.args[1] === "apply")
+		const bare = applies.map((call) =>
+			call.args.slice(2).filter((arg, i, all) => !arg.startsWith("--") && !all[i - 1]?.startsWith("--")),
+		)
 		/* the dry run takes no amount; each file runs on a session of its own, as it would alone */
 		expect(bare).toEqual([[], ["1"], ["1"]])
+		/* leaf 16.3 (a) of plan 21: Atlas runs files by name alone, as comb orders them */
+		expect(applies.map((call) => call.args.slice(2, 5))).toEqual([
+			["--dry-run", "--exec-order", "non-linear"],
+			["--exec-order", "non-linear", "--format"],
+			["--exec-order", "non-linear", "--format"],
+		])
 	})
 })
 
@@ -188,7 +194,7 @@ describe("applyWithAtlas: each history file parsed once", () => {
 	it("parses an applied file once, whatever the pending files after it read of it", async () => {
 		const parse = vi.spyOn(postgresParser(), "parseSync")
 		try {
-			const pending = status({ applied: [revision("1", { hash: "7=" })], current: "1", pending: [file("2_b.sql")] })
+			const pending = status({ applied: [ranWhole("1_a.sql")], current: "1", pending: [file("2_b.sql")] })
 			await applyWithAtlas(options(fakeAtlas({ apply: APPLIED_B, status: pending })))
 			expect(parse.mock.calls.filter(([sql]) => sql.includes('CREATE TABLE "a"'))).toHaveLength(1)
 		} finally {
@@ -206,7 +212,7 @@ describe("applyWithAtlas: what it prints", () => {
 	})
 
 	it("does nothing when nothing is pending", async () => {
-		const atlas = fakeAtlas({ status: status({ status: "OK" }) })
+		const atlas = fakeAtlas({ status: status({ applied: [ranWhole("1_a.sql"), ranWhole("2_b.sql")] }) })
 		const run = options(atlas)
 		expect(await applyWithAtlas(run)).toEqual([])
 		expect(run.out).toEqual(["No migrations to apply"])
@@ -215,33 +221,36 @@ describe("applyWithAtlas: what it prints", () => {
 })
 
 describe("applyWithAtlas: what Atlas reports", () => {
-	it("refuses a history Atlas reports an error for, such as a file added out of order", async () => {
-		const late = status({
-			error: "migration file 1_late.sql was added out of order. See: https://atlasgo.io",
+	/* leaf 16.3 (a) of plan 21: Atlas's linear order calls a later name with a lower version out of order;
+	   comb orders by name alone, and Atlas runs them so under --exec-order non-linear */
+	it("applies the files by name through the out-of-order error of Atlas's linear status", async () => {
+		const linear = status({
+			error: "migration file 1_a.sql was added out of order. See: https://atlasgo.io",
 			status: "PENDING",
 		})
-		await expect(applyWithAtlas(options(fakeAtlas({ status: late })))).rejects.toThrow(
-			"1_late.sql is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
-		)
+		expect(await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: linear })))).toEqual(["1_a.sql", "2_b.sql"])
+	})
+
+	it("refuses a history Atlas reports any other error for", async () => {
 		const other = status({ error: "connect to postgres://app:S3cret@db failed" })
 		await expect(applyWithAtlas(options(fakeAtlas({ status: other })))).rejects.toThrow(
 			"atlas migrate status: connect to postgres://app:***@db failed",
 		)
 	})
 
-	it("takes a fresh database's files as pending, not late, and applies those alone", async () => {
+	it("takes every file of a fresh database as pending, not late, whatever Atlas lists", async () => {
 		const fresh = status({
 			available: [file("1_a.sql")],
 			current: "No migration applied yet",
 			pending: [file("1_a.sql")],
 		})
-		expect(await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: fresh })))).toEqual(["1_a.sql"])
+		expect(await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: fresh })))).toEqual(["1_a.sql", "2_b.sql"])
 	})
 
-	it("refuses a file older than the latest applied that Atlas skips without a word", async () => {
+	it("refuses a file named before the latest applied, which Atlas skips without a word", async () => {
 		const skipped = status({ applied: [revision("2")], available: [file("1_a.sql"), file("2_b.sql")], current: "2" })
 		await expect(applyWithAtlas(options(fakeAtlas({ status: skipped })))).rejects.toThrow(
-			"1_a.sql is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
+			"1_a.sql was never applied, yet it sorts before 2_b.sql, which was; rename it to sort after the applied files and run atlas migrate hash",
 		)
 	})
 
@@ -289,6 +298,7 @@ describe("applyWithAtlas: Atlas failing", () => {
 const partial = (hash: string) =>
 	status({
 		applied: [
+			ranWhole("1_a.sql"),
 			revision("2", { applied: 2, error: "pq: relation missing", errorStmt: 'ALTER TABLE "nope"', hash, total: 3 }),
 		],
 		error: "pq: relation missing",
@@ -427,14 +437,14 @@ describe("baselineWithAtlas: what it refuses", () => {
 
 /* a history whose second applied file is gone: no file of version 9 */
 const gone = () =>
-	fakeAtlas({ status: status({ applied: [revision("1", { hash: "7=" }), revision("9")], current: "9" }) })
+	fakeAtlas({ status: status({ applied: [ranWhole("1_a.sql"), ranWhole("2_b.sql"), revision("9")], current: "9" }) })
 
 describe("statusWithAtlas", () => {
 	it("lists what is applied and what is pending", async () => {
 		const run = options(
 			fakeAtlas({
 				status: status({
-					applied: [revision("1", { hash: "7=" })],
+					applied: [ranWhole("1_a.sql")],
 					current: "1",
 					pending: [file("2_b.sql")],
 					status: "PENDING",
@@ -459,15 +469,18 @@ describe("statusWithAtlas", () => {
 	/* M76 (atlas-history.ts): status names a revision whose file is gone; check and apply refuse it */
 	it("names a revision whose file is gone in status, and refuses it in check and apply", async () => {
 		const run = options(gone())
-		expect((await statusWithAtlas(run)).applied).toEqual(["1_a.sql", "9"])
-		expect(run.out).toEqual(["Applied: 2 (up to 9)", "Pending: none", "9 was applied, and its file is gone or renamed"])
+		expect((await statusWithAtlas(run)).applied).toEqual(["1_a.sql", "2_b.sql", "9"])
+		expect(run.out).toEqual(["Applied: 3 (up to 9)", "Pending: none", "9 was applied, and its file is gone or renamed"])
 		await expect(applyWithAtlas({ ...options(gone()), checkOnly: true })).rejects.toThrow("9 was applied, and its file")
 		await expect(applyWithAtlas(options(gone()))).rejects.toThrow("9 was applied, and its file")
 	})
 
 	it("reports a file Atlas ran halfway, and an error in the history", async () => {
 		const half = status({
-			applied: [revision("2", { applied: 1, error: "pq: x", errorStmt: "S", hash: "7=", total: 2 })],
+			applied: [
+				ranWhole("1_a.sql"),
+				revision("2", { applied: 1, error: "pq: x", errorStmt: "S", hash: "7=", total: 2 }),
+			],
 			error: "pq: x",
 			pending: [file("2_b.sql")],
 		})

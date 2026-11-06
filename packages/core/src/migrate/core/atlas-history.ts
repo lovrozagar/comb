@@ -4,8 +4,11 @@
  * file over its name and the files before it. So an applied file renamed under its version, gone,
  * or edited is named for what happened to it, checked in that order, before Atlas runs anything.
  */
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { explainAtlasFailure, failedStatement } from "./atlas-failure.ts"
+import { outsideTransaction } from "./atlas-header.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }
@@ -43,6 +46,16 @@ function versionOf(name: string): { description: string; version: string } {
 const filesOf = (copy: string): AtlasFile[] =>
 	sqlFiles(copy).map((Name) => ({ Description: versionOf(Name).description, Name, Version: versionOf(Name).version }))
 
+/** The name `revision` was applied as: its version, then `_` and its description when it has one */
+const appliedAs = (revision: Pick<AtlasRevision, "description" | "version">): string =>
+	revision.description === "" ? `${revision.version}.sql` : `${revision.version}_${revision.description}.sql`
+
+/** The applied file that sorts last by name, as Atlas orders files; undefined while none is applied */
+const lastApplied = (applied: readonly AtlasRevision[]): string | undefined =>
+	applied
+		.map(appliedAs)
+		.reduce<string | undefined>((last, name) => (last === undefined || name > last ? name : last), undefined)
+
 /** The file of `version` in the snapshot, as Atlas maps a revision to its file; the version when none is */
 const fileOf = (copy: string, version: string): string =>
 	sqlFiles(copy).find((name) => versionOf(name).version === version) ?? version
@@ -55,9 +68,7 @@ function refuseRenamed(status: AtlasStatus, copy: string): void {
 	for (const revision of status.applied) {
 		const name = fileOf(copy, revision.version)
 		if (name === revision.version || versionOf(name).description === revision.description) continue
-		const was =
-			revision.description === "" ? `${revision.version}.sql` : `${revision.version}_${revision.description}.sql`
-		throw new Error(`${revision.version} was applied as ${was} and is now ${name}; restore its name`)
+		throw new Error(`${revision.version} was applied as ${appliedAs(revision)} and is now ${name}; restore its name`)
 	}
 }
 
@@ -99,13 +110,52 @@ function refuseEdited(status: AtlasStatus, copy: string, partial: AtlasRevision 
 	}
 }
 
-/** Refuses a file older than the last applied one that Atlas lists as neither pending nor an error */
-function refuseLate(status: AtlasStatus, scrub: Report["scrub"]): void {
+/**
+ * Refuses a file never applied that sorts by name before the last applied one, as comb does on
+ * SQLite: Atlas orders files by name and skips such a file without a word. One that sorts before a
+ * gone file is that file's doing, so the gone files are named instead
+ */
+function refuseLate(status: AtlasStatus, missing: readonly string[], scrub: Report["scrub"]): void {
 	const recorded = new Set(status.applied.map((revision) => revision.version))
-	const last = status.applied.at(-1)?.version
-	const late = status.available.find((file) => last !== undefined && !recorded.has(file.Version) && file.Version < last)
-	if (late !== undefined)
-		throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`, scrub))
+	const last = lastApplied(status.applied)
+	const late = status.available.find((file) => last !== undefined && !recorded.has(file.Version) && file.Name < last)
+	if (late === undefined) return
+	if (missing.length > 0) throw new Error(missing.join("; "))
+	throw new Error(
+		`${scrub(late.Name)} was never applied, yet it sorts before ${scrub(last as string)}, which was; rename it to sort after the applied files and run atlas migrate hash`,
+	)
+}
+
+/** The highest version of `applied`, compared as text as Atlas compares them, with the name it was applied as */
+const topOf = (applied: readonly AtlasRevision[]): { name: string; version: string } | undefined =>
+	applied
+		.map((revision) => ({ name: appliedAs(revision), version: revision.version }))
+		.reduce<{ name: string; version: string } | undefined>(
+			(top, each) => (top === undefined || each.version > top.version ? each : top),
+			undefined,
+		)
+
+/**
+ * Refuses a file Atlas would leave half-run for good: it resumes a file it ran halfway outside a
+ * transaction only while that file's version, compared as text, is the highest it recorded, and
+ * otherwise runs the next file in its place and reports nothing pending. So `partial` below another
+ * applied version is refused, and so is a pending txmode none file whose version sorts below one
+ * applied or run before it, which a failure halfway would leave so
+ */
+function refuseUnresumable(status: AtlasStatus, copy: string, partial: AtlasRevision | undefined): void {
+	let top = topOf(status.applied.filter((revision) => revision !== partial))
+	if (partial !== undefined && top !== undefined && partial.version < top.version)
+		throw new Error(
+			`${appliedAs(partial)} ran ${partial.applied} of its ${partial.total} statements outside a transaction, and Atlas will not resume it: it resumes such a file only while its version is the highest applied, and ${partial.version} sorts below ${top.name}'s; run its remaining statements by hand, then set its applied count to ${partial.total} and its error to '' in its row of Atlas's atlas_schema_revisions table`,
+		)
+	for (const file of status.pending) {
+		const late = top !== undefined && file.Version !== partial?.version && file.Version < top.version
+		if (late && outsideTransaction(readFileSync(join(copy, file.Name), "utf8")))
+			throw new Error(
+				`${file.Name} runs outside a transaction (atlas:txmode none), yet its version sorts below ${top?.name}'s, which runs before it, and Atlas resumes such a file only while its version is the highest applied, so a failure halfway would stay; rename it so its version sorts above ${top?.version} and run atlas migrate hash`,
+			)
+		if (top === undefined || file.Version > top.version) top = { name: file.Name, version: file.Version }
+	}
 }
 
 /** Where `partial`, a file Atlas ran halfway, stopped; only Atlas's text is scrubbed, the statement and its error */
@@ -132,7 +182,8 @@ function resumable(partial: AtlasRevision, copy: string, scrub: Report["scrub"])
  * The history checked against the snapshot. A history Atlas reports no error for may proceed, and
  * so may a file Atlas ran halfway outside a transaction, if it is unchanged; returns where that
  * file stopped, if one did. A renamed, gone, late or edited applied file is refused, in that order
- * and before the half-run file's own change, since Atlas's hashes are cumulative; a gone file
+ * and before the half-run file's own change, since Atlas's hashes are cumulative, and then a
+ * txmode none file Atlas would not resume (refuseUnresumable); a gone file
  * is only named when `gone` takes it, as status does, and then no hash is compared, as every one
  * after it reads as changed.
  */
@@ -142,21 +193,22 @@ function checkHistory(
 	{ elsewhere, gone, scrub, unread }: Report,
 ): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
-	/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
+	/* a renamed or gone file first: a file named before a gone one is the gone one's doing */
 	refuseRenamed(status, copy)
 	const missing = goneFiles(status, copy, { elsewhere, unread })
 	if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
-	/* the half-run file's own error, which Atlas's status repeats, is no other error; any other is honored, an
-	   out-of-order file's among them, and one past a gone file is the gone file's doing */
+	/* the half-run file's own error, which Atlas's status repeats, is no other error; any other is honored, and
+	   one past a gone file is the gone file's doing */
 	if (status.error !== "" && status.error !== partial?.error)
 		throw new Error(
 			missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,
 		)
-	refuseLate(status, scrub)
+	refuseLate(status, missing, scrub)
 	for (const line of missing) gone?.(line)
-	if (missing.length === 0) refuseEdited(status, copy, partial)
-	if (partial === undefined) return undefined
-	return missing.length > 0 ? stoppedAt(partial, copy, scrub) : resumable(partial, copy, scrub)
+	if (missing.length > 0) return partial === undefined ? undefined : stoppedAt(partial, copy, scrub)
+	refuseEdited(status, copy, partial)
+	refuseUnresumable(status, copy, partial)
+	return partial === undefined ? undefined : resumable(partial, copy, scrub)
 }
 
-export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf }
+export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, filesOf, lastApplied, versionOf }

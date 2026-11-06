@@ -1,9 +1,9 @@
 /**
  * Atlas's failures in comb's terms, where comb knows the fix: Docker missing for the default dev
  * database, another apply's lock, a database with objects and no history (the target's, or the dev
- * database's, which Atlas finds as it snapshots it), a schema that is missing, a file out of order,
- * an enum value Atlas cannot drop, and what Atlas OSS refuses. Atlas's own text is scrubbed of
- * secrets; comb's words are never.
+ * database's, which Atlas finds as it snapshots it), a schema that is missing, an enum value Atlas
+ * cannot drop, and what Atlas OSS refuses. Atlas's own text is scrubbed of secrets; comb's words
+ * are never.
  */
 
 /**
@@ -66,10 +66,6 @@ function explainAtlasFailure(
 	const missing = scrub(/schema "([^"]+)" was not found/.exec(stderr)?.[1] ?? "")
 	if (missing !== "")
 		return `schema ${missing} does not exist on the target; create it once (CREATE SCHEMA ${missing}) before the first apply`
-	const late = /migration file (\S+) was added out of order/.exec(stderr)?.[1]
-	if (late !== undefined) {
-		return `${scrub(late)} is older than a migration already applied; rename it to a newer version and run atlas migrate hash`
-	}
 	const [, value, type] = /dropping value "([^"]*)" from enum "([^"]*)" is not supported/.exec(stderr) ?? []
 	if (value !== undefined) {
 		return `Atlas cannot drop the value "${scrub(value)}" of enum "${scrub(type as string)}": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again`

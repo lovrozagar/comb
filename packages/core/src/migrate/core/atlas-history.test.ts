@@ -215,18 +215,15 @@ describe("a file Atlas ran halfway, after a change to an earlier file (P11)", ()
 	})
 
 	/*
-	 * 27.5 of plan 15: as Atlas v1.3.0 reports it (.tmp/grunt/r16/p14/status-probe.log), a late file is
-	 * no file `available` lists, and its out-of-order error stands in the status beside the half-run file's
+	 * 27.5 of plan 15, by name since leaf 16.3 (a) of plan 21: Atlas v1.3.0 lists a late file in neither
+	 * `available` nor pending (.tmp/grunt/r16/p14/status-probe.log), so ownHistory lists the snapshot's
+	 * files and drops Atlas's out-of-order error, and the late file is named, not the half-run one
 	 */
-	it("names an earlier file added since, as one older than a migration applied", () => {
+	it("names an earlier file added since, as one named before a file applied", () => {
 		snapshot(files)
-		const status = {
-			...history([half("2_b.sql", "other=")]),
-			available: [file("2_b.sql")],
-			error: "migration file 1_a.sql was added out of order. See: https://atlasgo.io/versioned/apply#non-linear-error",
-		}
+		const status = { ...history([half("2_b.sql", "other=")]), available: [file("1_a.sql"), file("2_b.sql")] }
 		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(
-			"1_a.sql is older than a migration already applied",
+			"1_a.sql was never applied, yet it sorts before 2_b.sql, which was",
 		)
 	})
 
@@ -242,5 +239,91 @@ describe("a file Atlas ran halfway, after a change to an earlier file (P11)", ()
 		expect(() => checkHistory(history([applied("1_a.sql"), half("2_b.sql", "other=")]), dir, { scrub: kept })).toThrow(
 			"2_b.sql ran 1 of its 3 statements before it failed at SELECT 2 (pq: relation exists), outside a transaction, and has changed since; restore it: migrate apply resumes at the statement that failed, so fix what made it fail, in the database, first",
 		)
+	})
+})
+
+/*
+ * leaf 16.3 (a) of plan 21 (migrate-pg-atlas_flow_names): the name is the only order, as on SQLite,
+ * and Atlas resumes a file it ran halfway outside a transaction only while its version, as text, is
+ * the highest recorded (.tmp/grunt/p21/areas/ae3/exo/probe4.log)
+ */
+/** `status` listing the snapshot's files, as ownHistory hands it */
+const listing = (status: AtlasStatus, ...pending: string[]): AtlasStatus => ({
+	...status,
+	available: sqlFiles(dir).map(file),
+	pending: pending.map(file),
+})
+
+const NONE = "-- atlas:txmode none\n\nSELECT 1;\n"
+
+/** The refusal of 20260101_none.sql below `name`'s version */
+const below = (name: string) =>
+	`20260101_none.sql runs outside a transaction (atlas:txmode none), yet its version sorts below ${name}'s, which runs before it`
+
+describe("the history by name", () => {
+	it("refuses a file named before the last applied one, whatever its version, its name masked", () => {
+		snapshot({ "1.5_a.sql": "SELECT 1;\n", "1_b.sql": "SELECT 2;\n" })
+		expect(() => checkHistory(listing(history([applied("1_b.sql")])), dir, { scrub: kept })).toThrow(
+			"1.5_a.sql was never applied, yet it sorts before 1_b.sql, which was; rename it to sort after the applied files and run atlas migrate hash",
+		)
+		for (const name of ["1.5_a.sql", "1_b.sql"]) rmSync(join(dir, name))
+		snapshot({ "1_S3cret.sql": "SELECT 1;\n", "2_b.sql": "SELECT 2;\n" })
+		expect(() => checkHistory(listing(history([applied("2_b.sql")])), dir, { scrub: masked })).toThrow(
+			/^1_\*\*\*\.sql was never applied, yet it sorts before 2_b\.sql/,
+		)
+	})
+
+	it("passes files applied by name whose versions sort otherwise, 20260101000000_b before 20260101_a", () => {
+		snapshot({
+			"20260101000000_b.sql": "SELECT 1;\n",
+			"20260101_a.sql": "SELECT 2;\n",
+			"20260102_c.sql": "SELECT 3;\n",
+		})
+		const status = listing(history([applied("20260101000000_b.sql"), applied("20260101_a.sql")]), "20260102_c.sql")
+		expect(checkHistory(status, dir, { scrub: kept })).toBeUndefined()
+	})
+
+	it("names the gone file, not a file named before it, in status too", () => {
+		snapshot({ "15_z.sql": "SELECT 1;\n", "1_a.sql": "SELECT 2;\n" })
+		const status = listing(history([applied("1_a.sql"), applied("2_b.sql")]))
+		expect(() => named(status)).toThrow(/^2 was applied, and its file is gone or renamed$/)
+	})
+})
+
+describe("a txmode none file Atlas would not resume", () => {
+	it("refuses a half-run file whose version sorts below another applied, which Atlas will not resume", () => {
+		snapshot({ "20260101000000_b.sql": "SELECT 1;\n", "20260101_half.sql": NONE })
+		const status = listing(
+			history([applied("20260101000000_b.sql"), half("20260101_half.sql", "17=")]),
+			"20260101_half.sql",
+		)
+		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(
+			"20260101_half.sql ran 1 of its 3 statements outside a transaction, and Atlas will not resume it: it resumes such a file only while its version is the highest applied, and 20260101 sorts below 20260101000000_b.sql's; run its remaining statements by hand, then set its applied count to 3 and its error to '' in its row of Atlas's atlas_schema_revisions table",
+		)
+	})
+
+	it("refuses a pending txmode none file whose version sorts below one applied or run before it", () => {
+		snapshot({ "20260101000000_b.sql": "SELECT 1;\n", "20260101_none.sql": NONE, "2026_x.sql": "SELECT 2;\n" })
+		expect(() =>
+			checkHistory(listing(history([applied("20260101000000_b.sql")]), "20260101_none.sql", "2026_x.sql"), dir, {
+				scrub: kept,
+			}),
+		).toThrow(below("20260101000000_b.sql"))
+		expect(() =>
+			checkHistory(listing(history([]), "20260101000000_b.sql", "20260101_none.sql", "2026_x.sql"), dir, {
+				scrub: kept,
+			}),
+		).toThrow(below("20260101000000_b.sql"))
+	})
+
+	it("passes a txmode none file whose version is the highest so far, and a transactional one below", () => {
+		snapshot({ "20260101000000_b.sql": "SELECT 1;\n", "20260101_a.sql": "SELECT 2;\n", "20260102_none.sql": NONE })
+		const status = listing(history([applied("20260101000000_b.sql")]), "20260101_a.sql", "20260102_none.sql")
+		expect(checkHistory(status, dir, { scrub: kept })).toBeUndefined()
+		const resuming = listing(
+			history([applied("20260101000000_b.sql"), applied("20260101_a.sql"), half("20260102_none.sql", "17=")]),
+			"20260102_none.sql",
+		)
+		expect(checkHistory(resuming, dir, { scrub: kept })).toContain("20260102_none.sql ran 1 of its 3 statements")
 	})
 })

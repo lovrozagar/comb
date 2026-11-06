@@ -5,9 +5,7 @@
  * adopt them): public ignores it, saying so, and keeps its own order. Every other revision with no
  * file is refused as gone. The shared rows are never deleted.
  *
- * Atlas counts such a row as public's position and calls a file of public's older than it out of
- * order, so then the dry run and apply pass `--exec-order non-linear`, and checkHistory's late
- * check, over public's own revisions, keeps the order Atlas's check would have.
+ * ownHistory leaves such a row out of public's position, which every apply reads by name.
  *
  * Listing the schemas costs Atlas a read of every table's metadata: `--exclude '*.*'` filters
  * after reading (about half a second per 3000 tables on Postgres 17), and `--include` is Atlas
@@ -15,7 +13,7 @@
  * no Postgres client of its own, and this is no reason for one.
  */
 import { readInspect } from "./atlas-clean.ts"
-import { type AtlasStatus, fileOf, filesOf } from "./atlas-history.ts"
+import { type AtlasStatus, fileOf, filesOf, lastApplied } from "./atlas-history.ts"
 import { atlasStatus, type AtlasCommand } from "./atlas-status.ts"
 import { explainAtlasFailure } from "./atlas-failure.ts"
 import { type PgTarget, SHARED_REVISIONS, withAtlasEnv } from "./atlas-target.ts"
@@ -86,19 +84,22 @@ async function foreignRows(options: AtlasCommand, copy: string, status: AtlasSta
 }
 
 /**
- * `status` as public's own history, without `foreign`'s rows: its position, its files and pending
- * files from the snapshot `copy` (Atlas lists none once it calls one out of order), and no
- * out-of-order error those rows caused
+ * `status` as the target's own history, without `foreign`'s rows, ordered by name alone, as comb
+ * orders files on SQLite and Atlas runs them under `--exec-order non-linear`: pending is the file Atlas
+ * ran halfway, then each file never applied that sorts after the last applied one, from the snapshot
+ * `copy`. Atlas's linear order compares versions, so its status lists other files and calls a later
+ * name with a lower version out of order; that error is dropped, and checkHistory refuses a file named
+ * before the last applied one, which Atlas skips without a word
  */
 function ownHistory(status: AtlasStatus, { ignored }: Foreign, copy: string): AtlasStatus {
-	if (ignored.size === 0) return status
 	const applied = status.applied.filter((revision) => !ignored.has(revision.version))
 	const recorded = new Set(applied.map((revision) => revision.version))
-	const current = applied.at(-1)?.version ?? ""
+	const half = applied.find((revision) => revision.applied < revision.total && revision.error !== "")?.version
+	const last = lastApplied(applied) ?? ""
 	const available = filesOf(copy)
-	const pending = available.filter((file) => !recorded.has(file.Version) && file.Version > current)
+	const pending = available.filter((file) => file.Version === half || (!recorded.has(file.Version) && file.Name > last))
 	const error = /was added out of order/.test(status.error) ? "" : status.error
-	return { ...status, applied, available, current, error, pending }
+	return { ...status, applied, available, current: applied.at(-1)?.version ?? "", error, pending }
 }
 
 /** What public says of each row it ignores, the target's secrets masked where a schema's name holds one */
@@ -109,7 +110,4 @@ const ignoredLines = ({ ignored }: Foreign, target: PgTarget): string[] =>
 		return `${version} is schema ${name}'s, recorded in ${OWN}${name}; public ignores it`
 	})
 
-/** The flag the dry run and apply need when public ignores a row: Atlas would count it as public's position */
-const execOrder = ({ ignored }: Foreign): string[] => (ignored.size > 0 ? ["--exec-order", "non-linear"] : [])
-
-export { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory }
+export { type Foreign, foreignRows, ignoredLines, ownHistory }

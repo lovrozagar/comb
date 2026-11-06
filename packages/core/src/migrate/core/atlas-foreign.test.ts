@@ -1,7 +1,7 @@
 /**
  * M78: public's shared history beside another schema's 0.12 rows, with a fake Atlas. A row with
  * no file of public's is ignored only when that schema's own history holds the same version and
- * hash; then, and only then, Atlas gets `--exec-order non-linear`. A history comb cannot read
+ * hash, and public's position is then its own revisions'. A history comb cannot read
  * leaves the row refused as gone, with the reason.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -83,11 +83,10 @@ const withApps = () => status([row("1", "7=", "a"), row("5", "b=")], OUT_OF_ORDE
 const execOrders = (calls: string[][]) => calls.filter((args) => args.includes("--exec-order"))
 
 describe("public's history beside another schema's 0.12 rows (M78)", () => {
-	it("passes no --exec-order, and reads no other history, for a history whose every row has its file", async () => {
+	it("reads no other history for a history whose every row has its file", async () => {
 		const atlas = fakeAtlas({ shared: status([row("1", "7=", "a")]) })
 		const out: string[] = []
 		await applyWithAtlas({ approve, dir, exec: atlas, print: (line) => out.push(line), target })
-		expect(execOrders(atlas.calls)).toEqual([])
 		expect(atlas.calls.some((args) => args[0] === "schema")).toBe(false)
 	})
 

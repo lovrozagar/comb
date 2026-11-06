@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { fakeAtlas, file, ok, status } from "../../../tests/support/fake-atlas.ts"
+import { fakeAtlas, file, ok, ranWhole, status } from "../../../tests/support/fake-atlas.ts"
 import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 import { applyRuns } from "./atlas-apply-runs.ts"
 import type { AtlasStatus } from "./atlas-history.ts"
@@ -30,6 +30,8 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 const TARGET = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "public", url: "postgres://app@db/app" }
 const PENDING = status({ available: NAMES.map(file), pending: NAMES.map(file), status: "PENDING" })
+/* the status once every file ran, here or by another apply */
+const DONE = status({ applied: NAMES.map(ranWhole), available: NAMES.map(file), status: "OK" })
 /** Atlas's report of an apply of `names` */
 const report = (...names: string[]) =>
 	ok(JSON.stringify({ applied: names.map((Name) => ({ Name })), error: "", target: "3" }))
@@ -66,7 +68,7 @@ describe("applyRuns", () => {
 	})
 
 	it("stops once another apply ran the rest", async () => {
-		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING, statusAfterApply: status({ status: "OK" }) })
+		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING, statusAfterApply: DONE })
 		const { amounts, run } = applied(atlas)
 		expect([await run(), amounts()]).toEqual([["1_a.sql"], ["1"]])
 	})
@@ -86,7 +88,7 @@ describe("applyRuns, a call that ran nothing", () => {
 		const atlas = fakeAtlas({
 			apply: ok(JSON.stringify({ applied: null, error: "", target: "" })),
 			status: PENDING,
-			statusAfterApply: status({ status: "OK" }),
+			statusAfterApply: DONE,
 		})
 		const { out, run } = applied(atlas)
 		expect([await run(), out]).toEqual([[], ["No migrations to apply"]])
@@ -98,7 +100,7 @@ describe("applyRuns, a call that ran nothing", () => {
 		const raced = Object.assign(
 			async (cmd: string, args: readonly string[], runOptions?: Parameters<typeof atlas>[2]) =>
 				/* the status after the call that ran nothing: another apply ran 3_c.sql */
-				args[1] === "status" && ++reads === 3 ? status({ status: "OK" }) : atlas(cmd, args, runOptions),
+				args[1] === "status" && ++reads === 3 ? DONE : atlas(cmd, args, runOptions),
 			{ calls: atlas.calls, replayed: atlas.replayed },
 		)
 		const { amounts, out, run } = applied(raced)
@@ -143,7 +145,7 @@ describe("applyRuns stopped by a signal (PA4 of r22)", () => {
 	it.each([
 		["the first call's file", undefined, "applied 1_a.sql; not applied 2_b.sql, 3_c.sql"],
 		["none", PENDING, "applied none; not applied 1_a.sql, 2_b.sql, 3_c.sql"],
-		["every file", status({ status: "OK" }), "applied 1_a.sql, 2_b.sql, 3_c.sql; not applied none"],
+		["every file", DONE, "applied 1_a.sql, 2_b.sql, 3_c.sql; not applied none"],
 	])("says once which approved files the history records, %s here, then ends by the signal", async (_, after, said) => {
 		expect(await stoppedLines(after)).toEqual([[`Stopped by SIGTERM: ${said}`], [[process.pid, "SIGTERM"]]])
 	})
