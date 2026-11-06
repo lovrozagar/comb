@@ -313,6 +313,33 @@ describe("refuseHistoryDrift on a docker:// dev database", () => {
 	})
 })
 
+/** atlas finding the tables in sync, recording each 1_init.sql it is handed to replay */
+function replaying1(): Run & { replayed: string[] } {
+	const replayed: string[] = []
+	const exec: Run = async (_cmd, args) => {
+		const to = args[args.indexOf("--to") + 1] as string
+		if (args[0] === "schema") replayed.push(readFileSync(join(to.replace("file://", ""), "1_init.sql"), "utf8"))
+		return { code: 0, stderr: "", stdout: SYNCED_SAID }
+	}
+	return Object.assign(exec, { replayed })
+}
+
+/* 16.3 (b) of plan 21: only a docker:// dev has Atlas replay files now, so its rewrite holds the case alone */
+describe("refuseHistoryDrift's replay files on a docker:// dev database", () => {
+	beforeAll(loadPostgresParser)
+
+	it("hands Atlas the history's tables without a drop of a policy, which comb owns and Atlas compares nothing of", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE TABLE t (id int);\nDROP POLICY IF EXISTS p ON t;\n")
+		const exec = replaying1()
+		const docker = { ...target("x"), devUrl: "docker://postgres/17/dev" }
+		const options = { exec, print: () => undefined, readLive: async () => noLive(), readReplay: unreachable }
+		await refuseHistoryDrift({ ...options, target: docker }, join(dir, "m"))
+		expect(exec.replayed).toHaveLength(1)
+		expect(exec.replayed[0]).toContain("CREATE TABLE t (id int)")
+		expect(exec.replayed[0]).not.toContain("DROP POLICY")
+	})
+})
+
 /* N-S5 of plan 15's rerun: Atlas OSS refuses what it cannot inspect */
 describe("sqliteDrift: what Atlas OSS is handed", () => {
 	it("hands Atlas neither side's virtual table, which it compares itself", async () => {
