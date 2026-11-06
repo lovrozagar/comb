@@ -69,6 +69,14 @@ import { namesIn } from "./sql-code.ts"
 /** A history file as baseline reads it */
 type HistoryFile = { name: string; sql: string }
 
+/** What replayCatalog replays, where it says what it left, the role the target is read as, and what reads it first */
+type CatalogReplay<T> = {
+	files: readonly HistoryFile[]
+	inspect(database: string): Promise<T>
+	print(line: string): void
+	targetUser: string
+}
+
 /* why comb loads postgres.js here */
 const REPLAYS = "replay the history on devUrl, and read what it leaves, in a baseline"
 
@@ -207,7 +215,7 @@ async function opening(
 
 /**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
- * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
+ * first; then `after` on its connection and the database's name. A statement dev refuses is named, with dev's error, as what
  * was `doing`, and then what that `stops`; what the replay or its sweep could not drop is `print`ed
  */
 async function onDev<T>(
@@ -219,7 +227,7 @@ async function onDev<T>(
 		print,
 		...replay
 	}: Omit<Replay, "leftOut"> & {
-		after: (sql: Sql) => Promise<T>
+		after: (sql: Sql, database: string) => Promise<T>
 		leftOut?: Replay["leftOut"] | undefined
 		load: () => Promise<Connect>
 		print: (line: string) => void
@@ -248,7 +256,7 @@ async function onDev<T>(
 				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
 				await replayEach(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused, waits })
-				return await after(run.sql)
+				return await after(run.sql, run.database)
 			} finally {
 				await cleanup.run()
 			}
@@ -267,15 +275,19 @@ async function onDev<T>(
  * The catalog the history `files` leave in `target`'s schema, replayed on its dev server as Atlas
  * applied them (onDev), read by the target's own query (readCatalog). The role the replay
  * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
- * names the role each database was built as
+ * names the role each database was built as. `inspect` reads the replay's database first, by its
+ * name, as Atlas compares its tables, before the cleanup drops it with what the replay adopted
  */
-async function replayCatalog(
+async function replayCatalog<T>(
 	target: PgTarget,
-	{ files, print, targetUser }: { files: readonly HistoryFile[]; print: (line: string) => void; targetUser: string },
+	{ files, inspect, print, targetUser }: CatalogReplay<T>,
 	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
-): Promise<LiveObjects> {
+): Promise<{ catalog: LiveObjects; inspected: T }> {
 	return onDev(target, files, {
-		after: async (sql) => asTarget(await readCatalog(sql, target.schema), targetUser),
+		after: async (sql, database) => {
+			const inspected = await inspect(database)
+			return { catalog: asTarget(await readCatalog(sql, target.schema), targetUser), inspected }
+		},
 		doing: "baseline replayed the history there",
 		load,
 		print,

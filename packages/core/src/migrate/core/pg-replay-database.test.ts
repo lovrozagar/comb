@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { coded, fake } from "../__fixtures__/pg-admin.ts"
-import { claim, copyExtensions, makeDatabase } from "./pg-replay-database.ts"
+import { claim, copyExtensions, makeDatabase, replayUrl } from "./pg-replay-database.ts"
 
 describe("claim", () => {
 	it.each([
@@ -139,3 +139,15 @@ describe("copyExtensions beside an extension the history makes", () => {
 })
 
 /** A role's row as createRole reads it, with its comment */
+
+describe("replayUrl", () => {
+	it("names the replay's database in the path, drops a dbname key, and keeps the scheme, authority and query", () => {
+		expect(replayUrl("postgresql://u:p%40@db:5433/app?sslmode=disable", "comb_replay_1")).toBe(
+			"postgresql://u:p%40@db:5433/comb_replay_1?sslmode=disable",
+		)
+		expect(replayUrl("postgres://u@%2Fsock?dbname=app&a=1", "comb_replay_1")).toBe(
+			"postgres://u@%2Fsock/comb_replay_1?a=1",
+		)
+		expect(replayUrl("postgres://db", "comb_replay_1")).toBe("postgres://db/comb_replay_1")
+	})
+})

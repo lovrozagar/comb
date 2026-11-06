@@ -14,7 +14,7 @@ import { sqlFiles } from "./atlas-dir.ts"
 import type { AtlasRevision, AtlasStatus } from "./atlas-history.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import type { Run, RunResult } from "./process.ts"
-import { noLive } from "../__fixtures__/live-objects.ts"
+import { noLive, replaying } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
 
 let dir = ""
@@ -247,7 +247,7 @@ const unreachable: Run = async (_cmd, args) =>
 
 const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
 /* the catalog reads and the dev schema, faked: the database and the history's replay hold nothing (P5 of r19) */
-const fakes = { readLive: noObjects, readReplay: noObjects, readyDev: async () => undefined }
+const fakes = { readLive: noObjects, readReplay: replaying(noObjects), readyDev: async () => undefined }
 
 describe("proveAdoption", () => {
 	it("passes a schema that holds what the files leave, passing Atlas's notices on", async () => {

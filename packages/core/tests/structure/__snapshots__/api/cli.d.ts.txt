@@ -268,13 +268,20 @@ type HistoryFile = {
     name: string;
     sql: string;
 };
+/** What replayCatalog replays, where it says what it left, the role the target is read as, and what reads it first */
+type CatalogReplay<T> = {
+    files: readonly HistoryFile[];
+    inspect(database: string): Promise<T>;
+    print(line: string): void;
+    targetUser: string;
+};
 /**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
- * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
+ * first; then `after` on its connection and the database's name. A statement dev refuses is named, with dev's error, as what
  * was `doing`, and then what that `stops`; what the replay or its sweep could not drop is `print`ed
  */
 declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { after, load, print, ...replay }: Omit<Replay, "leftOut"> & {
-    after: (sql: Sql) => Promise<T>;
+    after: (sql: Sql, database: string) => Promise<T>;
     leftOut?: Replay["leftOut"] | undefined;
     load: () => Promise<Connect>;
     print: (line: string) => void;
@@ -283,13 +290,13 @@ declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { aft
  * The catalog the history `files` leave in `target`'s schema, replayed on its dev server as Atlas
  * applied them (onDev), read by the target's own query (readCatalog). The role the replay
  * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
- * names the role each database was built as
+ * names the role each database was built as. `inspect` reads the replay's database first, by its
+ * name, as Atlas compares its tables, before the cleanup drops it with what the replay adopted
  */
-declare function replayCatalog(target: PgTarget, { files, print, targetUser }: {
-    files: readonly HistoryFile[];
-    print: (line: string) => void;
-    targetUser: string;
-}, load?: () => Promise<Connect>): Promise<LiveObjects>;
+declare function replayCatalog<T>(target: PgTarget, { files, inspect, print, targetUser }: CatalogReplay<T>, load?: () => Promise<Connect>): Promise<{
+    catalog: LiveObjects;
+    inspected: T;
+}>;
 export { type HistoryFile, onDev, replayCatalog };
 
 // migrate/core/atlas-target.d.ts
@@ -312,6 +319,8 @@ type AtlasNeeds = {
     allSchemas?: boolean | undefined;
     /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
     revisions?: string | undefined;
+    /** a database Atlas compares the target with, read as env://src, scoped to the schema as the target is */
+    src?: string | undefined;
     url?: boolean | undefined;
 };
 /** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */
@@ -455,6 +464,12 @@ declare function replayOptions(devUrl: string, at?: {
     settings: Record<string, string>;
 }): Record<string, unknown>;
 /**
+ * devUrl naming the replay's `database`, as Atlas reaches it to read what the replay left: the path
+ * names it, and a dbname key, which libpq reads over the path, is dropped. devUrl is a URL the
+ * replay reached, so libpq's form, which pg-url.ts reads
+ */
+declare function replayUrl(devUrl: string, database: string): string;
+/**
  * A new replay database on `admin`'s server, named for its `owner`, made from template0 at the
  * target's `locale` (CREATE DATABASE's options for it); a role without CREATEDB is `denied`, and any
  * other refusal, a locale the server lacks among them, `unmade`
@@ -480,7 +495,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<(to: Sql) => Promise<void>>;
-export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, type Sql, STALE_MS, TAG, };
+export { claim, codeOf, copyExtensions, extensionsOf, leftovers, literal, makeDatabase, replayOptions, replayUrl, type Sql, STALE_MS, TAG, };
 
 // migrate/core/pg-replay-statement.d.ts
 import type { Locked } from "./pg-held-types.ts";

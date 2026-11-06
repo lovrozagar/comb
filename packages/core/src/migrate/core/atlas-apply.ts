@@ -31,7 +31,7 @@ import { applyRuns } from "./atlas-apply-runs.ts"
 import { NOT_CLEAN } from "./atlas-failure.ts"
 import { SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, NO_HISTORY, scrubbing } from "./atlas-status.ts"
-import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
+import { type ObjectsCompare, refuseHistoryDrift } from "./baseline-compare.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
@@ -216,11 +216,8 @@ async function baselineWithAtlas(options: AtlasCommand & Reads): Promise<string[
 		if (latest === undefined) throw new Error("there are no migrations to record")
 		/* the replay runs on a dev database holding the schema */
 		await (options.readyDev ?? readyDevSchema)(options.target)
-		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it */
-		const warnings = await refuseObjectDrift(options, copy)
-		for (const notice of await refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
-			options.print(`Warning: Atlas: ${notice}`)
-		for (const warning of warnings()) options.print(warning)
+		/* comb's replay, in a database of its own, dropped after it, and Atlas reading what it left */
+		await refuseHistoryDrift(options, copy)
 		/* the version as Atlas reads the name, the reader status and adoption use */
 		const set = await atlas(options, copy, ["set", versionOf(latest).version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)

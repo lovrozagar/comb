@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { stopsEnded } from "./cleanup.ts"
 import { fakeAtlas, revision, status } from "../../../tests/support/fake-atlas.ts"
-import { noLive } from "../__fixtures__/live-objects.ts"
+import { noLive, replaying } from "../__fixtures__/live-objects.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sumHashes } from "./atlas-dir.ts"
 import type { ObjectsCompare } from "./baseline-compare.ts"
@@ -41,7 +41,7 @@ function options(exec: Run): ApplyOptions & Pick<ObjectsCompare, "readLive" | "r
 		exec,
 		print: () => undefined,
 		readLive,
-		readReplay: async (target) => readLive(target),
+		readReplay: replaying(readLive),
 		replayPending: async () => undefined,
 		sweepDev: async () => undefined,
 		target: { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "public", url: "postgres://app@db/app" },

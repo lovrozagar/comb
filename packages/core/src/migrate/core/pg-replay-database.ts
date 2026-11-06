@@ -25,7 +25,7 @@ import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import type { Connect } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { pgRead } from "./pg-split.ts"
-import { postgresOptionsOf } from "./pg-url.ts"
+import { postgresOptionsOf, withParam } from "./pg-url.ts"
 import { flag } from "./pg-nodes.ts"
 
 type Sql = ReturnType<Connect>
@@ -135,6 +135,18 @@ function replayOptions(
 	if (at === undefined) return options
 	const connection = { ...(options["connection"] as object | undefined), ...at.settings }
 	return { ...options, connection, database: at.database }
+}
+
+/**
+ * devUrl naming the replay's `database`, as Atlas reaches it to read what the replay left: the path
+ * names it, and a dbname key, which libpq reads over the path, is dropped. devUrl is a URL the
+ * replay reached, so libpq's form, which pg-url.ts reads
+ */
+function replayUrl(devUrl: string, database: string): string {
+	const [, scheme = "", authority = "", , query] = /^(postgres(?:ql)?):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?$/.exec(
+		devUrl,
+	) as RegExpExecArray
+	return withParam(`${scheme}://${authority}/${database}${query === undefined ? "" : `?${query}`}`, "dbname")
 }
 
 /**
@@ -248,6 +260,7 @@ export {
 	literal,
 	makeDatabase,
 	replayOptions,
+	replayUrl,
 	type Sql,
 	STALE_MS,
 	TAG,

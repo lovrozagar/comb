@@ -39,7 +39,7 @@ type Answers = {
 }
 type Fake = Run & {
 	calls: Array<{ args: string[]; env: Readonly<Record<string, string | undefined>> | undefined }>
-	/** each file of the history a schema diff replayed */
+	/** each file of the history a schema diff replayed, on a docker:// dev */
 	replayed: string[]
 }
 
@@ -94,8 +94,10 @@ function fakeAtlas(answers: Answers): Fake {
 			return (applied ? answers.statusAfterApply : undefined) ?? pendingAfter(answers.status ?? ok("{}"), taken)
 		if (args[1] === "inspect") return answers.inspect ?? ok("{}")
 		if (args[0] === "schema") {
-			const to = (args[args.indexOf("--to") + 1] as string).replace("file://", "")
-			replayed.push(...sqlFiles(to).map((name) => readFileSync(join(to, name), "utf8")))
+			/* a docker:// dev's files Atlas replays; a postgres:// dev's replay database, env://src, it only reads */
+			const to = args[args.indexOf("--to") + 1] as string
+			if (to.startsWith("file://"))
+				replayed.push(...sqlFiles(to.slice(7)).map((name) => readFileSync(join(to.slice(7), name), "utf8")))
 			return answers.schemaDiff ?? ok("Schemas are synced, no changes to be made.\n")
 		}
 		if (args.includes("--dry-run")) return answers.dryRun ?? NOTHING

@@ -6,10 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { createClient } from "@libsql/client"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { createLibsqlProvider } from "../drivers/sqlite.ts"
-import { refuseDrift, refuseObjectDrift, sqliteDrift, UNCOMPARED } from "./baseline-compare.ts"
+import { refuseHistoryDrift, sqliteDrift, UNCOMPARED } from "./baseline-compare.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
-import { noLive } from "../__fixtures__/live-objects.ts"
+import { FAKE_REPLAY, noLive, replaying } from "../__fixtures__/live-objects.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -17,6 +17,9 @@ beforeEach(() => {
 	mkdirSync(join(dir, "m"))
 })
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
+
+/** What Atlas prints for two schemas alike */
+const SYNCED_SAID = "Schemas are synced, no changes to be made.\n"
 
 /** atlas: hash writes nothing; schema diff keeps the database's DDL it was handed and answers `stdout` */
 function atlas(stdout: string, code = 0, notice = ""): Run & { live: string[] } {
@@ -58,22 +61,47 @@ const target = (password: string) => ({
 	url: `postgres://app:${password}@db/app`,
 })
 
-describe("refuseDrift: the Postgres database against its replayed history", () => {
+/** A run of the Postgres comparison: no database read, a replay faked by `replaying`, and what it printed */
+function compared(exec: Run, password = "synced", read = async () => noLive()) {
+	const printed: string[] = []
+	const options = { exec, print: (line: string) => printed.push(line), readLive: read, readReplay: replaying(read) }
+	return { printed, run: () => refuseHistoryDrift({ ...options, target: target(password) }, join(dir, "m")) }
+}
+
+describe("refuseHistoryDrift: the Postgres database against what comb's replay left", () => {
+	beforeAll(loadPostgresParser)
+
 	it("finds a synced database synced whatever its password spells, and prints a difference scrubbed", async () => {
 		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
 		for (const password of ["synced", "are", "changes"]) {
-			const exec = atlas("Schemas are synced, no changes to be made.\n")
-			await expect(refuseDrift({ exec, target: target(password) }, join(dir, "m"))).resolves.toEqual([])
+			await expect(compared(atlas(SYNCED_SAID), password).run()).resolves.toBeUndefined()
 		}
-		/* what Atlas says as it succeeds comes back, scrubbed, for baseline to warn with (plan 14's 5.4) */
-		const said = atlas("Schemas are synced, no changes to be made.\n", 0, "Skipped triggers on synced\n")
-		expect(await refuseDrift({ exec: said, target: target("synced") }, join(dir, "m"))).toEqual([
-			"Skipped triggers on ***",
-		])
+		/* what Atlas says as it succeeds is printed, scrubbed, as baseline warns with it (plan 14's 5.4) */
+		const said = compared(atlas(SYNCED_SAID, 0, "Skipped triggers on synced\n"))
+		await said.run()
+		expect(said.printed).toEqual(["Warning: Atlas: Skipped triggers on ***", UNCOMPARED])
 		const drifted = atlas('-- Modify "a" table: synced\nALTER TABLE "a" ADD COLUMN "x" int;\n')
-		await expect(refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).rejects.toThrow(
+		await expect(compared(drifted).run()).rejects.toThrow(
 			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',
 		)
+		await expect(compared(atlas("", 1)).run()).rejects.toThrow("atlas schema diff: boom")
+	})
+
+	/* 16.3 (b) of plan 21: Atlas replaying the files itself ran a DO block's role past comb's guard and left it */
+	it("has Atlas read the replay's own database, scoped to the schema, and run no file", async () => {
+		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
+		const calls: Array<{ args: readonly string[]; src: string | undefined }> = []
+		const exec: Run = async (_cmd, args, options) => {
+			calls.push({ args, src: options?.env?.["COMB_ATLAS_SRC_URL"] })
+			return { code: 0, stderr: "", stdout: SYNCED_SAID }
+		}
+		await compared(exec).run()
+		expect(calls).toEqual([
+			{
+				args: expect.arrayContaining(["schema", "diff", "--from", "env://url", "--to", "env://src"]),
+				src: `postgres://localhost/${FAKE_REPLAY}?search_path=public`,
+			},
+		])
 	})
 })
 
@@ -82,13 +110,17 @@ describe("refuseDrift: the Postgres database against its replayed history", () =
 const hashRefused: Run = async (_cmd, args) =>
 	args[1] === "hash" ? { code: 1, stderr: "hash refused", stdout: "" } : { code: 0, stderr: "", stdout: "" }
 
-describe("refuseDrift's replayable history", () => {
+describe("refuseHistoryDrift's replayable history on a docker:// dev", () => {
+	beforeAll(loadPostgresParser)
+
 	it("leaves nothing in the temp directory when hashing it fails", async () => {
 		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
 		const tmp = mkdtempSync(join(dir, "tmp-"))
 		vi.stubEnv("TMPDIR", tmp)
 		try {
-			await expect(refuseDrift({ exec: hashRefused, target: target("p") }, join(dir, "m"))).rejects.toThrow(
+			const docker = { ...target("p"), devUrl: "docker://postgres/17/dev" }
+			const options = { exec: hashRefused, print: () => undefined, readLive: async () => noLive(), target: docker }
+			await expect(refuseHistoryDrift(options, join(dir, "m"))).rejects.toThrow(
 				"atlas migrate hash failed: hash refused",
 			)
 			expect(readdirSync(tmp)).toEqual([])
@@ -100,7 +132,7 @@ describe("refuseDrift's replayable history", () => {
 
 /* S5 of the 0.14.1 review: Atlas OSS inspects no SQLite trigger or view, and FTS was compared by name alone */
 /** atlas finding the tables in sync */
-const synced = () => atlas("Schemas are synced, no changes to be made.\n")
+const synced = () => atlas(SYNCED_SAID)
 
 describe("sqliteDrift: the triggers, views and FTS tables Atlas OSS does not compare", () => {
 	const HISTORY = `CREATE TABLE post (id TEXT, title TEXT, body TEXT);
@@ -189,7 +221,7 @@ describe("sqliteDrift: the replay of the history", () => {
 })
 
 /* P21 of the 0.14.1 review: each kind counted apart, and its noun as many as it counts */
-describe("refuseObjectDrift: the warning over the bodies it did not compare", () => {
+describe("refuseHistoryDrift: the warning over the bodies it did not compare", () => {
 	beforeAll(loadPostgresParser)
 
 	it.each([
@@ -211,11 +243,10 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 				triggers.length === 0 ? [] : [["t", new Map(triggers.map((name) => [name, { enabled: true, type: 5 }]))]],
 			),
 		})
-		const verdict = await refuseObjectDrift(
-			{ print: () => undefined, readLive, readReplay: readLive, target: target("x") },
-			join(dir, "m"),
-		)
-		expect(verdict()).toEqual([
+		const printed: string[] = []
+		const options = { exec: synced(), print: (line: string) => printed.push(line), readLive }
+		await refuseHistoryDrift({ ...options, readReplay: replaying(readLive), target: target("x") }, join(dir, "m"))
+		expect(printed).toEqual([
 			`Warning: the bodies of ${counted} were not compared: Atlas OSS cannot load them, and comb does not read them`,
 			UNCOMPARED,
 		])
@@ -223,14 +254,14 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 })
 
 /** A replay read a docker:// dev must never reach */
-const unreachable = async (): Promise<LiveObjects> => {
+const unreachable = replaying(async () => {
 	throw new Error("the replay reached for docker://")
-}
+})
 /** A database holding view v */
 const holding = async (): Promise<LiveObjects> => ({ ...noLive(), relations: new Map([["v", "view" as const]]) })
 
 /* P5 of r19: Atlas's docker:// dev is out of comb's reach, so a history with something the catalog read compares is refused */
-describe("refuseObjectDrift on a docker:// dev database", () => {
+describe("refuseHistoryDrift on a docker:// dev database", () => {
 	beforeAll(loadPostgresParser)
 	const docker = { ...target("x"), devUrl: "docker://postgres/17/dev" }
 
@@ -250,8 +281,14 @@ describe("refuseObjectDrift on a docker:// dev database", () => {
 	])("refuses %j, naming devUrl and the postgres:// fix", async (sql) => {
 		writeFileSync(join(dir, "m", "1_init.sql"), sql)
 		await expect(
-			refuseObjectDrift(
-				{ print: () => undefined, readLive: async () => noLive(), readReplay: unreachable, target: docker },
+			refuseHistoryDrift(
+				{
+					exec: synced(),
+					print: () => undefined,
+					readLive: async () => noLive(),
+					readReplay: unreachable,
+					target: docker,
+				},
 				join(dir, "m"),
 			),
 		).rejects.toThrow(
@@ -261,11 +298,16 @@ describe("refuseObjectDrift on a docker:// dev database", () => {
 
 	it("compares a history of plain tables with the database without a replay, naming what only the database has", async () => {
 		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE TABLE t (id int);\nCREATE INDEX t_id ON t (id);")
-		const options = { print: () => undefined, readReplay: unreachable, target: docker }
-		expect((await refuseObjectDrift({ ...options, readLive: async () => noLive() }, join(dir, "m")))()).toEqual([
-			UNCOMPARED,
-		])
-		expect(await refuseObjectDrift({ ...options, readLive: holding }, join(dir, "m"))).toThrow(
+		const printed: string[] = []
+		const options = {
+			exec: synced(),
+			print: (line: string) => printed.push(line),
+			readReplay: unreachable,
+			target: docker,
+		}
+		await refuseHistoryDrift({ ...options, readLive: async () => noLive() }, join(dir, "m"))
+		expect(printed).toEqual([UNCOMPARED])
+		await expect(refuseHistoryDrift({ ...options, readLive: holding }, join(dir, "m"))).rejects.toThrow(
 			"view v: only in the database",
 		)
 	})

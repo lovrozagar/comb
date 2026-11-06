@@ -794,6 +794,8 @@ type AtlasNeeds = {
     allSchemas?: boolean | undefined;
     /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
     revisions?: string | undefined;
+    /** a database Atlas compares the target with, read as env://src, scoped to the schema as the target is */
+    src?: string | undefined;
     url?: boolean | undefined;
 };
 /** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */

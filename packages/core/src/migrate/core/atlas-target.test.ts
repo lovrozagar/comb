@@ -290,7 +290,7 @@ describe("withAtlasEnv", () => {
 	it("sets only what the call needs, and escapes a directory HCL would interpolate", () => {
 		withAtlasEnv(target(), { dir: '/m/${x}"q%{y}' }, (atlas) => {
 			const hcl = readFileSync(`${atlas.dir}/atlas.hcl`, "utf8")
-			expect(hcl).not.toMatch(/url =|dev =/)
+			expect(hcl).not.toMatch(/url =|dev =|src =/)
 			expect(hcl).toContain('dir = "file:///m/$${x}\\"q%%{y}"')
 			expect(Object.keys(atlas.env)).toEqual([])
 		})
@@ -320,6 +320,18 @@ describe("withAtlasEnv", () => {
 		expect(scrubbed).toBe("auth failed for ***")
 		/* M79: maskSecrets takes the given URLs' secrets only, not the generic rules */
 		expect(maskSecrets("auth failed for S3cret, api_key=x", [target().url])).toBe("auth failed for ***, api_key=x")
+	})
+})
+
+/* 16.3 (b) of plan 21: Atlas reads the database comb's replay left, never replaying the files on a postgres:// dev */
+describe("withAtlasEnv's src", () => {
+	it("hands Atlas a database to compare with as src, through env, scoped and scrubbed as the target is", () => {
+		const src = "postgres://dev:S3cret@localhost/comb_replay_1"
+		withAtlasEnv(target(), { src, url: true }, (atlas) => {
+			expect(readFileSync(`${atlas.dir}/atlas.hcl`, "utf8")).toContain('  src = getenv("COMB_ATLAS_SRC_URL")\n')
+			expect(atlas.env.COMB_ATLAS_SRC_URL).toBe(`${src}?search_path=public`)
+			expect(atlas.scrub(`at ${src}?search_path=public`)).not.toContain("S3cret")
+		})
 	})
 })
 

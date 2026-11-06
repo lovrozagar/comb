@@ -19,7 +19,7 @@ import { type AtlasStatus, versionOf } from "./atlas-history.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
+import { type ObjectsCompare, refuseHistoryDrift } from "./baseline-compare.ts"
 import { holdsAnything, type ReadHeld } from "./pg-schema-members.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import type { Run } from "./process.ts"
@@ -77,11 +77,8 @@ async function proveAdoption(
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
 		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
-		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it */
-		const warnings = await refuseObjectDrift(options, prefix, refusal)
-		for (const notice of await replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
-			options.print(`Warning: Atlas: ${notice}`)
-		for (const warning of warnings()) options.print(warning)
+		/* comb's replay, in a database of its own, dropped after it, and Atlas reading what it left */
+		await replayed(() => refuseHistoryDrift(options, prefix, refusal), schema, ran)
 	} finally {
 		removePrefix()
 	}

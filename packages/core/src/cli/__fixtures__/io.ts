@@ -5,7 +5,7 @@ import { join } from "node:path"
 import type { Run, RunResult } from "../../migrate/core/process.ts"
 import type { LiveObjects } from "../../migrate/core/pg-live-types.ts"
 import type { CliContext, CliIo } from "../output.ts"
-import { noLive } from "../../migrate/__fixtures__/live-objects.ts"
+import { noLive, replaying } from "../../migrate/__fixtures__/live-objects.ts"
 
 /** An io that records the lines, with the seams comb fakes in its tests */
 export type TestIo = CliContext & { errors: string[]; outputs: string[] }
@@ -20,10 +20,7 @@ const readPgObjects = async (): Promise<LiveObjects> => ({
 })
 
 /* nor does the history's replay on dev (P5 of r19): it leaves what the faked database holds */
-const replayPgHistory = async (_target: unknown, { targetUser }: { targetUser: string }): Promise<LiveObjects> => ({
-	...(await readPgObjects()),
-	user: targetUser,
-})
+const replayPgHistory = /* @__PURE__ */ replaying(readPgObjects)
 
 /* every optional peer is comb's own devDependency, found as comb resolves it, wherever the project is */
 const locatePeer = (peer: string): string => import.meta.resolve(peer)

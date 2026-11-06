@@ -17,6 +17,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { withScratchDb } from "../support/pg.ts"
 import { UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
+import { query } from "../support/pg-roles.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -216,14 +217,16 @@ CREATE POLICY "own" ON "u" USING (true);
 
 /* P3 of the 0.15.0 review: Atlas found the dev database not clean, and comb said the target had no history */
 describe("a Postgres baseline on a dev database that is not empty", () => {
-	it("names the dev database and what it holds", async () => {
+	/* 16.3 (b) of plan 21: Atlas reads the database comb's replay made, never devUrl's own, so what that holds is no matter */
+	it("baselines, reading nothing of the dev database's own and leaving it as it was", async () => {
 		await withDevAndTarget(async (devUrl, url) => {
 			await exec(url, TABLE)
 			await exec(devUrl, 'CREATE TABLE "leftover" ("x" integer);')
 			const { refused } = await baseline(url, devUrl, TABLE)
-			expect(refused).toContain(
-				'devUrl must be an empty database, and it holds table "leftover" in connected schema; point devUrl at an empty database, or empty this one',
-			)
+			expect(refused).toBeUndefined()
+			expect(await query(devUrl, "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).toEqual([
+				{ tablename: "leftover" },
+			])
 		})
 	}, 60_000)
 

@@ -9,14 +9,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import pg from "pg"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest"
 import { baselineWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
-import { heldRole, hiddenWrites, query, roleOf, shapeRoles } from "../support/pg-roles.ts"
-import { refuseObjectDrift, UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
+import { dropRoles, heldRole, hiddenWrites, query, roleOf, shapeRoles, unique } from "../support/pg-roles.ts"
+import { refuseHistoryDrift, UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -195,6 +195,9 @@ describe("a Postgres baseline whose replay fails on the dev database", () => {
 	})
 })
 
+/** Atlas's answer for tables alike, so its own container stays unreached */
+const synced = async () => ({ code: 0, stderr: "", stdout: "Schemas are synced, no changes to be made.\n" })
+
 /* R1 of stack 2: the gate that skips comb's replay for a docker:// dev must miss nothing the catalog read compares */
 describe("a Postgres baseline's gate on a docker:// dev database", () => {
 	const DO_FUNCTION = "DO $$ BEGIN EXECUTE 'CREATE FUNCTION f() RETURNS int LANGUAGE sql AS ''select 1'''; END $$;\n"
@@ -214,8 +217,9 @@ describe("a Postgres baseline's gate on a docker:// dev database", () => {
 			await exec(url, sql)
 			writeFileSync(join(dir, "20260101000000_t.sql"), sql)
 			const target = { devUrl: "docker://postgres/17/dev", lockTimeout: "5s", schema: "public", url }
-			const verdict = await refuseObjectDrift({ print: () => undefined, target }, dir)
-			expect(verdict()).toEqual([UNCOMPARED])
+			const printed: string[] = []
+			await refuseHistoryDrift({ exec: synced, print: (line) => printed.push(line), target }, dir)
+			expect(printed).toEqual([UNCOMPARED])
 		})
 	})
 })
@@ -272,4 +276,29 @@ describe("a Postgres baseline of a txmode none file that commits per batch (P1 o
 		},
 		60_000,
 	)
+})
+
+/*
+ * Leaf 16.3 (b) of plan 21, migrate-pg_h-x-do-where of the G1 after-run: comb's replay adopts a role
+ * a DO block makes and drops it after, and Atlas then replayed the files itself on devUrl, where the
+ * DO made its role again, named for the dev database, and nothing dropped it
+ */
+describe("a Postgres baseline of a file whose DO block makes a role named for its database (16.3 (b) of plan 21)", () => {
+	it("baselines the target the file built by hand and leaves no role on devUrl's server", async () => {
+		const prefix = unique("comb_t_dow")
+		const like = `SELECT rolname FROM pg_roles WHERE rolname LIKE '${prefix}%'`
+		onTestFinished(async () => dropRoles(...(await query(pgUrl(), like)).map((row) => String(row["rolname"]))))
+		const file = `CREATE TABLE t (id int);\nDO $$ BEGIN EXECUTE format('CREATE ROLE %I', '${prefix}_' || current_database()); END $$;\n`
+		const target = await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				await exec(url, file)
+				const refused = await baseline(url, dev, [file])
+				const [{ datname } = {}] = await query(url, "SELECT current_database() AS datname")
+				return { own: `${prefix}_${String(datname)}`.slice(0, 63), refused }
+			}),
+		)
+		expect(target.refused).toBeUndefined()
+		/* the target's own, which the file made by hand, and none the baseline made */
+		expect((await query(pgUrl(), like)).map((row) => row["rolname"])).toEqual([target.own])
+	}, 60_000)
 })

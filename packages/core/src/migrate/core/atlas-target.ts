@@ -39,6 +39,8 @@ type AtlasNeeds = {
 	allSchemas?: boolean | undefined
 	/** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in, or another schema's own */
 	revisions?: string | undefined
+	/** a database Atlas compares the target with, read as env://src, scoped to the schema as the target is */
+	src?: string | undefined
 	url?: boolean | undefined
 }
 
@@ -230,6 +232,7 @@ function atlasConfig(needs: AtlasNeeds, revisions: string): string {
 	const lines = ['env "comb" {']
 	if (needs.url) lines.push('  url = getenv("COMB_ATLAS_URL")')
 	if (needs.dev) lines.push('  dev = getenv("COMB_ATLAS_DEV_URL")')
+	if (needs.src !== undefined) lines.push('  src = getenv("COMB_ATLAS_SRC_URL")')
 	lines.push("  migration {")
 	if (needs.dir !== undefined) lines.push(`    dir = ${hclString(`file://${needs.dir}`)}`)
 	lines.push(`    revisions_schema = ${hclString(revisions)}`, "  }", "}", "")
@@ -257,6 +260,7 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 		const env: Record<string, string> = {}
 		if (needs.url) env["COMB_ATLAS_URL"] = needs.allSchemas === true ? unscoped(target.url) : atlasTargetUrl(target)
 		if (needs.dev) env["COMB_ATLAS_DEV_URL"] = atlasDevUrl(target)
+		if (needs.src !== undefined) env["COMB_ATLAS_SRC_URL"] = scoped(needs.src, target.schema)
 		const secrets = [target.url, target.devUrl, ...Object.values(env)].filter((url) => url !== "")
 		const args = ["--config", `file://${join(dir, "atlas.hcl")}`, "--env", "comb"]
 		const out = body({ args, dir, env, scrub: (text) => scrubAtlasOutput(text, secrets) })

@@ -11,6 +11,8 @@ beforeAll(loadPostgresParser)
 const file = (sql: string) => [{ name: "1_a.sql", sql }]
 /* what a replay prints, where a test reads none of it */
 const QUIET = (): undefined => undefined
+/* a replay no Atlas reads, saying nothing */
+const UNREAD = { inspect: async (): Promise<undefined> => undefined, print: QUIET }
 const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
 
 /* the replay's database, named for the backend that made it and a random suffix */
@@ -91,6 +93,28 @@ function refusedInBlockOnce(start: string): (query: string) => Error | undefined
 			: undefined
 }
 
+describe("replayCatalog's inspect", () => {
+	/* 16.3 (b) of plan 21: Atlas compares the target with what the replay left, while its adopted roles are still dropped after */
+	it("has `inspect` read the replay's database by its name before the cleanup drops it, and hands back what it read", async () => {
+		const dev = fake([{ name: "dev_user", what: "user" }])
+		const inspected: Array<{ database: string; dropped: boolean }> = []
+		const inspect = async (database: string) => {
+			inspected.push({ database, dropped: dev.queries().includes(DROPPED) })
+			return "read"
+		}
+		const replayed = await replayCatalog(
+			TARGET,
+			{ files: file("CREATE TABLE t (a int);"), inspect, print: QUIET, targetUser: "u" },
+			dev.load,
+		)
+		expect([replayed.inspected, inspected]).toEqual([
+			"read",
+			[{ database: expect.stringMatching(new RegExp(`^${DATABASE.source}$`)), dropped: false }],
+		])
+		expect(dev.queries()).toContain(DROPPED)
+	})
+})
+
 describe("replayCatalog", () => {
 	it("replays each file in a transaction of its own in a database of its own, reading with the target's own query (addition B)", async () => {
 		const dev = fake([{ name: "dev_user", what: "user" }], refusedInBlockOnce("CREATE INDEX CONCURRENTLY"))
@@ -101,7 +125,7 @@ describe("replayCatalog", () => {
 					{ name: "1_a.sql", sql: "CREATE TABLE t (a int);\nALTER SYSTEM SET work_mem = '4MB';" },
 					{ name: "2_b.sql", sql: "-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON t (a);" },
 				],
-				print: QUIET,
+				...UNREAD,
 				targetUser: "app_user",
 			},
 			dev.load,
@@ -157,22 +181,18 @@ describe("replayCatalog of a policy", () => {
 			{ how: "for all, to dev_user, zeta, permissive", name: "p", on_table: "t", what: "policy" },
 			{ how: "for all, to alpha, public, restrictive", name: "q", on_table: "t", what: "policy" },
 		])
-		const live = await replayCatalog(
-			TARGET,
-			{ files: file("SELECT 1;"), print: QUIET, targetUser: "app_user" },
-			dev.load,
-		)
-		expect(live.user).toBe("app_user")
-		expect([...(live.policies.get("t") ?? [])]).toEqual([
+		const live = await replayCatalog(TARGET, { files: file("SELECT 1;"), ...UNREAD, targetUser: "app_user" }, dev.load)
+		expect(live.catalog.user).toBe("app_user")
+		expect([...(live.catalog.policies.get("t") ?? [])]).toEqual([
 			["p", "for all, to app_user, zeta, permissive"],
 			["q", "for all, to alpha, public, restrictive"],
 		])
 		const same = await replayCatalog(
 			TARGET,
-			{ files: file("SELECT 1;"), print: QUIET, targetUser: "dev_user" },
+			{ files: file("SELECT 1;"), ...UNREAD, targetUser: "dev_user" },
 			fake([{ name: "dev_user", what: "user" }]).load,
 		)
-		expect(same.user).toBe("dev_user")
+		expect(same.catalog.user).toBe("dev_user")
 	})
 })
 
@@ -183,7 +203,7 @@ describe("replayCatalog on what dev refuses", () => {
 		)
 		const replay = replayCatalog(
 			TARGET,
-			{ files: file("CREATE TABLE t (a int);\nCREATE VIEW v AS SELECT nope FROM t;"), print: QUIET, targetUser: "u" },
+			{ files: file("CREATE TABLE t (a int);\nCREATE VIEW v AS SELECT nope FROM t;"), ...UNREAD, targetUser: "u" },
 			dev.load,
 		)
 		await expect(replay).rejects.toThrow(
@@ -197,7 +217,7 @@ describe("replayCatalog on what dev refuses", () => {
 		const dev = fake([], (query) =>
 			query.startsWith("SELEC ") ? new Error('syntax error at or near "SELEC"') : undefined,
 		)
-		const replay = replayCatalog(TARGET, { files: file("SELEC 1;"), print: QUIET, targetUser: "u" }, dev.load)
+		const replay = replayCatalog(TARGET, { files: file("SELEC 1;"), ...UNREAD, targetUser: "u" }, dev.load)
 		await expect(replay).rejects.toThrow('1_a.sql: devUrl refused "SELEC 1" as baseline replayed the history there')
 	})
 })
@@ -214,6 +234,7 @@ describe("replayCatalog on a dev that fails past a refusal", () => {
 			TARGET,
 			{
 				files: file("CREATE ROLE r;\nCREATE VIEW v AS SELECT nope;"),
+				inspect: UNREAD.inspect,
 				print: (line) => said.push(line.replaceAll(DATABASE, "<db>")),
 				targetUser: "u",
 			},
@@ -239,7 +260,7 @@ describe("replayCatalog on a dev that fails past a refusal", () => {
 			query === "BEGIN" ? new Error("password authentication failed for postgres://u:hunter2@dev/dev") : undefined,
 		)
 		const secret = { ...TARGET, devUrl: "postgres://u:hunter2@dev/dev" }
-		const replay = replayCatalog(secret, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load)
+		const replay = replayCatalog(secret, { files: file("SELECT 1;"), ...UNREAD, targetUser: "u" }, dev.load)
 		await expect(replay).rejects.toThrow(/^comb could not replay the history on devUrl: /)
 		await expect(replay).rejects.not.toThrow(/hunter2/)
 	})
@@ -254,14 +275,14 @@ describe("replayCatalog on a devUrl password comb's hint also says", () => {
 		const secret = { ...TARGET, devUrl: "postgres://u:comb@dev/dev" }
 		const failing = (at: string) => fake([], (query) => (query.startsWith(at) ? new Error(tls) : undefined)).load
 		await expect(
-			replayCatalog(secret, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, failing("SELECT datname")),
+			replayCatalog(secret, { files: file("SELECT 1;"), ...UNREAD, targetUser: "u" }, failing("SELECT datname")),
 		).rejects.toThrow(
 			`comb could not replay the history on devUrl: Client network socket disconnected before secure TLS connection was established for ***@dev: ${hint}`,
 		)
 		await expect(
 			replayCatalog(
 				secret,
-				{ files: file("CREATE TABLE t (a int);"), print: QUIET, targetUser: "u" },
+				{ files: file("CREATE TABLE t (a int);"), ...UNREAD, targetUser: "u" },
 				failing("CREATE TABLE"),
 			),
 		).rejects.toThrow(`for ***@dev: ${hint}; baseline compares nothing`)
@@ -280,7 +301,7 @@ describe("replayCatalog on a devUrl comb refuses", () => {
 		const dev = fake([])
 		const replay = replayCatalog(
 			{ ...TARGET, devUrl },
-			{ files: file("SELECT 1;"), print: QUIET, targetUser: "u" },
+			{ files: file("SELECT 1;"), ...UNREAD, targetUser: "u" },
 			dev.load,
 		)
 		await expect(replay).rejects.toThrow(said)
@@ -294,7 +315,7 @@ describe("replayCatalog's database", () => {
 
 	it("refuses a role without CREATEDB, naming the privilege, and makes nothing", async () => {
 		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? denied : undefined))
-		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load)
+		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), ...UNREAD, targetUser: "u" }, dev.load)
 		await expect(replay).rejects.toThrow(
 			/^devUrl's role cannot create a database \(CREATEDB\).*; baseline compares nothing$/,
 		)
@@ -305,7 +326,7 @@ describe("replayCatalog's database", () => {
 	it("refuses a locale devUrl's server cannot make, naming it and the server's error (PR4 of r22b)", async () => {
 		const lacking = Object.assign(new Error('invalid LC_COLLATE locale name: "C"'), { code: "42809" })
 		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? lacking : undefined))
-		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load)
+		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), ...UNREAD, targetUser: "u" }, dev.load)
 		await expect(replay).rejects.toThrow(
 			`devUrl's server could not make the replay's database at the target database's locale (ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' LOCALE_PROVIDER libc), and a verdict under another is not the target's; point devUrl at a server that has it: invalid LC_COLLATE locale name: "C"; baseline compares nothing`,
 		)
@@ -340,7 +361,7 @@ describe("replayCatalog stopped by a signal", () => {
 			return undefined
 		})
 		const killed = await signalled(signal, undefined, () =>
-			replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), print: QUIET, targetUser: "u" }, dev.load).then(
+			replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), ...UNREAD, targetUser: "u" }, dev.load).then(
 				() => undefined,
 			),
 		)
@@ -358,7 +379,7 @@ describe("replayCatalog stopped by a signal", () => {
 			"SIGTERM",
 			() => void heard++,
 			() =>
-				replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), print: QUIET, targetUser: "u" }, dev.load).then(
+				replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), ...UNREAD, targetUser: "u" }, dev.load).then(
 					() => undefined,
 				),
 		)
@@ -375,9 +396,7 @@ describe("replayCatalog stopped by a signal", () => {
 			"SIGINT",
 			() => undefined,
 			() =>
-				replayCatalog(TARGET, { files: file("SELECT 1;"), print: QUIET, targetUser: "u" }, dev.load).then(
-					() => undefined,
-				),
+				replayCatalog(TARGET, { files: file("SELECT 1;"), ...UNREAD, targetUser: "u" }, dev.load).then(() => undefined),
 		)
 		expect(killed).toEqual([])
 		expect(dev.queries().filter((query) => query === DROPPED)).toHaveLength(1)

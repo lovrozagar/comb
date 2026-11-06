@@ -10,7 +10,7 @@ import type { LiveRead } from "./pg-live-types.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
 import { fail, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
-import { holdingRelations, noLive } from "../__fixtures__/live-objects.ts"
+import { FAKE_REPLAY, holdingRelations, noLive, replaying } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
 
 let dir = ""
@@ -53,7 +53,7 @@ function options(
 		print: (line: string) => out.push(line),
 		readLive,
 		/* the history's replay on dev, faked: it leaves what the faked database holds (P5 of r19) */
-		readReplay: async (target) => readLive(target),
+		readReplay: replaying(readLive),
 		/* check's replay on dev is atlas-apply.check.test.ts's and pg-check-replay.ts's to test */
 		replayPending: async () => undefined,
 		sweepDev: async () => undefined,
@@ -332,33 +332,38 @@ describe("baselineWithAtlas", () => {
 	})
 })
 
-describe("baselineWithAtlas: the history Atlas replays", () => {
-	it("compares the database with the history replayed without comb's objects but its sequences and views", async () => {
+describe("baselineWithAtlas: the history Atlas compares the database with", () => {
+	/* 16.3 (b) of plan 21: Atlas replaying the files itself ran a DO block's role past comb's guard, and left it */
+	it("has Atlas read the database comb's replay left on a postgres:// dev, running no file", async () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
-			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\nCREATE ROLE "r";\n',
+			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
 		await baselineWithAtlas(options(atlas, { readLive: holding(["n", "sequence"], ["v", "view"]) }))
-		expect(atlas.replayed[0]).toBe(
-			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nDO $comb$ BEGIN EXECUTE $comb_view$CREATE VIEW "v" AS (select 1)$comb_view$; END $comb$;\n',
-		)
+		expect(atlas.replayed).toEqual([])
 		const diff = atlas.calls.find((call) => call.args[0] === "schema")
-		expect(diff?.args.slice(0, 4)).toEqual(["schema", "diff", "--from", "env://url"])
-		expect(diff?.env?.["COMB_ATLAS_DEV_URL"]).toBe(`${TARGET.devUrl}?search_path=public`)
+		expect(diff?.args.slice(0, 6)).toEqual(["schema", "diff", "--from", "env://url", "--to", "env://src"])
+		expect([diff?.env?.["COMB_ATLAS_SRC_URL"], diff?.env?.["COMB_ATLAS_DEV_URL"]]).toEqual([
+			`postgres://localhost/${FAKE_REPLAY}?search_path=public`,
+			undefined,
+		])
 	})
 
-	/* M75: the replay is read as Postgres runs it and written so Atlas sends each statement alone */
-	it("replays a history Atlas splits by its own delimiter, each statement of a chunk read", async () => {
+	/* M75: on Atlas's own container the replay is read as Postgres runs it and written so Atlas sends each statement alone */
+	it("replays a history Atlas splits by its own delimiter on a docker:// dev, each statement of a chunk read", async () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
-			'-- atlas:delimiter GO\n\nCREATE ROLE "r"; CREATE TABLE "a" ("id" int)\nGO\nCREATE VIEW "v" AS (select 1)\nGO\n',
+			'-- atlas:delimiter GO\n\nCREATE TABLE "a" ("id" int); COMMENT ON ROLE "r" IS \'x\'\nGO\nDROP VIEW IF EXISTS "v"; DROP EXTENSION IF EXISTS "e"\nGO\nDROP SEQUENCE IF EXISTS "s"; DROP FUNCTION IF EXISTS "f"\nGO\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
-		await baselineWithAtlas(options(atlas, { readLive: holding(["v", "view"]) }))
+		const docker = { ...TARGET, devUrl: "docker://postgres/17/dev" }
+		await baselineWithAtlas(options(atlas, { target: docker }))
 		expect(atlas.replayed[0]).toBe(
-			'CREATE TABLE "a" ("id" int);\nDO $comb$ BEGIN EXECUTE $comb_view$CREATE VIEW "v" AS (select 1)$comb_view$; END $comb$;\n',
+			'CREATE TABLE "a" ("id" int);\nDO $comb$ BEGIN EXECUTE $comb_view$DROP VIEW IF EXISTS "v"$comb_view$; END $comb$;\nDO $comb$ BEGIN EXECUTE $comb_view$DROP EXTENSION IF EXISTS "e"$comb_view$; END $comb$;\nDROP SEQUENCE IF EXISTS "s";\nDROP FUNCTION IF EXISTS "f";\n',
 		)
+		const diff = atlas.calls.find((call) => call.args[0] === "schema")
+		expect(diff?.env?.["COMB_ATLAS_DEV_URL"]).toBe("docker://postgres/17/dev?search_path=public")
 	})
 
 	it("records nothing when the database's tables differ from the history's, naming the difference", async () => {
