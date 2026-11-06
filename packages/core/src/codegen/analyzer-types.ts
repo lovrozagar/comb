@@ -119,6 +119,8 @@ type FieldMeta = {
 	identity: boolean
 	/** a column of the table's composite primary key */
 	inCompositeKey: boolean
+	/** an interval's declared precision, which `sqlType` leaves out at 0 as drizzle writes it; null or absent for none or another type */
+	intervalPrecision?: number | null | undefined
 	/** the column is NOT NULL: a write must give it a value or leave it to a default */
 	isNotNull: boolean
 	/** the table's single-column primary key */

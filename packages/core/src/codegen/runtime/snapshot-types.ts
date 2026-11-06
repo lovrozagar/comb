@@ -47,6 +47,8 @@ type SnapshotColumn = {
 	hasDefault: boolean
 	/** an identity column, always or by default */
 	identity: boolean
+	/** an interval's declared precision, which drizzle's `sqlType` leaves out at 0; null for none or another type */
+	intervalPrecision: number | null
 	/** the property key */
 	key: string
 	/** a Postgres array's declared dimensions, 0 for a column of one value */

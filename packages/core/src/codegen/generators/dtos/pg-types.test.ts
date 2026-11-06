@@ -169,17 +169,25 @@ describe("a time's rules read the parsed modifier (CD5, CD6; sibling: a timestam
 	})
 })
 
-/* drizzle writes an interval's precision 0 as no precision, so the rule never reads 0: a drizzle
-   that kept it fails here before a {1,0} reached a published pattern */
-describe("an interval's precision 0, as drizzle writes it (sibling: the interval's fraction rule)", () => {
+/* CD6 of r22b: drizzle writes an interval's precision 0 as no precision in its SQL type, so the rule
+   reads the declared one, and holds whole seconds as timestamp(0) and time(0) do */
+describe("an interval's declared precision 0, which drizzle's SQL type drops (CD6)", () => {
 	it.each(['interval("v", { precision: 0 })', 'interval("v", { fields: "second", precision: 0 })'])(
-		"reads no precision from %s, and holds no fraction rule",
+		"%s takes whole seconds and refuses a fraction",
 		(column) => {
-			const field = parseField("v", column, { dialect: "postgres" })
-			expect(pgModifierOf(field.sqlType)).toMatchObject({ base: "interval", precision: null })
-			expect(pgWriteRule(field)).not.toContain("[^.]")
+			expect(pgModifierOf(parseField("v", column, { dialect: "postgres" }).sqlType)).toMatchObject({
+				precision: null,
+			})
+			expect(takes(column, ["PT1S", "P1DT2M", "PT1.4S", "PT0.5S"])).toEqual([true, true, false, false])
 		},
 	)
+
+	it("tells why: the column rounds a fraction away", () => {
+		const schema = new Function("z", `return ${rule('interval("v", { precision: 0 })')}`)(z) as z.ZodType
+		expect(schema.safeParse("PT1.4S").error?.issues.map((issue) => issue.message)).toEqual([
+			"Must have no fraction of a second, which interval(0) would round",
+		])
+	})
 })
 
 describe("an interval's and a numeric's rules read the parsed modifier (CD5, CD6; sibling: numeric's scale bound)", () => {

@@ -39,6 +39,7 @@ const COLUMNS: Record<string, string> = {
 	ivs: 'interval("ivs", { fields: "second" })',
 	ivds3: 'interval("ivds3", { fields: "day to second", precision: 3 })',
 	iv3: 'interval("iv3", { precision: 3 })',
+	iv0: 'interval("iv0", { precision: 0 })',
 }
 
 /* the type a modifier narrows, which takes any value of its kind as written */
@@ -148,6 +149,10 @@ const CASES: Case[] = [
 	["iv3", "PT1.123S", true, true],
 	["iv3", "P1Y", true, true],
 	["iv3", "PT1.1234S", false, false],
+	/* CD6: drizzle creates a declared precision 0 as a plain interval, which keeps a fraction; the DTO
+	   holds the declared whole seconds, a refusal README's Upgrading to 0.21 lists */
+	["iv0", "PT1S", true, true],
+	["iv0", "PT1.4S", false, true],
 ]
 
 /** Whether Postgres takes `value` into `column`, and holds what the column's plain base type holds for it */
@@ -165,21 +170,26 @@ async function kept(client: pg.Client, column: string, value: string): Promise<b
 	}
 }
 
+/** The create DTO codegen writes for COLUMNS */
+async function createDto(): Promise<z.ZodObject> {
+	const dtos = await generatedDtos(
+		"cd5",
+		`import { interval, numeric, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const typmods = pgTable("typmods", { id: text("id").primaryKey(), ${Object.entries(
+			COLUMNS,
+		)
+			.map(([key, source]) => `${key}: ${source}`)
+			.join(", ")} })`,
+		{ dialect: "postgres" },
+	)
+	return dtos["typmods"]?.["typmodsDtoCreateSchema"] as z.ZodObject
+}
+
 describe("a Postgres type modifier is parsed once (CD5, CD6; sibling: numeric's scale bound)", () => {
 	const sessions = usePg()
 	let create: z.ZodObject
 
 	beforeAll(async () => {
-		const dtos = await generatedDtos(
-			"cd5",
-			`import { interval, numeric, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const typmods = pgTable("typmods", { id: text("id").primaryKey(), ${Object.entries(
-				COLUMNS,
-			)
-				.map(([key, source]) => `${key}: ${source}`)
-				.join(", ")} })`,
-			{ dialect: "postgres" },
-		)
-		create = dtos["typmods"]?.["typmodsDtoCreateSchema"] as z.ZodObject
+		create = await createDto()
 	})
 
 	beforeEach(async () => {
@@ -210,6 +220,7 @@ describe("a Postgres type modifier is parsed once (CD5, CD6; sibling: numeric's 
 			"interval second",
 			"interval day to second(3)",
 			"interval(3)",
+			"interval",
 		])
 	})
 
@@ -220,5 +231,18 @@ describe("a Postgres type modifier is parsed once (CD5, CD6; sibling: numeric's 
 
 	it("takes no value Postgres would refuse or change", () => {
 		expect(CASES.filter(([, , dto, pg]) => dto && !pg)).toEqual([])
+	})
+})
+
+describe("an interval's declared precision 0 (CD6)", () => {
+	const sessions = usePg()
+
+	it("refuses the fraction an interval(0), created as declared, rounds away", async () => {
+		const create = await createDto()
+		const client = sessions.pg()
+		await client.query("CREATE TEMP TABLE declared (v interval(0))")
+		const { rows } = await client.query("INSERT INTO declared VALUES ('PT1.4S'), ('PT1S') RETURNING v::text AS v")
+		expect(rows.map(({ v }) => v)).toEqual(["00:00:01", "00:00:01"])
+		expect(["PT1.4S", "PT1S"].map((iv0) => create.safeParse({ id: "k", iv0 }).success)).toEqual([false, true])
 	})
 })

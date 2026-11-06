@@ -94,6 +94,8 @@ function columnOf([key, column]: [string, ReadColumn], table: string, context: C
 		generated: column.generated !== undefined,
 		hasDefault: filledByDefault(column),
 		identity: column.generatedIdentity !== undefined,
+		intervalPrecision:
+			column.columnType === "PgInterval" && typeof column.precision === "number" ? column.precision : null,
 		key,
 		length: typeof column.length === "number" ? column.length : null,
 		notNull: column.notNull,

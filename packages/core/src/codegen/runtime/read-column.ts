@@ -13,6 +13,7 @@ export type ReadColumn = Column & {
 	isUnique?: boolean | undefined
 	length?: number | undefined
 	onUpdateFn?: unknown
+	precision?: number | undefined
 	table: Table
 	uniqueName?: string | undefined
 }

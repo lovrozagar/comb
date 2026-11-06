@@ -133,6 +133,7 @@ describe("toAnalysis: a schema a package exports", () => {
 			generated: false,
 			hasDefault: false,
 			identity: false,
+			intervalPrecision: null,
 			key: "prefs",
 			length: null,
 			notNull: false,

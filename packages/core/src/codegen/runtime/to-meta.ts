@@ -196,6 +196,7 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 		hasDefault: column.hasDefault,
 		identity: column.identity,
 		inCompositeKey: table.compositeKey.includes(column.key),
+		intervalPrecision: column.intervalPrecision,
 		isNotNull: column.notNull,
 		isPrimaryKey: column.primary,
 		dimensions: column.dimensions,

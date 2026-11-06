@@ -159,8 +159,9 @@ const KEPT_BY: Readonly<Record<Exclude<IntervalField, "second">, string>> = {
  * An interval: an ISO 8601 duration with no part below its last field, which Postgres drops
  * (`PT1H` into an `interval day` is stored as 0), and no fraction of a second past its precision,
  * which it rounds. A string and its pattern, with no `format: "duration"`: that format
- * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one. Its precision
- * is never 0: drizzle writes `precision: 0` as no precision, which a test holds
+ * is RFC 3339's, whose seconds take no fraction, where Postgres keeps one. Its precision is the
+ * declared one: drizzle's SQL type writes `precision: 0` as no precision, which keeps a fraction,
+ * so the DTO alone holds whole seconds
  */
 function intervalRule({ field, precision }: { field: IntervalField | null; precision: number | null }): string {
 	const fields =
@@ -170,7 +171,7 @@ function intervalRule({ field, precision }: { field: IntervalField | null; preci
 	const fraction =
 		precision === null
 			? ""
-			: `.regex(/^[^.]*(?:\\.[0-9]{1,${precision}}S)?$/u, { message: "${roundedBy("interval", precision)}" })`
+			: `.regex(/^[^.]*${precision === 0 ? "" : `(?:\\.[0-9]{1,${precision}}S)?`}$/u, { message: "${roundedBy("interval", precision)}" })`
 	return `z.string().regex(/${DURATION}/u, { message: "Must be an ISO 8601 duration" })${fields}${fraction}`
 }
 
@@ -275,7 +276,10 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"string date": () => `z.stringFormat("date", /^${ISO_DATE}$/u)`,
 	/* an inet a host address, its netmask optional; a cidr the shared cidrSchema, which also refuses a bit set past its prefix length */
 	"string inet": inetRule,
-	"string interval": ({ sqlType }) => intervalRule(modifierAs(sqlType, "interval")),
+	"string interval": ({ intervalPrecision, sqlType }) => {
+		const modifier = modifierAs(sqlType, "interval")
+		return intervalRule({ field: modifier.field, precision: intervalPrecision ?? modifier.precision })
+	},
 	"string macaddr": macaddr,
 	"string macaddr8": macaddr8,
 	"string int64": int64Text,
